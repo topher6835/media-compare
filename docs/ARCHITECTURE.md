@@ -10,9 +10,10 @@ The repository currently contains a working full-stack scaffold:
 - `GET /api/health`, returning plain text `ok`.
 - REST endpoints to register and read Sources under `/api/sources`.
 - REST endpoints to create and read durable scan requests under `/api/scan-runs`.
+- A singleton execution subresource that creates and reads the initial durable Job handoff for a ScanRun.
 - A frontend `/` route that requests and displays the health result.
 
-The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven V1 application tables, structural constraints, foreign keys, and initial indexes. Simple immutable records and Spring JDBC repositories provide insert/read access under the `catalog`, `scan`, `job`, and `analysis` feature packages. Source registration/read and durable scan-request creation/read are implemented. Filesystem scanning, hashing, reconciliation execution, job execution, analysis execution, matching, AI, and broader product workflows do not exist yet.
+The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven V1 application tables, structural constraints, foreign keys, and initial indexes. Simple immutable records and Spring JDBC repositories provide insert/read access under the `catalog`, `scan`, `job`, and `analysis` feature packages. Source registration/read, durable scan-request creation/read, and the initial ScanRun-to-Job execution handoff are implemented. Filesystem scanning, hashing, reconciliation execution, Job execution, analysis execution, matching, AI, and broader product workflows do not exist yet.
 
 ## Architectural Style
 
@@ -53,7 +54,7 @@ The initial Java package structure is:
 - `analysis` — AnalysisRecord and reusable specialized analysis artifacts.
 - `web` — thin REST controllers and later HTTP/SSE endpoints.
 
-The persistence foundation uses one concrete Spring JDBC repository per feature package: `CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository`. The boundaries remain simple. `catalog` does not depend on the job runner; `job` remains generic; and `analysis` owns analysis provenance. `SourceController` and `ScanRunController` are thin HTTP boundaries over small feature services, while `HealthController` remains unchanged. No generic repository framework, automatic interface/implementation pairs, or enterprise layering was introduced.
+The persistence foundation uses one concrete Spring JDBC repository per feature package: `CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository`. The boundaries remain simple. `catalog` does not depend on the job runner; `job` remains generic; and `analysis` owns analysis provenance. Scan-specific orchestration that depends on both ScanRun and Job concepts stays in `scan`, not `job`. The web controllers are thin HTTP boundaries over small feature services, while `HealthController` remains unchanged. No generic repository framework, automatic interface/implementation pairs, or enterprise layering was introduced.
 
 ## Catalog and Identity
 
@@ -79,7 +80,9 @@ Revisiting a Source performs lightweight discovery and reconciliation before exp
 
 `ScanRun` records user intent, selected Sources or WorkingSet, request type, options, and lifecycle. Its options become immutable when execution begins. The first implemented request creation accepts one or more registered Source IDs and atomically writes one ScanRun plus its ScanRunSource rows. It uses request type `INDEX`, initial status `PENDING`, options version `1`, and effective options `{}`. Each child begins `PENDING`, snapshots the Source's current location revision, and has traversal generation `0` with no completion or execution state. Child responses are ordered by Source ID.
 
-`Job` is the durable execution authority and may later execute scans, analysis, filesystem actions, exports, or other long-running work. Creating a ScanRun currently records intent only and creates no Job. `JobStage` is an aggregate checkpoint for one stage type within a Job, with `UNIQUE(job_id, stage_type)`; retries and resume update that row. Additional lifecycle values and execution behavior remain implementation details.
+`Job` is the durable execution authority and may later execute scans, analysis, filesystem actions, exports, or other long-running work. Creating a ScanRun records intent only and creates no Job. A separate execution handoff for an existing ScanRun atomically creates one `SCAN` Job and one `DISCOVERY` JobStage, both `PENDING`, with the Job's current stage set to `DISCOVERY`. Their shared creation timestamp is populated while progress, attempts, and execution timestamps remain at initial values. The ScanRun and its ScanRunSource rows are not mutated by the handoff.
+
+The current API permits at most one sequentially created `SCAN` execution handoff per ScanRun and returns HTTP 409 for a duplicate POST. This rule is enforced by `ScanExecutionService`; the generic Job schema does not impose `UNIQUE(scan_run_id)`. Simultaneous-request hardening remains part of later scheduling/concurrency design. `JobStage` remains an aggregate checkpoint for one stage type within a Job, with `UNIQUE(job_id, stage_type)`; retries and resume update that row. Additional lifecycle values and execution behavior remain implementation details.
 
 Pause/resume is database-driven and must survive full application shutdown. Work is processed in small batches, with completed analysis reused and incomplete work found from durable state. Detailed scheduling, cancellation, startup recovery, and stage-instance history remain open.
 
@@ -152,6 +155,18 @@ POST/GET /api/scan-runs
 ```
 
 Creation validates every selected Source before persistence, then atomically records the ScanRun and Source-location-revision snapshots. It does not access the filesystem, create a Job, or begin execution. Only get-by-ID is implemented; there is no ScanRun list endpoint yet.
+
+The implemented execution-handoff vertical slice is:
+
+```text
+POST/GET /api/scan-runs/{id}/execution
+    -> ScanExecutionController
+    -> ScanExecutionService
+    -> ScanRepository + JobRepository
+    -> SQLite job + job_stage
+```
+
+The POST atomically creates a pending `SCAN` Job and its one pending `DISCOVERY` stage. The GET reads that durable state with stages ordered by database ID. Neither endpoint starts work, checks Source availability, or accesses the filesystem.
 
 ## SQLite and Cross-Platform Requirements
 

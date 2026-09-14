@@ -95,6 +95,16 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Return ScanRunSource rows in ascending Source-ID order rather than promising request-array order.
 - ScanRun creation records durable user intent only. It does not create a Job, access the filesystem, or begin execution.
 
+## Initial Scan Execution Handoff
+
+- Expose a ScanRun's singleton execution subresource through `POST` and `GET /api/scan-runs/{id}/execution`; do not add a global Job API yet.
+- Keep scan-specific orchestration in `ScanExecutionService` under `scan`. Generic `job` code remains independent of scan orchestration.
+- The handoff creates a `SCAN` Job with status `PENDING`, current stage `DISCOVERY`, zero progress and attempts, and no execution timestamps/error.
+- Atomically create exactly one `DISCOVERY` JobStage with status `PENDING`, zero progress and attempts, the Job's creation timestamp, and no execution timestamps/error.
+- Creating execution does not mutate the ScanRun or ScanRunSource state and does not access the filesystem or begin work.
+- Enforce at most one sequential `SCAN` handoff per ScanRun in the service/repository boundary and return HTTP 409 for duplicate POST. Do not add `UNIQUE(scan_run_id)`; concurrent duplicate hardening remains deferred.
+- Read JobStages in stable ascending database-ID order until a deliberate multi-stage ordering model exists.
+
 ## Development
 
 - Favor readable, conventional, learnable code over clever abstractions.
@@ -114,7 +124,7 @@ The initial persistence implementation uses immutable Java records for row-shape
 
 ## Still Open
 
-- Concrete status, request-type, classification, and stage values.
+- Additional status, request-type, classification, and stage values beyond the implemented ScanRun request and initial execution-handoff values.
 - Source remount/relocation recognition and filesystem volume hints.
 - Final symlink/junction traversal behavior and detailed path equivalence.
 - ContentRecord merge/reconciliation behavior.

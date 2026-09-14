@@ -4,6 +4,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -50,19 +51,20 @@ public class JobRepository {
     }
 
     public Optional<Job> findJobById(long id) {
-        return jdbcTemplate.query("SELECT * FROM job WHERE id = ?", (resultSet, rowNumber) -> new Job(
-                resultSet.getLong("id"),
-                nullableLong(resultSet, "scan_run_id"),
-                resultSet.getString("job_type"),
-                resultSet.getString("status"),
-                resultSet.getString("current_stage_type"),
-                resultSet.getLong("progress_completed"),
-                nullableLong(resultSet, "progress_total"),
-                resultSet.getLong("attempt_count"),
-                resultSet.getLong("created_at_ms"),
-                nullableLong(resultSet, "started_at_ms"),
-                nullableLong(resultSet, "finished_at_ms"),
-                resultSet.getString("error_message")), id).stream().findFirst();
+        return jdbcTemplate.query("SELECT * FROM job WHERE id = ?", JobRepository::mapJob, id)
+                .stream()
+                .findFirst();
+    }
+
+    public Optional<Job> findJobByScanRunIdAndType(long scanRunId, String jobType) {
+        return jdbcTemplate.query("""
+                SELECT * FROM job
+                WHERE scan_run_id = ? AND job_type = ?
+                ORDER BY id
+                LIMIT 1
+                """, JobRepository::mapJob, scanRunId, jobType)
+                .stream()
+                .findFirst();
     }
 
     public JobStage insert(JobStage jobStage) {
@@ -93,7 +95,41 @@ public class JobRepository {
     }
 
     public Optional<JobStage> findJobStageById(long id) {
-        return jdbcTemplate.query("SELECT * FROM job_stage WHERE id = ?", (resultSet, rowNumber) -> new JobStage(
+        return jdbcTemplate.query("SELECT * FROM job_stage WHERE id = ?", JobRepository::mapJobStage, id)
+                .stream()
+                .findFirst();
+    }
+
+    public List<JobStage> findJobStagesByJobId(long jobId) {
+        return jdbcTemplate.query("""
+                SELECT * FROM job_stage
+                WHERE job_id = ?
+                ORDER BY id
+                """, JobRepository::mapJobStage, jobId);
+    }
+
+    private static long generatedId(GeneratedKeyHolder keyHolder) {
+        return Objects.requireNonNull(keyHolder.getKey(), "Database did not return a generated key").longValue();
+    }
+
+    private static Job mapJob(ResultSet resultSet, int rowNumber) throws SQLException {
+        return new Job(
+                resultSet.getLong("id"),
+                nullableLong(resultSet, "scan_run_id"),
+                resultSet.getString("job_type"),
+                resultSet.getString("status"),
+                resultSet.getString("current_stage_type"),
+                resultSet.getLong("progress_completed"),
+                nullableLong(resultSet, "progress_total"),
+                resultSet.getLong("attempt_count"),
+                resultSet.getLong("created_at_ms"),
+                nullableLong(resultSet, "started_at_ms"),
+                nullableLong(resultSet, "finished_at_ms"),
+                resultSet.getString("error_message"));
+    }
+
+    private static JobStage mapJobStage(ResultSet resultSet, int rowNumber) throws SQLException {
+        return new JobStage(
                 resultSet.getLong("id"),
                 resultSet.getLong("job_id"),
                 resultSet.getString("stage_type"),
@@ -104,11 +140,7 @@ public class JobRepository {
                 resultSet.getLong("created_at_ms"),
                 nullableLong(resultSet, "started_at_ms"),
                 nullableLong(resultSet, "finished_at_ms"),
-                resultSet.getString("error_message")), id).stream().findFirst();
-    }
-
-    private static long generatedId(GeneratedKeyHolder keyHolder) {
-        return Objects.requireNonNull(keyHolder.getKey(), "Database did not return a generated key").longValue();
+                resultSet.getString("error_message"));
     }
 
     private static Long nullableLong(ResultSet resultSet, String columnName) throws SQLException {

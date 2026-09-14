@@ -135,7 +135,9 @@ Implemented fields:
 - `finished_at_ms INTEGER NULL`
 - `error_message TEXT NULL`
 
-Job is the durable execution authority. ScanRun remains the user-request and operation-summary record. Detailed scheduling and recovery are deferred.
+Job is the durable execution authority. ScanRun remains the user-request and operation-summary record. The initial execution handoff creates a Job with `scan_run_id` set to the selected ScanRun, `job_type = SCAN`, `status = PENDING`, `current_stage_type = DISCOVERY`, zero completed progress, null total progress, zero attempts, a populated creation timestamp, and null execution timestamps/error. The handoff does not mutate the ScanRun or its ScanRunSource rows.
+
+The execution API currently permits one sequentially created `SCAN` Job per ScanRun. `ScanExecutionService` enforces that API behavior; no `UNIQUE(scan_run_id)` constraint was added because Job remains generic. Simultaneous duplicate-request hardening, detailed scheduling, and recovery are deferred.
 
 ### `job_stage`
 
@@ -154,6 +156,8 @@ Implemented fields:
 - `error_message TEXT NULL`
 
 The uniqueness rule is `UNIQUE(job_id, stage_type)`. A V1 stage row is an aggregate durable checkpoint for one stage type within a Job. Retry and resume update that row. Stage-instance and attempt-history tables are deferred.
+
+The initial handoff creates exactly one `DISCOVERY` stage with `status = PENDING`, zero completed progress, null total progress, zero attempts, the same creation timestamp as its Job, and null execution timestamps/error. Job and stage creation occur in one service transaction. Stage reads use stable ascending database-ID order; a deliberate multi-stage ordering model remains deferred.
 
 ### `analysis_record`
 
@@ -248,7 +252,7 @@ Immutable records representing all eleven table row shapes and concrete Spring J
 - `job`
 - `analysis`
 
-`CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` provide focused insert and read operations. They use `JdbcTemplate` directly without a generic repository superclass or ORM. `CatalogRepository` includes Source lookup by ID and deterministic ID-ordered Source listing. `ScanRepository` includes ScanRun lookup and Source-ID-ordered child lookup. `catalog` does not depend on the job runner, `job` remains generic, and `analysis` owns reusable analysis and provenance. The `web` boundary contains thin Source and ScanRun REST controllers; later HTTP/SSE endpoints remain deferred.
+`CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` provide focused insert and read operations. They use `JdbcTemplate` directly without a generic repository superclass or ORM. `CatalogRepository` includes Source lookup by ID and deterministic ID-ordered Source listing. `ScanRepository` includes ScanRun lookup and Source-ID-ordered child lookup. `JobRepository` supports explicit Job lookup by ScanRun/type and database-ID-ordered stage reads without owning scan orchestration. `catalog` does not depend on the job runner, `job` remains generic, and `analysis` owns reusable analysis and provenance. The `web` boundary contains thin Source, ScanRun, and scan-execution REST controllers; later HTTP/SSE endpoints remain deferred.
 
 ## Explicitly Deferred
 
