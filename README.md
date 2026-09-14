@@ -1,6 +1,6 @@
 # Media Compare
 
-Media Compare is an early-stage application for media comparison workflows. The repository currently contains a working full-stack scaffold; the product architecture and persistent data model have not yet been designed.
+Media Compare is an early-stage application for media comparison workflows. The repository currently contains a working full-stack scaffold and a documented conceptual architecture; the product features and persistent schema have not yet been implemented.
 
 ## Stack
 
