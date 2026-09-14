@@ -2,203 +2,266 @@
 
 ## Status and Scope
 
-The persistent application schema has not been designed or implemented. This document records the confirmed conceptual data model that will guide a later SQLite schema design. Concept names below do not commit the project to exact table, column, enum, key, or Java class names.
+The reviewed V1 persistence design is implemented by Flyway migration `V1__create_core_schema.sql`. The application now has the eleven V1 tables, their structural constraints and initial indexes, immutable Java record representations, and small Spring JDBC repositories.
 
-The current physical database remains effectively empty: there are no versioned Flyway migrations or application tables, and the local database contains only Flyway's `flyway_schema_history` bookkeeping table.
+The first migration contains exactly eleven application tables. The fields and constraints below describe the implemented schema.
 
-## Confirmed Persistence Choices
+## V1 Tables
 
-- SQLite is the single selected catalog database.
-- Spring JDBC is selected instead of JPA.
-- Flyway owns schema migrations.
-- The configured JDBC URL is `jdbc:sqlite:data/media-compare.db`.
-- When the backend starts from `backend/`, the local database is `backend/data/media-compare.db`.
-- Local files under `backend/data/` are ignored by Git; `backend/data/.gitkeep` preserves the directory.
-- Flyway migrations belong in `backend/src/main/resources/db/migration/` and load from `classpath:db/migration`.
-- A saved index or WorkingSet will be represented within the one catalog database, not in a separate database file.
+### `source`
 
-## Conceptual Relationship View
+Implemented fields:
+
+- `id INTEGER PRIMARY KEY`
+- `name TEXT NOT NULL`
+- `root_path TEXT NOT NULL`
+- `root_path_key TEXT NOT NULL`
+- `location_revision INTEGER NOT NULL DEFAULT 0 CHECK >= 0`
+- `created_at_ms INTEGER NOT NULL`
+- `updated_at_ms INTEGER NOT NULL`
+
+Source has a durable database identity. `root_path` and `root_path_key` are location/configuration data, not Source identity. `root_path_key` is an application lookup aid; neither path field is unique. Matching a path or path key must not automatically establish that a previously registered Source is the same Source that has returned. Relocation and remount recognition are deferred. Platform-specific volume or filesystem identifiers may later assist as optional hints only; they cannot be required cross-platform identity.
+
+### `content_record`
+
+Implemented fields:
+
+- `id INTEGER PRIMARY KEY`
+- `size_bytes INTEGER NOT NULL CHECK >= 0`
+- `created_at_ms INTEGER NOT NULL`
+
+A ContentRecord permanently represents one byte-version. Its identity is an internal ID rather than an exact hash. An established record is not mutated to represent replacement bytes. Temporary duplicate records are allowed until explicit reconciliation/merge behavior is designed. V1 has no canonical redirect or merge table.
+
+### `file_entry`
+
+Implemented fields:
+
+- `id INTEGER PRIMARY KEY`
+- `source_id INTEGER NOT NULL`
+- `relative_path TEXT NOT NULL`
+- `path_key TEXT NOT NULL`
+- `current_content_id INTEGER NULL`
+- `presence_status TEXT NOT NULL`
+- `size_bytes INTEGER NOT NULL CHECK >= 0`
+- `modified_time_epoch_second INTEGER NULL`
+- `modified_time_nano INTEGER NULL`, valid from `0` through `999999999` when present
+- `observation_revision INTEGER NOT NULL DEFAULT 0 CHECK >= 0`
+- `first_seen_at_ms INTEGER NOT NULL`
+- `last_seen_at_ms INTEGER NOT NULL`
+- `last_seen_scan_run_source_id INTEGER NULL`
+- `last_seen_traversal_generation INTEGER NULL`, positive when present
+
+The uniqueness rule is `UNIQUE(source_id, path_key)`. `relative_path` preserves observed case and Unicode spelling through Java NIO. Persisted portable relative paths use `/` between segments. V1 does not globally lowercase paths, Unicode-normalize them, resolve symlinks, or call `toRealPath()` to construct occurrence identity. Where equivalence is uncertain, observations remain separate. Initially `path_key` may match the portable serialized path while remaining a separate field for future lookup policy.
+
+A FileEntry represents a filesystem occurrence, not immutable content. Its occurrence remains historically useful when the file disappears. `PRESENT` and `MISSING` are the minimum conceptual presence states. `observation_revision` increments when an observation indicates that bytes or content association may have changed; seeing the same unchanged file does not increment it.
+
+When `last_seen_scan_run_source_id` is non-null, the referenced ScanRunSource must have the same `source_id` as the FileEntry. In V1, `CatalogRepository` checks this invariant within the FileEntry insert transaction. The schema retains the direct foreign key and `ON DELETE SET NULL`; no composite foreign key or trigger is used.
+
+### `working_set`
+
+Implemented fields:
+
+- `id INTEGER PRIMARY KEY`
+- `name TEXT NOT NULL`
+- `created_at_ms INTEGER NOT NULL`
+- `updated_at_ms INTEGER NOT NULL`
+
+WorkingSet names do not need to be unique.
+
+### `working_set_content`
+
+Implemented fields:
+
+- `working_set_id INTEGER NOT NULL`
+- `content_record_id INTEGER NOT NULL`
+- `added_at_ms INTEGER NOT NULL`
+
+The primary key is `(working_set_id, content_record_id)`. Membership remains ContentRecord-based. Replacing bytes at a FileEntry does not silently replace historical membership. Detailed path-to-content history is deferred.
+
+### `scan_run`
+
+Implemented fields:
+
+- `id INTEGER PRIMARY KEY`
+- `request_type TEXT NOT NULL`
+- `status TEXT NOT NULL`
+- `working_set_id INTEGER NULL`
+- `options_version INTEGER NOT NULL CHECK > 0`
+- `options_json TEXT NOT NULL`
+- `created_at_ms INTEGER NOT NULL`
+- `started_at_ms INTEGER NULL`
+- `finished_at_ms INTEGER NULL`
+- `error_message TEXT NULL`
+
+ScanRun records user intent. Options become immutable once execution begins. Exact lifecycle and request-type values remain implementation details.
+
+### `scan_run_source`
+
+Implemented fields:
+
+- `id INTEGER PRIMARY KEY`
+- `scan_run_id INTEGER NOT NULL`
+- `source_id INTEGER NOT NULL`
+- `status TEXT NOT NULL`
+- `source_location_revision INTEGER NOT NULL CHECK >= 0`
+- `traversal_generation INTEGER NOT NULL DEFAULT 0 CHECK >= 0`
+- `completed_generation INTEGER NULL`, greater than zero and no greater than `traversal_generation` when present
+- `started_at_ms INTEGER NULL`
+- `completed_at_ms INTEGER NULL`
+- `error_message TEXT NULL`
+
+The uniqueness rule is `UNIQUE(scan_run_id, source_id)`.
+
+Each traversal from a Source root receives a fresh positive generation. A traversal restarted after interruption receives a new generation, so `traversal_generation` may be greater than the last `completed_generation` while newer work is in progress. A completed generation is positive and cannot exceed the current traversal generation. V1 allows only one active reconciliation traversal per Source initially. A missing-file sweep is authorized only after a complete successful traversal of the intended scope. Cancellation, inaccessible directories, offline Sources, and incomplete traversal must not mark previous entries missing. The missing update and completed-generation state are committed together. Discovery may restart after shutdown; directory-level traversal checkpoints are deferred.
+
+### `job`
+
+Implemented fields:
+
+- `id INTEGER PRIMARY KEY`
+- `scan_run_id INTEGER NULL`
+- `job_type TEXT NOT NULL`
+- `status TEXT NOT NULL`
+- `current_stage_type TEXT NULL`
+- `progress_completed INTEGER NOT NULL DEFAULT 0 CHECK >= 0`
+- `progress_total INTEGER NULL CHECK >= 0 when present`
+- `attempt_count INTEGER NOT NULL DEFAULT 0 CHECK >= 0`
+- `created_at_ms INTEGER NOT NULL`
+- `started_at_ms INTEGER NULL`
+- `finished_at_ms INTEGER NULL`
+- `error_message TEXT NULL`
+
+Job is the durable execution authority. ScanRun remains the user-request and operation-summary record. Detailed scheduling and recovery are deferred.
+
+### `job_stage`
+
+Implemented fields:
+
+- `id INTEGER PRIMARY KEY`
+- `job_id INTEGER NOT NULL`
+- `stage_type TEXT NOT NULL`
+- `status TEXT NOT NULL`
+- `progress_completed INTEGER NOT NULL DEFAULT 0 CHECK >= 0`
+- `progress_total INTEGER NULL CHECK >= 0 when present`
+- `attempt_count INTEGER NOT NULL DEFAULT 0 CHECK >= 0`
+- `created_at_ms INTEGER NOT NULL`
+- `started_at_ms INTEGER NULL`
+- `finished_at_ms INTEGER NULL`
+- `error_message TEXT NULL`
+
+The uniqueness rule is `UNIQUE(job_id, stage_type)`. A V1 stage row is an aggregate durable checkpoint for one stage type within a Job. Retry and resume update that row. Stage-instance and attempt-history tables are deferred.
+
+### `analysis_record`
+
+Implemented fields:
+
+- `id INTEGER PRIMARY KEY`
+- `content_record_id INTEGER NOT NULL`
+- `analysis_type TEXT NOT NULL`
+- `analyzer_id TEXT NOT NULL`
+- `analyzer_version TEXT NOT NULL`
+- `configuration_version INTEGER NOT NULL CHECK > 0`
+- `configuration_hash TEXT NOT NULL`
+- `configuration_json TEXT NOT NULL`
+- `status TEXT NOT NULL`
+- `attempt_count INTEGER NOT NULL DEFAULT 0 CHECK >= 0`
+- `created_at_ms INTEGER NOT NULL`
+- `started_at_ms INTEGER NULL`
+- `finished_at_ms INTEGER NULL`
+- `error_message TEXT NULL`
+
+Cache/provenance identity includes ContentRecord, analysis type, analyzer identity, analyzer version, and configuration version/hash. All identity components are non-null. Even an analysis with no options uses a versioned empty configuration. The hash is computed from deterministic effective settings, while the effective configuration is retained as JSON.
+
+The reviewed cache/artifact uniqueness rule is:
+
+```text
+UNIQUE(
+    content_record_id,
+    analysis_type,
+    analyzer_id,
+    analyzer_version,
+    configuration_version,
+    configuration_hash
+)
+```
+
+`configuration_json` is retained for provenance and explainability, but is not part of this uniqueness constraint.
+
+Only successfully completed records with complete specialized results may be reused. Failed or interrupted work may be retried under the same artifact identity. Separate attempt history and detailed startup recovery remain deferred.
+
+### `content_hash`
+
+Implemented fields:
+
+- `analysis_record_id INTEGER PRIMARY KEY`
+- `algorithm TEXT NOT NULL`
+- `digest_hex TEXT NOT NULL`
+
+This is the specialized exact-hash artifact. Algorithm identifiers are canonical and the planned V1 digest encoding is lowercase hexadecimal. Index `(algorithm, digest_hex)`, but do not make that pair unique: provisional ContentRecords may temporarily produce the same trusted digest before reconciliation exists. The hash is never the ContentRecord primary key.
+
+## Filesystem Timestamps
+
+Application lifecycle timestamps use epoch milliseconds stored as SQLite integers. Filesystem modification times preserve available Java `FileTime` precision with an epoch-second value and nanosecond component. The two values are both present or both absent; nanoseconds are constrained to `0..999999999`. Filesystems that provide less precision remain valid.
+
+## Relationships, Foreign Keys, and Deletion
+
+The conceptual relationship is:
 
 ```text
 Source -> FileEntry -> ContentRecord -> AnalysisRecord -> specialized results
-                           |
-                           -> future relationships/groups
-
 WorkingSet -> ContentRecord membership
-
-ScanRun -> Job -> stages/checkpoints
+ScanRun -> ScanRunSource -> Source
+ScanRun -> Job -> JobStage
 ```
 
-This is pre-schema notation. It intentionally omits cardinalities, SQL names, columns, foreign keys, indexes, and ownership details that have not been decided.
+Historical catalog evidence must not disappear accidentally when a Source, ContentRecord, scan record, or related parent is removed. The migration uses restrictive deletion for durable catalog identities and reusable analysis relationships. WorkingSet membership cascades from WorkingSet deletion, JobStage cascades from Job deletion, and ContentHash cascades from AnalysisRecord deletion. `file_entry.last_seen_scan_run_source_id` uses `ON DELETE SET NULL`, allowing execution history to be removed later without deleting FileEntry history.
 
-## Source
+SQLite foreign-key enforcement is enabled for every physical datasource connection with the `foreign_keys=on` SQLite JDBC URL property.
 
-A Source is a durable registered scan root, such as a folder, external drive, whole drive, or another filesystem root.
+## Initial Index Direction
 
-- It has an internal persistent identity.
-- It defines a scan boundary and stores location/configuration information.
-- Its absolute path is not its identity.
-- It can move, mount at another path, or be temporarily unavailable without losing catalog history.
-- Platform-specific filesystem or volume identifiers may be optional hints, but cannot be required identity.
+Beyond primary keys and uniqueness constraints, the reviewed initial useful indexes are:
 
-The schema for current and historical Source locations is not yet decided.
+- `file_entry(current_content_id, presence_status)`
+- `file_entry(source_id, presence_status, last_seen_traversal_generation)` for Source-led reconciliation
+- `working_set_content(content_record_id)`
+- `scan_run_source(source_id, status)`
+- `job(scan_run_id)`
+- `content_hash(algorithm, digest_hex)`
 
-## FileEntry
+Do not add indexes for hypothetical queries before measuring actual access patterns.
 
-A FileEntry represents one known filesystem occurrence: “there is, or was, a file at this location within this Source.”
+## Lifecycle and Type Validation
 
-It conceptually retains:
+Evolving status and type values are not locked into rigid SQLite `CHECK (... IN (...))` lists in V1. SQL constraints enforce structural invariants such as nullability, foreign keys, uniqueness, ranges, and numeric validity. Exact lifecycle values will be validated in Java when the corresponding workflows are implemented.
 
-- Its Source relationship.
-- A path relative to that Source.
-- Size, filesystem timestamps, and useful filesystem attributes.
-- Current presence or absence.
-- First-seen and last-seen information.
-- An association with exact content when known.
+## Java Persistence Foundation
 
-Relative Source paths are preferred over absolute paths as occurrence identity. Path handling must remain compatible with Java `Path`/NIO and cannot assume a particular separator, drive-letter scheme, case behavior, or filesystem.
+Immutable records representing all eleven table row shapes and concrete Spring JDBC repositories are organized under the persistence-related feature packages:
 
-A missing file is not automatically deleted from the catalog. `PRESENT` and `MISSING` are the minimum conceptual states; no additional states or exact enum names are finalized. When bytes at an existing path change, the FileEntry remains the occurrence and its ContentRecord association can change.
+- `catalog`
+- `scan`
+- `job`
+- `analysis`
 
-## ContentRecord
+`CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` provide focused insert and read operations. They use `JdbcTemplate` directly without a generic repository superclass or ORM. `catalog` does not depend on the job runner, `job` remains generic, and `analysis` owns reusable analysis and provenance. The reviewed `web` boundary remains reserved for thin HTTP/SSE endpoints; no product controller was added.
 
-A ContentRecord represents exact bytes independently of filesystem location.
+## Explicitly Deferred
 
-- It has a stable internal database identity.
-- Its primary identity is not an exact hash value.
-- Multiple FileEntries can reference it after exact byte identity is trusted.
-- Reusable analysis belongs primarily to it rather than to a path.
-- It can remain useful when physical copies are missing and can be reused when bytes reappear later.
+V1 does not include:
 
-Original and transformed copies have different ContentRecords because their bytes differ. Their similarity or derivation is represented later through matching, relationships, or grouping—not by merging their exact-content identities. No separate logical-media abstraction is currently defined.
+- ContentRecord merge/redirect infrastructure.
+- Historical FileEntry path/content-version history.
+- Directory-level traversal checkpoints.
+- Analysis attempt-history or Job stage-instance tables.
+- Perceptual fingerprints, embeddings, vector infrastructure, face/person schemas, or video fingerprints.
+- Matching candidates, similarity relationships, groups, or manual override schemas.
+- AI-specific result schemas and provider infrastructure.
+- Filesystem-action history.
+- Thumbnail/cache metadata.
+- Final FFmpeg/ffprobe discovery strategy.
+- WAL-specific architecture.
+- Final symlink/junction traversal behavior.
+- Source remount/relocation detection algorithms.
 
-## Exact Hash Artifact
-
-A trusted exact hash is a reusable artifact that confirms byte-for-byte identity. Hashing need not happen immediately for every FileEntry, and a hash is not the ContentRecord's database primary key.
-
-The stored representation must identify its algorithm so the system is not permanently tied to one choice. SHA-256 is the leading initial candidate, but the schema and implementation choice remain open. Rules for reconciling separate ContentRecords that later receive the same trusted hash also remain to be designed.
-
-Size and timestamp may mark content as probably unchanged for reconciliation, but they are never proof of byte identity.
-
-## WorkingSet
-
-A WorkingSet is a durable logical collection of catalog content used in repeated comparison or organization workflows.
-
-- Membership references ContentRecords and does not duplicate their analysis.
-- A WorkingSet can grow as additional Sources or content are introduced.
-- Its identity and useful history survive when current FileEntries become `MISSING`.
-- It enables new content to reuse and compare against analysis already stored for earlier content.
-
-Exact membership history, removal, ordering, naming, and lifecycle semantics remain undecided.
-
-## ScanRun
-
-A ScanRun represents a user's requested operation. It is conceptually responsible for recording the selected Sources or WorkingSet, requested analysis options, requested mode, and lifecycle information.
-
-Index, compare, and combined index-and-compare are conceptual modes only. Their final names and representation are not decided.
-
-ScanRun is distinct from Job: the former captures intent, while the latter captures long-running execution.
-
-## Job
-
-A Job represents durable long-running work. Jobs may eventually cover scanning/indexing, deeper analysis, bulk filesystem operations, exports, and other future operations.
-
-Conceptual Job information includes work type, status, current stage, progress, timing, and error information. Potential scan stages include discovery, reconciliation, hashing, media metadata, fingerprints, faces, embeddings, matching, deep comparison, and grouping. These stage names are illustrative and are not a finalized enum, API, or table design.
-
-Job and stage state must support pause/resume after a complete application shutdown. The model should record durable, database-driven checkpoints rather than serialized Java execution state or a fragile exact filesystem iterator position. Work should be processed and committed in small batches, with incomplete work found by querying for missing compatible artifacts. Batch size and detailed checkpoint structures remain undecided.
-
-## AnalysisRecord
-
-An AnalysisRecord is the general provenance and lifecycle record for reusable analysis of a ContentRecord. Conceptually it answers:
-
-- What kind of analysis ran?
-- Which ContentRecord was analyzed?
-- Which algorithm, model, or provider produced it?
-- Which analyzer/model version and configuration produced it?
-- What is its lifecycle status and timing?
-- Did it fail, and is retry information needed?
-- Where is its specialized result represented?
-
-Exact persisted field names and lifecycle states are not finalized.
-
-### Versioning and Reuse
-
-An analysis artifact can be reused only when its analysis type, analyzer/model/provider, version, and relevant configuration are compatible with the request. When any compatibility-defining input changes, the new result is recorded separately instead of silently replacing the earlier result.
-
-This applies to hashes, fingerprints, media metadata extractors, embeddings, face analysis, and AI-based results. It lets completed expensive work survive renames, moves, duplicates, later scan runs, and application restarts.
-
-## Specialized Results
-
-AnalysisRecord holds common provenance, versioning, and lifecycle information. Specialized structures hold results that need domain-specific representation or efficient querying, potentially including:
-
-- Exact content hashes.
-- Media metadata.
-- Perceptual fingerprints.
-- Embeddings.
-- Detected faces and face embeddings.
-- Video fingerprints.
-- AI results.
-
-The design will not place every analysis output into one generic JSON result column. Query-heavy data such as hashes and fingerprints must remain efficiently searchable and indexable. Final result structures are not yet defined.
-
-Embeddings may initially use compact SQLite BLOB storage, likely float32 arrays, with similarity calculated in Java. This is an implementation candidate rather than a finalized schema. No vector database or vector extension has been selected.
-
-## Filesystem Metadata and Media Metadata
-
-Filesystem metadata belongs to FileEntry because it describes a physical occurrence. Examples include relative path, filename, size, filesystem timestamps, presence, and filesystem-specific attributes.
-
-Media-derived metadata belongs to versioned ContentRecord analysis because it describes the exact bytes. Examples include dimensions, duration, codec, frame rate, stream information, orientation, useful EXIF information, and ffprobe-derived metadata.
-
-Moving or renaming unchanged content must not invalidate compatible media-derived analysis.
-
-## Face and Human Classification Concepts
-
-Face-related data conceptually separates:
-
-1. Face-detection analysis of a ContentRecord.
-2. A detected face instance, potentially including a bounding region and confidence.
-3. A face embedding with its own model/version provenance.
-4. A later human-facing person or group classification in the organization layer.
-
-Analyzer output and user classification are separate facts. The final detected-face, embedding, person, and grouping schema is not designed.
-
-## AI Analysis
-
-AI results use the same provenance and versioning approach as other analysis. Relevant provenance may include task, provider, model identifier/version, prompt or template version, and configuration. Local and cloud providers may coexist, AI remains optional, and catalog records must not depend directly on one provider.
-
-The AI-provider interface and specialized AI-result schema remain undecided.
-
-## Large Derived Data
-
-The SQLite catalog will hold compact metadata, hashes/fingerprints, vectors, classifications, provenance, and relationships. Large derived files—such as thumbnails, previews, extracted video frames, and large intermediates—will generally live in an application-managed cache rather than as SQLite BLOBs.
-
-The cache schema, lifecycle, and platform-specific locations on macOS and Windows are not yet decided.
-
-## Historical and Reconciliation Rules
-
-- Previously known FileEntries are marked missing rather than automatically deleted when unobserved.
-- ContentRecords and reusable analysis can remain after physical copies disappear.
-- WorkingSet identity and useful history can remain after members lose current physical occurrences.
-- Filesystem discovery may be rerun while compatible expensive artifacts are reused.
-- OS file IDs and similar attributes can be optional reconciliation hints, never mandatory cross-platform identity.
-- Exact hashing provides trusted byte-identity confirmation; size and timestamp only support cheaper probable-unchanged decisions.
-
-## Data Model Decisions Still Needed
-
-The schema design pass still needs to decide:
-
-- Exact tables, columns, keys, constraints, foreign keys, and indexes.
-- Concrete names and representations for file classifications, presence states, run modes, job states, and stages.
-- Source location history, relocation, availability, and optional platform-hint storage.
-- FileEntry uniqueness and path case/collation behavior across filesystems.
-- Deferred hashing and safe ContentRecord reconciliation transactions.
-- WorkingSet membership and history semantics.
-- ScanRun-to-Job relationships and durable checkpoint representation.
-- Analysis compatibility keys, lifecycle states, retries, and retention.
-- Specialized result schemas and embedding encoding.
-- Matching-candidate persistence and relationship/group representation.
-- Face/person/manual-classification structures.
-- AI-result representation.
-- Application-cache metadata, paths, cleanup, and recovery behavior.
-
-No migration should be created until this conceptual model is translated into a reviewed first concrete schema.
+Temporary duplicate ContentRecords are acceptable until the concrete merge/reconciliation operation is designed and tested.

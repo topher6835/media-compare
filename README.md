@@ -1,6 +1,6 @@
 # Media Compare
 
-Media Compare is an early-stage application for media comparison workflows. The repository currently contains a working full-stack scaffold and a documented conceptual architecture; the product features and persistent schema have not yet been implemented.
+Media Compare is an early-stage application for media comparison workflows. The repository contains a working full-stack scaffold and the first SQLite persistence foundation; product workflows have not yet been implemented.
 
 ## Stack
 
@@ -56,4 +56,4 @@ The SQLite database is created locally at `backend/data/media-compare.db` when t
 
 ## Status
 
-The baseline frontend/backend connection is working, but real Media Compare search and comparison functionality has not started. See [`docs/STATUS.md`](docs/STATUS.md) for the current handoff state.
+The baseline frontend/backend connection and V1 persistence foundation are working, but real Media Compare search and comparison functionality has not started. See [`docs/STATUS.md`](docs/STATUS.md) for the current handoff state.

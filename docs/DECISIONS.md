@@ -1,6 +1,6 @@
 # Decisions
 
-This file records decisions that have already been made. It does not turn planned capabilities into finalized architecture.
+This file records decisions already made. It distinguishes the reviewed V1 implementation target from behavior and architecture that remain open.
 
 ## Project
 
@@ -10,60 +10,101 @@ This file records decisions that have already been made. It does not turn planne
 
 ## Stack
 
-- Use Java 21.
-- Use Spring Boot 4.1.1.
-- Use Maven and commit its macOS/Linux and Windows wrappers.
-- Use React with TypeScript and Vite for the frontend.
-- Use React Router for client-side routing.
-- Use SQLite for persistence.
-- Use Spring JDBC instead of JPA.
+- Use Java 21, Spring Boot 4.1.1, and Maven.
+- Use React, TypeScript, Vite, React Router, and ESLint.
+- Use SQLite with Spring JDBC instead of JPA.
 - Use Flyway for schema migrations.
-- Use Java NIO for future filesystem work when practical.
+- Use Java NIO for filesystem work.
 - Use FFmpeg and ffprobe for future media inspection and processing.
-- Use REST APIs, with SSE as the direction for future server-to-client live/progress updates.
-- Allow future AI integrations through pluggable local and cloud providers.
-
-Concrete implementation structures for filesystem scanning, comparison, jobs, SSE, FFmpeg discovery, and AI-provider integration remain undecided.
+- Use REST APIs, with SSE as the direction for later live/progress updates.
+- Allow future pluggable local and cloud AI providers.
 
 ## Architecture
 
-- Begin as a modular monolith: one Spring Boot backend, one React frontend, and one SQLite catalog. Do not introduce microservices, message queues, a Docker requirement, or a separate worker process initially.
-- Keep meaningful internal responsibility boundaries without finalizing Java packages or detailed frontend modules prematurely.
-- Catalog files generally, not only media. Apply cheap catalog work broadly and expensive analysis only to selected and supported media.
-- Give each registered scan Source a durable internal identity. Treat its absolute path as changeable location/configuration rather than identity, so history can survive moves, remounts, and temporary unavailability.
-- Represent a FileEntry as one current or historical filesystem occurrence within a Source. Prefer a Source-relative path and preserve missing history rather than deleting an entry automatically.
+- Begin as a modular monolith: one Spring Boot backend, one React frontend, and one SQLite catalog.
+- Do not introduce microservices, message queues, a Docker requirement, or a separate worker process initially.
+- Catalog files generally, not only media. Apply cheap catalog work broadly and expensive analysis only to selected/supported media.
+- Keep internal responsibility boundaries meaningful without creating elaborate layered architecture.
+- Give each registered scan Source a durable internal identity. Its root path and path key are location/configuration data, not identity; a path-key match alone cannot identify a returning Source. Platform-specific volume/filesystem IDs, file IDs, or inodes may be optional hints, never required cross-platform identity.
+- Represent a FileEntry as a current or historical filesystem occurrence within a Source. Preserve missing history rather than deleting an entry automatically.
 - Represent exact bytes with a stable internal ContentRecord identity independent of path and hashing algorithm. Multiple exact duplicate FileEntries may share a ContentRecord; transformed copies must not.
+- Treat a trusted exact hash as confirmation of byte identity, with its algorithm recorded explicitly. Size and timestamp are optimization signals, not proof.
 - Attach reusable expensive analysis primarily to ContentRecord so it survives moves, renames, duplicates, later scans, and missing/reappearing copies.
-- Treat a trusted exact hash as confirmation of byte identity, while keeping the algorithm explicit and keeping hashes separate from database primary identity. Size and timestamp are optimization signals, not proof.
-- Perform lightweight reconciliation before expensive analysis. Platform-specific file IDs may be optional hints but cannot be required cross-platform identity.
-- Design traversal and persistence for libraries up to potentially hundreds of thousands of files using streamed discovery, database batching, indexed queries, and selective expensive analysis—not speculative distributed infrastructure.
-- Keep ScanRun (the user's requested operation) distinct from Job (durable long-running execution), because future jobs are not limited to scans.
 - Make resume database-driven and durable across full application shutdown. Prefer idempotent stages and small committed batches over serialized Java state or fragile iterator cursors.
 - Represent a saved index as a persistent WorkingSet backed by the one catalog database. WorkingSets reference ContentRecords, reuse their analysis, and retain useful identity/history when physical copies disappear.
-- Use a general AnalysisRecord concept for analysis provenance, version/configuration, and lifecycle, with specialized structures for queryable results. Do not put every result into one generic JSON column.
-- Reuse analysis only when type, analyzer/model/provider, version, and configuration are compatible. Preserve prior artifacts when those inputs change.
-- Keep filesystem metadata on FileEntry and media-derived metadata in ContentRecord analysis, so a move or rename does not invalidate compatible media analysis.
-- Keep face detection/instances/embeddings separate from later human person or group classification.
-- Keep AI optional and provider-independent; local and cloud providers may coexist under the same provenance/versioning principles.
-- Keep large derived files in a future managed cache rather than as large SQLite BLOBs; store the catalog and compact/queryable artifacts in SQLite.
-- Generate plausible matching candidates cheaply before deeper comparison. Do not use full pairwise comparison for large libraries, and make pending candidate work resumable.
+- Use a general AnalysisRecord for analysis provenance, version/configuration, and lifecycle, with specialized structures for queryable results rather than placing every result in generic JSON.
+- Reuse analysis only when type, analyzer/model/provider, version, and configuration are compatible; preserve prior artifacts when those inputs change.
+- Keep filesystem metadata on FileEntry and media-derived metadata in ContentRecord analysis, so moves and renames do not invalidate compatible analysis.
+- Keep face analyzer output, detected faces, and embeddings separate from later human person or group classification.
+- Keep AI optional and provider-independent; local and cloud providers may coexist under the same provenance/versioning model.
+- Keep large derived files in a future application-managed cache rather than as large SQLite BLOBs; SQLite holds the catalog and compact/queryable artifacts.
+- Generate plausible matching candidates cheaply before deeper comparison. Do not use full pairwise comparison for large libraries, and ensure pending candidate/deep-analysis work can eventually resume durably.
 
-These decisions define conceptual boundaries and invariants. They do not finalize SQL schemas, package names, APIs, enums, algorithms, concurrency, or provider interfaces.
+## Reviewed V1 Persistence Target
+
+The first concrete schema is implemented by `V1__create_core_schema.sql` and contains exactly these eleven tables:
+
+`source`, `file_entry`, `content_record`, `working_set`, `working_set_content`, `scan_run`, `scan_run_source`, `job`, `job_stage`, `analysis_record`, and `content_hash`.
+
+The reviewed direction is:
+
+- `Source` has a durable database identity. `root_path` and `root_path_key` are location/configuration data and neither is unique; a matching path or path key alone does not establish a returning Source. A location revision records configuration changes.
+- `FileEntry` represents a filesystem occurrence within a Source. It uses a Source-relative path, a lossless application-generated `path_key`, and `UNIQUE(source_id, path_key)`. Observed case and Unicode spelling are preserved; V1 does not globally lowercase, Unicode-normalize, resolve symlinks, or use `toRealPath()` for occurrence identity.
+- A non-null FileEntry last-seen ScanRunSource must belong to the same Source. V1 enforces this transactionally in `CatalogRepository` while retaining the simple foreign key and `ON DELETE SET NULL` behavior.
+- `ContentRecord` represents one immutable byte-version with an internal ID independent of exact hashes. Temporary duplicate records are allowed. V1 has no canonical redirect or merge table.
+- `WorkingSet` membership is ContentRecord-based and remains useful when physical copies disappear. Replacing bytes at a FileEntry does not silently replace historical membership.
+- `ScanRun` records user intent and immutable-on-start options. `ScanRunSource` records per-Source processing, location revision, traversal generation, and completion.
+- Each root discovery traversal receives a fresh generation. A non-null completed generation is positive and cannot exceed the current traversal generation, which may advance while newer work is in progress. Missing-file sweeps run only after a complete successful traversal of the intended scope, and the sweep plus completed-generation state commit together. Incomplete, cancelled, inaccessible, or offline scans do not mark entries missing.
+- `Job` is the durable execution authority. `JobStage` is an aggregate checkpoint per stage type within a Job, with `UNIQUE(job_id, stage_type)`. Retries and resume update that row; stage-instance and attempt-history tables are deferred.
+- `AnalysisRecord` stores non-null provenance and cache identity: ContentRecord, analysis type, analyzer identity/version, configuration version/hash, and effective configuration. Only completed artifacts with complete specialized results are reusable. Changed provenance creates a new artifact.
+- `content_hash` is a specialized exact-hash result with canonical algorithm identifiers and lowercase hexadecimal digests. `(algorithm, digest_hex)` is indexed but not unique.
+- Application lifecycle timestamps use epoch milliseconds. Filesystem modification time uses epoch seconds plus a nanosecond component when available.
+- SQL enforces structural invariants, foreign keys, uniqueness, ranges, and numeric validity. Evolving lifecycle/type values are not constrained by rigid SQLite membership checks and will be validated in Java when their workflows are implemented.
+- Foreign-key deletion behavior preserves historical catalog evidence and reusable analysis. Pure dependent rows may cascade when their owner is intentionally deleted.
+- Initial indexes cover content occurrences, Source reconciliation, reverse WorkingSet membership, Source scan activity, Jobs by ScanRun, and exact-hash lookup. Speculative indexes are deferred.
+
+## Java Package Direction
+
+The preferred initial feature-oriented boundaries are:
+
+- `catalog` — Source, FileEntry, ContentRecord, WorkingSet, and persistence.
+- `scan` — ScanRun, ScanRunSource, and reconciliation coordination.
+- `job` — generic execution and stage state.
+- `analysis` — reusable analysis/provenance and specialized artifacts.
+- `web` — thin REST controllers and later HTTP/SSE endpoints.
+
+`catalog` must not depend on the job runner. `scan` may coordinate catalog and jobs. `job` remains generic. Automatic interface/implementation pairs and unnecessary enterprise layering are not decisions.
+
+The initial persistence implementation uses immutable Java records for row-shaped domain data and one focused concrete Spring JDBC repository per feature package. SQLite foreign keys are enabled on every physical connection with the JDBC URL's `foreign_keys=on` property. No ORM, generic repository framework, or new dependency was added.
 
 ## Development
 
 - Favor readable, conventional, learnable code over clever abstractions.
 - Implement in small, understandable increments and avoid premature architecture.
 - Require explicit authorization before installing or modifying system software.
-- Use Codex deliberately for meaningful implementation work; conserve usage when straightforward work can be handled manually.
-- Treat the separate planning/ideas ChatGPT conversation as the authority for high-level product decisions.
-- Treat the repository and its documentation as the authority for implemented technical state.
-- Do not silently promote tentative ideas to confirmed decisions.
+- Use Codex deliberately for meaningful implementation work.
+- High-level product decisions come from the separate planning/ideas ChatGPT conversation.
+- The repository and its durable docs are authoritative for implemented technical state.
 
 ## Git
 
 - Use the personal GitHub account `topher6835` for this repository.
 - Use the repository-local identity `topher6835 <topher6835@users.noreply.github.com>`.
-- Use the `github-personal` SSH alias; `origin` is `git@github-personal:topher6835/media-compare.git`.
-- Keep this configuration repository-local and do not disturb other GitHub identities on the machine.
+- Use the `github-personal` SSH alias with origin `git@github-personal:topher6835/media-compare.git`.
+- Keep this configuration repository-local and do not disturb other GitHub identities.
 - Do not commit or push unless explicitly requested.
+
+## Still Open
+
+- Concrete status, request-type, classification, and stage values.
+- Source remount/relocation recognition and filesystem volume hints.
+- Final symlink/junction traversal behavior and detailed path equivalence.
+- ContentRecord merge/reconciliation behavior.
+- Job scheduling, concurrency, cancellation, retry, and startup recovery.
+- Detailed scan scope representation and source-specific progress.
+- Specialized result schemas beyond `content_hash`.
+- Matching, similarity, relationship, grouping, and manual override schemas.
+- Face/person schema and AI-provider architecture.
+- Application-managed cache locations and lifecycle.
+- FFmpeg/ffprobe discovery and process management.
+- Safeguards for eventual filesystem-modifying operations.

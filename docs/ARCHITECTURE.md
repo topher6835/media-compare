@@ -2,15 +2,15 @@
 
 ## Implementation Status
 
-Media Compare currently has only a working full-stack scaffold:
+The repository currently contains a working full-stack scaffold:
 
 - A React single-page frontend in `frontend/`.
 - A Spring Boot REST backend in `backend/`.
 - One local SQLite database configured through Spring JDBC and Flyway.
-- One implemented application endpoint, `GET /api/health`, which returns plain text `ok`.
-- One frontend route, `/`, which requests and displays the health result.
+- `GET /api/health`, returning plain text `ok`.
+- A frontend `/` route that requests and displays the health result.
 
-The rest of this document records the confirmed conceptual architecture for future implementation. Unless explicitly described above as current behavior, it is not implemented.
+The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven V1 application tables, structural constraints, foreign keys, and initial indexes. Simple immutable records and Spring JDBC repositories provide insert/read access under the `catalog`, `scan`, `job`, and `analysis` feature packages. Scanning, hashing, reconciliation execution, job execution, analysis execution, matching, AI, and product behavior do not exist yet.
 
 ## Architectural Style
 
@@ -19,135 +19,83 @@ Media Compare will begin as a modular monolith:
 - One Spring Boot backend.
 - One React frontend.
 - One SQLite catalog.
-- No microservices.
-- No message queues.
-- No Docker requirement.
-- No separate worker process initially.
+- No microservices, message queues, Docker requirement, or separate worker process initially.
 
-Responsibilities must still be kept meaningfully separated inside the applications. Expected responsibility areas include catalog/indexing, scanning/reconciliation, analysis, matching, jobs/progress, organization/manual decisions, filesystem operations, media tooling, and AI integrations. These areas are conceptual boundaries, not finalized Java packages or frontend modules.
+Responsibilities remain meaningfully separated inside the applications without creating elaborate layered architecture. The initial responsibility areas are catalog/indexing, scanning/reconciliation, analysis, matching, jobs/progress, organization/manual decisions, filesystem operations, media tooling, and AI integrations.
 
-## Catalog and Identity Model
+## Implemented V1 Persistence Boundaries
 
-The catalog represents files generally, not only supported media. A source can contain images, videos, audio, documents, archives, and miscellaneous or unknown file types. Cheap filesystem and catalog processing can apply to all encountered files; expensive analysis applies only to selected and supported media.
-
-Broad file classifications such as image, video, audio, document, archive, other, and unknown are useful conceptual categories. Their exact enum names and persistence representation are not decided.
-
-### Source
-
-A Source is a persistent registered scan root, such as a folder, external drive, whole drive, or another filesystem root. It defines a scan boundary and configuration, but it is not the identity of the files or content beneath it.
-
-Each Source has a durable internal identity. Its absolute path is location/configuration information and may change if a folder moves or a volume mounts differently. A Source can also be temporarily unavailable. Catalog history should survive all of these conditions.
-
-Platform-specific filesystem or volume identifiers may be used later as optional hints, but cannot be required for identity because they are not portable or consistently reliable across macOS, Windows, and different filesystems.
-
-### FileEntry
-
-A FileEntry represents one known filesystem occurrence: a file exists, or previously existed, at a relative location within a Source. It owns filesystem-location information such as relative path, size, filesystem timestamps and attributes, presence, and first/last-seen information.
-
-Paths should be stored relative to their Source rather than using an absolute path as file identity. Filesystem code must use platform-neutral Java `Path` and NIO concepts and must not assume slash separators, Windows drive letters, macOS case behavior, or a single filesystem model.
-
-FileEntry history is retained when a file disappears. The minimum conceptual presence states are `PRESENT` and `MISSING`; additional states are not decided. If a file changes in place, the FileEntry remains the occurrence while its association with exact content may change.
-
-### ContentRecord
-
-A ContentRecord represents exact file bytes independently of filesystem location. It has a stable internal database identity that is not an exact hash. Hashing may be deferred, algorithms may change, and internal references must remain stable across those changes.
-
-Multiple FileEntries can refer to one ContentRecord when a trusted exact hash confirms that they contain the same bytes:
+The first concrete persistence schema contains exactly these eleven tables:
 
 ```text
-FileEntry A ---\
-FileEntry B ----> ContentRecord
-FileEntry C ---/
+source
+file_entry
+content_record
+working_set
+working_set_content
+scan_run
+scan_run_source
+job
+job_stage
+analysis_record
+content_hash
 ```
 
-Reusable expensive analysis belongs primarily to ContentRecord. This allows results to survive moves, renames, duplicate copies, later scans, and the disappearance and reappearance of physical copies.
+The implemented fields, constraints, indexes, foreign-key direction, and remaining design boundaries are recorded in [`DATA_MODEL.md`](DATA_MODEL.md).
 
-Transformed copies do not share a ContentRecord. For example, an original image and a cropped derivative have different exact bytes and therefore separate ContentRecords. A later matching or grouping process may infer a relationship between them. No separate vague “logical media item” is introduced at the catalog layer at this stage.
+The initial Java package structure is:
 
-## Exact Hashing and Reconciliation
+- `catalog` — Source, FileEntry, ContentRecord, WorkingSet, and related persistence.
+- `scan` — ScanRun, ScanRunSource, and reconciliation coordination.
+- `job` — generic durable execution and stage state.
+- `analysis` — AnalysisRecord and reusable specialized analysis artifacts.
+- `web` — thin REST controllers and later HTTP/SSE endpoints.
 
-A trusted exact hash confirms byte-for-byte identity and is a reusable analysis artifact. The hash algorithm must be recorded explicitly; the model must not permanently assume a single algorithm. SHA-256 is the leading initial candidate because Java supports it without another dependency, but the concrete schema and implementation have not been selected.
+The persistence foundation uses one concrete Spring JDBC repository per feature package: `CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository`. The boundaries remain simple. `catalog` does not depend on the job runner; `job` remains generic; `analysis` owns analysis provenance; and the existing health controller remains the only web behavior. No generic repository framework, automatic interface/implementation pairs, or enterprise layering was introduced.
 
-If separate ContentRecords are later proven to have the same trusted exact hash, catalog logic should carefully reconcile them. That process is not designed or implemented yet.
+## Catalog and Identity
 
-Revisiting a Source begins with lightweight reconciliation before expensive analysis:
+The catalog represents files generally, including images, video, audio, documents, archives, and miscellaneous or unknown files. Cheap filesystem/catalog processing can apply broadly; expensive analysis applies only to selected and supported media.
 
-```text
-start scan
-    -> stream source traversal with Java NIO
-    -> reuse entries whose path and cheap metadata appear unchanged
-    -> re-evaluate changed metadata
-    -> create or identify entries for new paths
-    -> conservatively recognize moves/renames where possible
-    -> mark previously known but unobserved entries MISSING
-    -> checkpoint
-```
+A `Source` is a persistent registered scan root such as a folder, external drive, whole drive, or other filesystem root. It has a durable database identity. `root_path` and `root_path_key` are location/configuration data, not identity; `root_path_key` is an application lookup aid, and neither field is unique. A matching path or path key must not automatically establish that a previously registered Source is the same Source that has returned. `location_revision` records changes to the configured location. Source relocation and remount recognition remain later concerns. Platform-specific volume, filesystem, file-ID, or inode information may later assist as optional hints only and can never be required cross-platform identity.
 
-Size and timestamp can support a “probably unchanged” optimization, but do not prove exact content identity. OS file IDs, inodes, or similar attributes may assist move/rename recognition as optional hints only. Exact hashing remains the trusted confirmation mechanism.
+A `FileEntry` represents one filesystem occurrence within a Source. It stores a Source-relative path, filesystem metadata, current content association, presence, first/last-seen information, observation revision, and the scan traversal that last observed it. The uniqueness rule is `UNIQUE(source_id, path_key)`.
 
-## ScanRun, Job, and Resumability
+When a FileEntry records `last_seen_scan_run_source_id`, that ScanRunSource must belong to the FileEntry's own Source. V1 keeps the simple foreign key and its `ON DELETE SET NULL` behavior; `CatalogRepository` enforces the cross-table Source match transactionally before insertion rather than adding a composite foreign key or trigger.
 
-A ScanRun represents what the user asked Media Compare to do: selected Sources or a WorkingSet, requested analysis options, mode, and lifecycle information. Possible modes such as index, compare, or index-and-compare are conceptual; exact enum and API names are not finalized.
+The path policy is cross-platform and lossless: preserve observed case and Unicode spelling, use `/` between persisted relative path segments, do not globally lowercase or Unicode-normalize, and do not resolve symlinks or call `toRealPath()` to construct occurrence identity. Where filesystem equivalence is uncertain, preserve separate observations.
 
-A Job represents long-running executable work and is intentionally distinct from ScanRun. Future jobs may cover scanning/indexing, deep analysis, bulk filesystem operations, exports, or other long-running work. A Job conceptually tracks its type, status, stage, progress, timing, and errors.
+A `ContentRecord` represents one immutable byte-version independently of location. It has a stable internal ID rather than a hash primary key. Exact hashing may be deferred. Temporary duplicate ContentRecords are acceptable until a later explicit reconciliation operation; V1 has no canonical redirect or merge table. Transformed copies have separate ContentRecords.
 
-REST remains the application API direction. SSE is planned for later server-to-client live/progress updates, but its endpoints, event format, and recovery behavior are not designed.
+## Reconciliation and Execution
 
-Potential scan stages include discovery, reconciliation, hashing, media metadata, fingerprinting, faces, embeddings, matching, deep comparison, and grouping. These are conceptual stages rather than a finalized enum or pipeline, and not every run performs every stage.
+Revisiting a Source performs lightweight discovery and reconciliation before expensive analysis. Each root traversal receives a fresh positive traversal generation. A missing-file sweep is permitted only after a complete successful traversal of the intended scope. Interrupted, cancelled, incomplete, inaccessible, or offline scans do not mark previously known files missing. The missing update and completed-generation state are committed together.
 
-Pause and resume must survive full application shutdown. The design will not serialize fragile Java execution state or depend on an exact filesystem iterator cursor. Instead, stages should be durable, database-driven, and idempotent where practical:
+`observation_revision` allows future workers to reject stale publication after a FileEntry may have changed. Discovery may restart after application shutdown; fragile filesystem iterator cursors are not persisted. Directory-level traversal checkpoints remain deferred.
 
-- Query for work whose requested artifacts are still missing.
-- Process a small batch.
-- Persist results and progress.
-- Commit the batch.
-- Continue or resume from durable state.
+`ScanRun` records user intent, selected Sources or WorkingSet, request type, options, and lifecycle. Its options become immutable when execution begins. `Job` is the durable execution authority and may execute scans, analysis, filesystem actions, exports, or other long-running work. `JobStage` is an aggregate checkpoint for one stage type within a Job, with `UNIQUE(job_id, stage_type)`; retries and resume update that row. Exact status and stage values remain implementation details.
 
-Filesystem discovery may restart when necessary because it is relatively cheap, while completed expensive analysis is reused. Directory-level discovery checkpoints may be introduced later if real performance measurements justify them. Batch sizes remain an implementation and tuning decision.
+Pause/resume is database-driven and must survive full application shutdown. Work is processed in small batches, with completed analysis reused and incomplete work found from durable state. Detailed scheduling, cancellation, startup recovery, and stage-instance history remain open.
 
-## Working Sets
+## Working Sets and Analysis
 
-A WorkingSet is a persistent logical collection of known content for repeated comparison and organization workflows. It references ContentRecords and never duplicates their reusable analysis.
+A `WorkingSet` is a persistent logical collection of `ContentRecord` membership for repeated comparison and organization workflows. Replacing the bytes at a FileEntry does not silently replace historical WorkingSet membership. Physical copies can become missing while content identity, membership, and reusable analysis remain useful. Saved indexes use the one catalog database rather than separate database files.
 
-This supports incremental workflows such as indexing Sources A and B, later adding Source C, analyzing only missing artifacts, and comparing C against the stored A+B catalog state.
+`AnalysisRecord` captures reusable analysis provenance, lifecycle, analyzer identity/version, configuration version/hash, and effective configuration. A compatible completed artifact can be reused; changes to analysis type, analyzer, model, version, preprocessing, provider, or configuration create a new artifact rather than silently overwriting the prior result. Specialized result structures hold hashes, media metadata, fingerprints, embeddings, face results, video fingerprints, and AI results as those features are designed.
 
-WorkingSet identity and useful membership history remain even if every current FileEntry for a ContentRecord becomes `MISSING`. A user-facing saved index will be a persistent concept backed by the one catalog database, not a separate SQLite database file.
+`content_hash` is the specialized exact-hash result. It uses canonical algorithm identifiers and lowercase hexadecimal digests. `(algorithm, digest_hex)` is indexed but not unique because temporary duplicate ContentRecords may exist.
 
-## Analysis and Provenance
+Filesystem metadata belongs to FileEntry. Media-derived metadata belongs to ContentRecord analysis so moves and renames do not invalidate compatible analysis. Large derived files such as thumbnails, previews, extracted frames, and intermediates belong in a future managed cache rather than the SQLite catalog.
 
-Reusable analysis attaches primarily to ContentRecord through a general AnalysisRecord concept. An AnalysisRecord records what analysis ran, which content it analyzed, the algorithm/model/provider and version/configuration used, lifecycle status and timing, and relevant failure/retry information. Exact persisted names are not finalized.
-
-Analysis reuse depends on compatible type, analyzer/model, version, and configuration. A compatible existing artifact is reused. A changed algorithm, model, provider, prompt/template, or configuration creates a new analysis result rather than silently overwriting the prior one. This rule applies to deterministic and AI-based analysis.
-
-AnalysisRecord provides provenance, versioning, and lifecycle state. Query-heavy results should use specialized, efficiently searchable structures rather than placing every output in one generic JSON column. Potential specialized results include exact hashes, media metadata, perceptual fingerprints, embeddings, detected faces, video fingerprints, and AI results. Their final schemas are undecided.
-
-### Filesystem and Media Metadata
-
-Filesystem metadata belongs to FileEntry because it describes an occurrence: path, filename, size, filesystem timestamps, presence, and filesystem-specific attributes.
-
-Media-derived metadata belongs to analysis of ContentRecord because it describes the bytes: dimensions, duration, codec, frame rate, stream information, orientation, useful EXIF data, and ffprobe-derived metadata. Moving or renaming unchanged content should not invalidate that analysis.
-
-### Embeddings, Faces, and AI
-
-Embeddings are versioned analysis artifacts. A first implementation may store vectors compactly in SQLite, likely as float32 BLOB data, and calculate similarity in Java. This storage choice is not final. No vector database or SQLite vector extension is selected; specialized vector search should be considered only if demonstrated scale requires it.
-
-Face processing conceptually separates face detection, a detected face instance, a versioned face embedding, and later human organization into a person/group identity. Analyzer output (“a face was detected here”) must remain distinct from a user's classification (“these faces are the same person”). The final person schema is not designed.
-
-AI analysis follows the same provenance and versioning rules. Local and cloud providers can coexist, AI remains optional and supplementary, and the rest of the catalog must not depend directly on a particular provider. Provider interfaces and runtime architecture are not designed yet.
+Face analyzer output, detected face instances, and embeddings remain conceptually separate from later human person or group classification. AI analysis follows the same provenance and versioning rules: it is optional and provider-independent, and local and cloud providers may coexist without making the rest of the catalog depend on one provider. Face/person schemas, AI result schemas, provider interfaces, and runtime architecture remain undecided.
 
 ## Matching and Scale
 
-The architecture should support thousands, tens of thousands, and potentially hundreds of thousands of files without speculative distributed infrastructure. Implementation should stream filesystem traversal, batch database work, use indexed SQLite queries, avoid retaining an entire drive listing in memory unnecessarily, and defer expensive work to selected/supported media that needs it.
+The design targets thousands, tens of thousands, and potentially hundreds of thousands of files. Implementations should stream Java NIO traversal, use bounded database batches and indexed queries, avoid loading complete drive listings into memory, and avoid expensive work for files that do not need it.
 
-Matching must not perform full pairwise comparison across a large catalog. It will use cheap candidate generation, persist or otherwise durably manage plausible candidates, and perform deeper comparison only for those candidates. Pending candidate work must be resumable. Candidate algorithms and persistence schema remain undecided.
+Matching uses cheap candidate generation followed by deeper comparison for plausible candidates. Full pairwise comparison is not a V1 strategy. Candidate persistence and matching algorithms remain open, while pending work must eventually support durable resume.
 
-## Derived-Data Storage
-
-SQLite will hold the catalog, compact metadata, hashes/fingerprints, vectors, classifications, provenance, and relationships. Large derived files such as thumbnails, preview media, extracted frames, and large intermediates should live in a future application-managed cache rather than as large SQLite BLOBs.
-
-Platform-specific application-data and cache locations for macOS and Windows are not decided.
-
-## Current Conceptual Relationship View
+## Broader Conceptual Relationship View
 
 ```text
 Source -> FileEntry -> ContentRecord -> AnalysisRecord -> specialized results
@@ -159,11 +107,11 @@ WorkingSet -> ContentRecord membership
 ScanRun -> Job -> stages/checkpoints
 ```
 
-This diagram describes conceptual ownership and relationships, not tables, foreign keys, packages, or final cardinalities.
+This shows long-term conceptual ownership and relationships, not only the V1 tables, foreign keys, packages, or final cardinalities. Of specialized analysis-result structures, only `content_hash` is part of the reviewed V1 schema.
 
 ## Current Development Request Flow
 
-The implemented local development request flow remains:
+The implemented local development flow is:
 
 ```text
 React application on Vite :5173
@@ -173,35 +121,36 @@ Vite development proxy
     -> SQLite at backend/data/media-compare.db
 ```
 
-The frontend health request has been successfully exercised through this route.
+REST remains the API direction. SSE is planned for later server-to-client live/progress updates; endpoint, event, and recovery design remain open.
 
-## Cross-Platform Requirement
+## SQLite and Cross-Platform Requirements
 
-The application must support both macOS and Windows. Filesystem work should use Java NIO and must not hard-code platform-specific paths or assumptions.
+SQLite remains the single local catalog database. Spring JDBC and Flyway provide persistence access and migration ownership. SQL should enforce structural invariants such as nullability, foreign keys, uniqueness, numeric ranges, and valid nanosecond values. Evolving status and type values should initially be validated in Java rather than rigid SQLite membership checks.
 
-Future FFmpeg/ffprobe integration must not assume `/opt/homebrew/bin/ffmpeg`, `/opt/homebrew/bin/ffprobe`, or any other fixed executable location. Executable discovery/configuration must work across macOS and Windows; its strategy remains undecided.
+Foreign-key enforcement is enabled through the SQLite JDBC URL's `foreign_keys=on` connection property, so every physical connection receives the setting. Tests verify the PRAGMA on separate simultaneous pooled connections and verify rejection of an invalid reference. Database transactions should be short; filesystem traversal, hashing, FFmpeg calls, and analysis should occur outside write transactions. WAL remains deferred until sustained concurrent reads and analysis writes provide a measured reason to evaluate it.
+
+macOS and Windows are both required. Filesystem handling uses Java NIO and must not assume one separator, drive-letter model, case behavior, Unicode normalization, symlink policy, or mount identity. Future FFmpeg/ffprobe integration must not assume `/opt/homebrew/bin/ffmpeg`, `/opt/homebrew/bin/ffprobe`, or any fixed executable path.
+
+## Undecided Areas
+
+The following remain open after the V1 review:
+
+- Concrete status, request-type, classification, and stage values.
+- Source remount/relocation recognition and filesystem volume hints.
+- Final symlink and Windows junction traversal behavior.
+- Detailed path equivalence beyond the V1 lossless key policy.
+- ContentRecord reconciliation/merge behavior.
+- Job scheduling, concurrency, cancellation, retries, and startup recovery.
+- Detailed scan scope representation and source-specific progress.
+- Specialized result schemas beyond `content_hash`.
+- Candidate, similarity, relationship, grouping, and manual override schemas.
+- Face/person schema and AI-provider architecture.
+- Application-managed cache locations and lifecycle.
+- FFmpeg/ffprobe discovery and process management.
+- Safeguards and workflow for eventual filesystem-modifying operations.
 
 ## Planned Product Capabilities
 
-The conceptual architecture is intended to support folders, unrelated folders, whole drives, persistent indexing, incremental/reconciliation scans, exact duplicate and transformed-copy detection, similar/related media, resumable analysis, manual organization overrides, optional face analysis, optional local/cloud AI, and later explicit and safeguarded filesystem modification.
+The architecture is intended to support folders, multiple unrelated folders, whole drives, persistent indexing, incremental/reconciliation scans, exact duplicate and transformed-copy detection, similar/related media, resumable analysis, manual grouping/classification overrides, optional face analysis, optional local/cloud AI, and later explicit safeguarded filesystem modification.
 
 None of these product capabilities is implemented by the current scaffold.
-
-## Undecided Architecture Areas
-
-The following remain open:
-
-- Concrete Java package boundaries and frontend module boundaries.
-- Concrete SQLite tables, columns, constraints, indexes, and migrations.
-- Exact enums and API representations for classifications, run modes, job states, and stages.
-- Source relocation/offline detection details and use of platform-specific hints.
-- ContentRecord reconciliation rules and transactional behavior.
-- Candidate-generation, similarity, grouping, and transformed-copy algorithms.
-- Job scheduling, concurrency, cancellation, retry, and SSE event design.
-- WorkingSet membership/history semantics beyond the confirmed conceptual behavior.
-- Exact analysis-result schemas and storage encodings, including embeddings.
-- Face/person schema and classification workflow.
-- AI-provider interfaces and configuration.
-- Cross-platform FFmpeg/ffprobe discovery and process management.
-- Application-managed cache locations and lifecycle on macOS and Windows.
-- Safeguards and workflow for eventual filesystem-modifying operations.
