@@ -22,6 +22,8 @@ Implemented fields:
 
 Source has a durable database identity. `root_path` and `root_path_key` are location/configuration data, not Source identity. `root_path_key` is an application lookup aid; neither path field is unique. Matching a path or path key must not automatically establish that a previously registered Source is the same Source that has returned. Relocation and remount recognition are deferred. Platform-specific volume or filesystem identifiers may later assist as optional hints only; they cannot be required cross-platform identity.
 
+Initial Source registration sets `root_path_key` equal to the supplied `root_path`. The registration service preserves that supplied string and uses `Path.of(...)` only to require host-platform syntax and an absolute path. It does not require the path to exist or be a directory and does not perform filesystem canonicalization, case conversion, Unicode normalization, symlink resolution, or `toRealPath()`. Duplicate names, root paths, and root-path keys are intentionally allowed; each registration receives a distinct database identity.
+
 ### `content_record`
 
 Implemented fields:
@@ -244,7 +246,7 @@ Immutable records representing all eleven table row shapes and concrete Spring J
 - `job`
 - `analysis`
 
-`CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` provide focused insert and read operations. They use `JdbcTemplate` directly without a generic repository superclass or ORM. `catalog` does not depend on the job runner, `job` remains generic, and `analysis` owns reusable analysis and provenance. The reviewed `web` boundary remains reserved for thin HTTP/SSE endpoints; no product controller was added.
+`CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` provide focused insert and read operations. They use `JdbcTemplate` directly without a generic repository superclass or ORM. `CatalogRepository` includes Source lookup by ID and deterministic ID-ordered Source listing for the registration/read API. `catalog` does not depend on the job runner, `job` remains generic, and `analysis` owns reusable analysis and provenance. The `web` boundary contains the thin Source REST controller; later HTTP/SSE endpoints remain deferred.
 
 ## Explicitly Deferred
 

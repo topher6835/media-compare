@@ -8,9 +8,10 @@ The repository currently contains a working full-stack scaffold:
 - A Spring Boot REST backend in `backend/`.
 - One local SQLite database configured through Spring JDBC and Flyway.
 - `GET /api/health`, returning plain text `ok`.
+- REST endpoints to register and read Sources under `/api/sources`.
 - A frontend `/` route that requests and displays the health result.
 
-The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven V1 application tables, structural constraints, foreign keys, and initial indexes. Simple immutable records and Spring JDBC repositories provide insert/read access under the `catalog`, `scan`, `job`, and `analysis` feature packages. Scanning, hashing, reconciliation execution, job execution, analysis execution, matching, AI, and product behavior do not exist yet.
+The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven V1 application tables, structural constraints, foreign keys, and initial indexes. Simple immutable records and Spring JDBC repositories provide insert/read access under the `catalog`, `scan`, `job`, and `analysis` feature packages. Scanning, hashing, reconciliation execution, job execution, analysis execution, matching, AI, and broader product workflows do not exist yet.
 
 ## Architectural Style
 
@@ -51,13 +52,15 @@ The initial Java package structure is:
 - `analysis` — AnalysisRecord and reusable specialized analysis artifacts.
 - `web` — thin REST controllers and later HTTP/SSE endpoints.
 
-The persistence foundation uses one concrete Spring JDBC repository per feature package: `CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository`. The boundaries remain simple. `catalog` does not depend on the job runner; `job` remains generic; `analysis` owns analysis provenance; and the existing health controller remains the only web behavior. No generic repository framework, automatic interface/implementation pairs, or enterprise layering was introduced.
+The persistence foundation uses one concrete Spring JDBC repository per feature package: `CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository`. The boundaries remain simple. `catalog` does not depend on the job runner; `job` remains generic; and `analysis` owns analysis provenance. `SourceController` is a thin HTTP boundary over the small catalog `SourceService`, while `HealthController` remains unchanged. No generic repository framework, automatic interface/implementation pairs, or enterprise layering was introduced.
 
 ## Catalog and Identity
 
 The catalog represents files generally, including images, video, audio, documents, archives, and miscellaneous or unknown files. Cheap filesystem/catalog processing can apply broadly; expensive analysis applies only to selected and supported media.
 
 A `Source` is a persistent registered scan root such as a folder, external drive, whole drive, or other filesystem root. It has a durable database identity. `root_path` and `root_path_key` are location/configuration data, not identity; `root_path_key` is an application lookup aid, and neither field is unique. A matching path or path key must not automatically establish that a previously registered Source is the same Source that has returned. `location_revision` records changes to the configured location. Source relocation and remount recognition remain later concerns. Platform-specific volume, filesystem, file-ID, or inode information may later assist as optional hints only and can never be required cross-platform identity.
+
+The initial Source registration behavior preserves the supplied root-path string and writes the same value to `root_path_key`. It uses Java NIO only to check that the path is syntactically valid and absolute for the backend host. Registration does not inspect filesystem availability, require the path to exist or be a directory, resolve symlinks, or canonicalize the path. Duplicate names and root paths are allowed because database ID, not path, establishes Source identity.
 
 A `FileEntry` represents one filesystem occurrence within a Source. It stores a Source-relative path, filesystem metadata, current content association, presence, first/last-seen information, observation revision, and the scan traversal that last observed it. The uniqueness rule is `UNIQUE(source_id, path_key)`.
 
@@ -122,6 +125,18 @@ Vite development proxy
 ```
 
 REST remains the API direction. SSE is planned for later server-to-client live/progress updates; endpoint, event, and recovery design remain open.
+
+The implemented Source vertical slice is:
+
+```text
+POST/GET /api/sources
+    -> SourceController
+    -> SourceService
+    -> CatalogRepository
+    -> SQLite
+```
+
+The API can register a Source, list Sources in database-ID order, and retrieve one Source by ID. It does not yet update, delete, relocate, check availability, scan, or reconcile Sources.
 
 ## SQLite and Cross-Platform Requirements
 

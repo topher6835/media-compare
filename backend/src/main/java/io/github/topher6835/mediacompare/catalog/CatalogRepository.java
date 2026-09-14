@@ -4,6 +4,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -44,14 +45,13 @@ public class CatalogRepository {
     }
 
     public Optional<Source> findSourceById(long id) {
-        return jdbcTemplate.query("SELECT * FROM source WHERE id = ?", (resultSet, rowNumber) -> new Source(
-                resultSet.getLong("id"),
-                resultSet.getString("name"),
-                resultSet.getString("root_path"),
-                resultSet.getString("root_path_key"),
-                resultSet.getLong("location_revision"),
-                resultSet.getLong("created_at_ms"),
-                resultSet.getLong("updated_at_ms")), id).stream().findFirst();
+        return jdbcTemplate.query("SELECT * FROM source WHERE id = ?", CatalogRepository::mapSource, id)
+                .stream()
+                .findFirst();
+    }
+
+    public List<Source> findAllSources() {
+        return jdbcTemplate.query("SELECT * FROM source ORDER BY id", CatalogRepository::mapSource);
     }
 
     public ContentRecord insert(ContentRecord contentRecord) {
@@ -196,6 +196,17 @@ public class CatalogRepository {
 
     private static long generatedId(GeneratedKeyHolder keyHolder) {
         return Objects.requireNonNull(keyHolder.getKey(), "Database did not return a generated key").longValue();
+    }
+
+    private static Source mapSource(ResultSet resultSet, int rowNumber) throws SQLException {
+        return new Source(
+                resultSet.getLong("id"),
+                resultSet.getString("name"),
+                resultSet.getString("root_path"),
+                resultSet.getString("root_path_key"),
+                resultSet.getLong("location_revision"),
+                resultSet.getLong("created_at_ms"),
+                resultSet.getLong("updated_at_ms"));
     }
 
     private static Long nullableLong(ResultSet resultSet, String columnName) throws SQLException {

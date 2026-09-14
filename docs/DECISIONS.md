@@ -77,6 +77,15 @@ The preferred initial feature-oriented boundaries are:
 
 The initial persistence implementation uses immutable Java records for row-shaped domain data and one focused concrete Spring JDBC repository per feature package. SQLite foreign keys are enabled on every physical connection with the JDBC URL's `foreign_keys=on` property. No ORM, generic repository framework, or new dependency was added.
 
+## Initial Source Registration API
+
+- Expose Source registration and reads through `POST /api/sources`, `GET /api/sources`, and `GET /api/sources/{id}`.
+- Keep the HTTP controller thin and place registration validation and initial state construction in a small catalog `SourceService` backed by `CatalogRepository`.
+- Source database ID is identity. Duplicate names, root paths, and root-path keys are intentionally allowed; registration does not reuse a Source based on its configured path.
+- Initially set `root_path_key` to the supplied `root_path` and exclude it from the public REST response.
+- Validate only that the supplied root path is nonblank, syntactically valid, and absolute for the backend host. Preserve the supplied string and do not require filesystem availability, canonicalize it, resolve symlinks, or call `toRealPath()`.
+- Source update, deletion, relocation, remount recognition, availability checks, and traversal remain deferred.
+
 ## Development
 
 - Favor readable, conventional, learnable code over clever abstractions.
