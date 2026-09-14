@@ -4,6 +4,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -88,23 +89,35 @@ public class ScanRepository {
     }
 
     public Optional<ScanRunSource> findScanRunSourceById(long id) {
-        return jdbcTemplate.query("SELECT * FROM scan_run_source WHERE id = ?",
-                (resultSet, rowNumber) -> new ScanRunSource(
-                        resultSet.getLong("id"),
-                        resultSet.getLong("scan_run_id"),
-                        resultSet.getLong("source_id"),
-                        resultSet.getString("status"),
-                        resultSet.getLong("source_location_revision"),
-                        resultSet.getLong("traversal_generation"),
-                        nullableLong(resultSet, "completed_generation"),
-                        nullableLong(resultSet, "started_at_ms"),
-                        nullableLong(resultSet, "completed_at_ms"),
-                        resultSet.getString("error_message")),
-                id).stream().findFirst();
+        return jdbcTemplate.query("SELECT * FROM scan_run_source WHERE id = ?", ScanRepository::mapScanRunSource, id)
+                .stream()
+                .findFirst();
+    }
+
+    public List<ScanRunSource> findScanRunSourcesByScanRunId(long scanRunId) {
+        return jdbcTemplate.query("""
+                SELECT * FROM scan_run_source
+                WHERE scan_run_id = ?
+                ORDER BY source_id
+                """, ScanRepository::mapScanRunSource, scanRunId);
     }
 
     private static long generatedId(GeneratedKeyHolder keyHolder) {
         return Objects.requireNonNull(keyHolder.getKey(), "Database did not return a generated key").longValue();
+    }
+
+    private static ScanRunSource mapScanRunSource(ResultSet resultSet, int rowNumber) throws SQLException {
+        return new ScanRunSource(
+                resultSet.getLong("id"),
+                resultSet.getLong("scan_run_id"),
+                resultSet.getLong("source_id"),
+                resultSet.getString("status"),
+                resultSet.getLong("source_location_revision"),
+                resultSet.getLong("traversal_generation"),
+                nullableLong(resultSet, "completed_generation"),
+                nullableLong(resultSet, "started_at_ms"),
+                nullableLong(resultSet, "completed_at_ms"),
+                resultSet.getString("error_message"));
     }
 
     private static Long nullableLong(ResultSet resultSet, String columnName) throws SQLException {

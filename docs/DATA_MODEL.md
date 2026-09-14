@@ -95,7 +95,7 @@ Implemented fields:
 - `finished_at_ms INTEGER NULL`
 - `error_message TEXT NULL`
 
-ScanRun records user intent. Options become immutable once execution begins. Exact lifecycle and request-type values remain implementation details.
+ScanRun records user intent. The initial scan-request API creates Source-based requests with `request_type = INDEX`, `status = PENDING`, `working_set_id = NULL`, `options_version = 1`, `options_json = {}`, and null execution timestamps/error. Options become immutable once execution begins. Additional lifecycle and request-type values remain implementation details.
 
 ### `scan_run_source`
 
@@ -113,6 +113,8 @@ Implemented fields:
 - `error_message TEXT NULL`
 
 The uniqueness rule is `UNIQUE(scan_run_id, source_id)`.
+
+Initial request creation writes one row for each selected Source with `status = PENDING`, the Source's current `location_revision` snapshot, `traversal_generation = 0`, and null completion, execution timestamps, and error. All requested Sources are validated before insertion, and the parent ScanRun plus all ScanRunSource rows are committed atomically. Reads order these rows by ascending `source_id`. Creating these records does not create a Job or begin traversal.
 
 Each traversal from a Source root receives a fresh positive generation. A traversal restarted after interruption receives a new generation, so `traversal_generation` may be greater than the last `completed_generation` while newer work is in progress. A completed generation is positive and cannot exceed the current traversal generation. V1 allows only one active reconciliation traversal per Source initially. A missing-file sweep is authorized only after a complete successful traversal of the intended scope. Cancellation, inaccessible directories, offline Sources, and incomplete traversal must not mark previous entries missing. The missing update and completed-generation state are committed together. Discovery may restart after shutdown; directory-level traversal checkpoints are deferred.
 
@@ -246,7 +248,7 @@ Immutable records representing all eleven table row shapes and concrete Spring J
 - `job`
 - `analysis`
 
-`CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` provide focused insert and read operations. They use `JdbcTemplate` directly without a generic repository superclass or ORM. `CatalogRepository` includes Source lookup by ID and deterministic ID-ordered Source listing for the registration/read API. `catalog` does not depend on the job runner, `job` remains generic, and `analysis` owns reusable analysis and provenance. The `web` boundary contains the thin Source REST controller; later HTTP/SSE endpoints remain deferred.
+`CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` provide focused insert and read operations. They use `JdbcTemplate` directly without a generic repository superclass or ORM. `CatalogRepository` includes Source lookup by ID and deterministic ID-ordered Source listing. `ScanRepository` includes ScanRun lookup and Source-ID-ordered child lookup. `catalog` does not depend on the job runner, `job` remains generic, and `analysis` owns reusable analysis and provenance. The `web` boundary contains thin Source and ScanRun REST controllers; later HTTP/SSE endpoints remain deferred.
 
 ## Explicitly Deferred
 

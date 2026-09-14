@@ -2,11 +2,11 @@
 
 ## Current State
 
-Media Compare is a fresh v2 repository with a working full-stack scaffold. The repository contains separate `backend/` and `frontend/` projects. The first catalog behavior now registers and reads Sources through REST, but no search, scanning, media-analysis, comparison, cleanup, or other product workflow has been implemented.
+Media Compare is a fresh v2 repository with a working full-stack scaffold. The repository contains separate `backend/` and `frontend/` projects. The backend can register/read Sources and create/read durable Source-based scan requests through REST. Scan requests currently record intent only; no search, filesystem scanning, media analysis, comparison, cleanup, or execution workflow has been implemented.
 
-The backend is a Java 21 and Spring Boot 4.1.1 Maven application. It connects to a local SQLite database, starts Flyway, exposes `GET /api/health`, and provides Source registration/read endpoints under `/api/sources`. The frontend is a React and TypeScript Vite application with React Router; its `/` route requests the backend health endpoint through the Vite proxy. No Source-management frontend exists.
+The backend is a Java 21 and Spring Boot 4.1.1 Maven application. It connects to a local SQLite database, starts Flyway, exposes `GET /api/health`, provides Source registration/read endpoints under `/api/sources`, and provides scan-request creation/read endpoints under `/api/scan-runs`. The frontend is a React and TypeScript Vite application with React Router; its `/` route requests the backend health endpoint through the Vite proxy. No Source or ScanRun frontend exists.
 
-The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven application tables with their structural constraints, foreign keys, and initial indexes. Immutable Java records and focused Spring JDBC repositories provide basic insert/read persistence under the reviewed `catalog`, `scan`, `job`, and `analysis` packages. `SourceController` delegates registration/read behavior to `SourceService`, which validates registration input, builds initial Source state, and uses `CatalogRepository`. Scanning, hashing, reconciliation execution, job execution, analysis execution, matching, AI, and filesystem operations remain unimplemented.
+The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven application tables with their structural constraints, foreign keys, and initial indexes. Immutable Java records and focused Spring JDBC repositories provide basic insert/read persistence under the reviewed feature packages. `SourceService` owns Source registration/read behavior. `ScanRunService` validates registered Source IDs, snapshots their location revisions, and atomically creates a pending ScanRun with its pending ScanRunSource rows. Scanning, hashing, reconciliation execution, Job creation/execution, analysis execution, matching, AI, and filesystem operations remain unimplemented.
 
 ## Documentation
 
@@ -38,18 +38,25 @@ The durable documentation baseline is:
 - `GET /api/sources` returns Sources in ascending database-ID order, including an empty JSON array when none exist.
 - `GET /api/sources/{id}` returns one Source or HTTP 404.
 - Source API integration tests cover persistence, public representations, validation, duplicate registration semantics, ordering, missing IDs, and non-existent absolute paths using platform-safe temporary paths.
+- `POST /api/scan-runs` creates an `INDEX` request for one or more registered Sources and returns HTTP 201 with a resource `Location`.
+- New ScanRuns are `PENDING` with options version 1 and `{}` effective options; each selected Source is `PENDING`, snapshots its current location revision, and begins with traversal generation zero and no completion/execution state.
+- ScanRun creation validates every Source before insertion and commits the parent and all child rows atomically. Missing Sources return HTTP 404 without partial persistence; malformed lists return HTTP 400.
+- `GET /api/scan-runs/{id}` returns the durable request with Source rows ordered by ascending Source ID, or HTTP 404.
+- ScanRun creation records intent only and creates no Job.
+- ScanRun API integration tests cover initial internal/public state, one and multiple Sources, revision snapshots, deterministic ordering, validation and missing IDs, atomic no-write failure, no Job creation, and repeated requests.
 - The frontend production build succeeds.
 - React Router is wired through `BrowserRouter` and a `/` route.
 - The Vite development server starts on port `5173`.
 - Vite proxies `/api` to `http://localhost:8080`.
 - A request to `/api/health` through Vite reaches the backend and returns `ok`.
 - The frontend renders the health request result.
-- The V1 persistence foundation is committed on `main`; local `main` and `origin/main` point to `22bb5c0` (`Implement V1 persistence foundation`). The Source API increment is currently uncommitted.
+- The Source registration/read API is committed on `main`; local `main` and `origin/main` point to `981b204` (`Add Source registration and read API`). The ScanRun API increment is currently uncommitted.
 - Git origin uses `git@github-personal:topher6835/media-compare.git`, with repository-local identity configured for `topher6835`.
 
 ## Known Limitations / Not Yet Implemented
 
 - No Source update, deletion, relocation/remount recognition, availability checking, reconciliation, or cross-platform filesystem traversal workflow exists.
+- No ScanRun list, status mutation, cancellation, retry, WorkingSet request, custom options, Job handoff, scheduling, or execution behavior exists.
 - No exact hashing, content reconciliation, media metadata, fingerprints, embeddings, face analysis, or AI integration exists.
 - No durable Job execution, stage checkpointing, pause/resume, or progress delivery exists.
 - No SSE endpoint or event design exists.
@@ -59,4 +66,4 @@ The durable documentation baseline is:
 
 ## Next Recommended Step
 
-Review the Source registration/read API as a completed vertical slice. The next deliberate increment should define the first scan-request lifecycle and API behavior before implementing filesystem traversal or reconciliation execution.
+Review the durable ScanRun creation/read API as a completed intent-recording slice. The next deliberate increment should define the initial durable Job/stage execution handoff before implementing filesystem traversal or reconciliation execution.

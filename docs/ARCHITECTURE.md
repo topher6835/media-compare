@@ -9,9 +9,10 @@ The repository currently contains a working full-stack scaffold:
 - One local SQLite database configured through Spring JDBC and Flyway.
 - `GET /api/health`, returning plain text `ok`.
 - REST endpoints to register and read Sources under `/api/sources`.
+- REST endpoints to create and read durable scan requests under `/api/scan-runs`.
 - A frontend `/` route that requests and displays the health result.
 
-The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven V1 application tables, structural constraints, foreign keys, and initial indexes. Simple immutable records and Spring JDBC repositories provide insert/read access under the `catalog`, `scan`, `job`, and `analysis` feature packages. Scanning, hashing, reconciliation execution, job execution, analysis execution, matching, AI, and broader product workflows do not exist yet.
+The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven V1 application tables, structural constraints, foreign keys, and initial indexes. Simple immutable records and Spring JDBC repositories provide insert/read access under the `catalog`, `scan`, `job`, and `analysis` feature packages. Source registration/read and durable scan-request creation/read are implemented. Filesystem scanning, hashing, reconciliation execution, job execution, analysis execution, matching, AI, and broader product workflows do not exist yet.
 
 ## Architectural Style
 
@@ -52,7 +53,7 @@ The initial Java package structure is:
 - `analysis` — AnalysisRecord and reusable specialized analysis artifacts.
 - `web` — thin REST controllers and later HTTP/SSE endpoints.
 
-The persistence foundation uses one concrete Spring JDBC repository per feature package: `CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository`. The boundaries remain simple. `catalog` does not depend on the job runner; `job` remains generic; and `analysis` owns analysis provenance. `SourceController` is a thin HTTP boundary over the small catalog `SourceService`, while `HealthController` remains unchanged. No generic repository framework, automatic interface/implementation pairs, or enterprise layering was introduced.
+The persistence foundation uses one concrete Spring JDBC repository per feature package: `CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository`. The boundaries remain simple. `catalog` does not depend on the job runner; `job` remains generic; and `analysis` owns analysis provenance. `SourceController` and `ScanRunController` are thin HTTP boundaries over small feature services, while `HealthController` remains unchanged. No generic repository framework, automatic interface/implementation pairs, or enterprise layering was introduced.
 
 ## Catalog and Identity
 
@@ -76,7 +77,9 @@ Revisiting a Source performs lightweight discovery and reconciliation before exp
 
 `observation_revision` allows future workers to reject stale publication after a FileEntry may have changed. Discovery may restart after application shutdown; fragile filesystem iterator cursors are not persisted. Directory-level traversal checkpoints remain deferred.
 
-`ScanRun` records user intent, selected Sources or WorkingSet, request type, options, and lifecycle. Its options become immutable when execution begins. `Job` is the durable execution authority and may execute scans, analysis, filesystem actions, exports, or other long-running work. `JobStage` is an aggregate checkpoint for one stage type within a Job, with `UNIQUE(job_id, stage_type)`; retries and resume update that row. Exact status and stage values remain implementation details.
+`ScanRun` records user intent, selected Sources or WorkingSet, request type, options, and lifecycle. Its options become immutable when execution begins. The first implemented request creation accepts one or more registered Source IDs and atomically writes one ScanRun plus its ScanRunSource rows. It uses request type `INDEX`, initial status `PENDING`, options version `1`, and effective options `{}`. Each child begins `PENDING`, snapshots the Source's current location revision, and has traversal generation `0` with no completion or execution state. Child responses are ordered by Source ID.
+
+`Job` is the durable execution authority and may later execute scans, analysis, filesystem actions, exports, or other long-running work. Creating a ScanRun currently records intent only and creates no Job. `JobStage` is an aggregate checkpoint for one stage type within a Job, with `UNIQUE(job_id, stage_type)`; retries and resume update that row. Additional lifecycle values and execution behavior remain implementation details.
 
 Pause/resume is database-driven and must survive full application shutdown. Work is processed in small batches, with completed analysis reused and incomplete work found from durable state. Detailed scheduling, cancellation, startup recovery, and stage-instance history remain open.
 
@@ -138,6 +141,18 @@ POST/GET /api/sources
 
 The API can register a Source, list Sources in database-ID order, and retrieve one Source by ID. It does not yet update, delete, relocate, check availability, scan, or reconcile Sources.
 
+The implemented scan-request vertical slice is:
+
+```text
+POST/GET /api/scan-runs
+    -> ScanRunController
+    -> ScanRunService
+    -> CatalogRepository + ScanRepository
+    -> SQLite scan_run + scan_run_source
+```
+
+Creation validates every selected Source before persistence, then atomically records the ScanRun and Source-location-revision snapshots. It does not access the filesystem, create a Job, or begin execution. Only get-by-ID is implemented; there is no ScanRun list endpoint yet.
+
 ## SQLite and Cross-Platform Requirements
 
 SQLite remains the single local catalog database. Spring JDBC and Flyway provide persistence access and migration ownership. SQL should enforce structural invariants such as nullability, foreign keys, uniqueness, numeric ranges, and valid nanosecond values. Evolving status and type values should initially be validated in Java rather than rigid SQLite membership checks.
@@ -150,7 +165,7 @@ macOS and Windows are both required. Filesystem handling uses Java NIO and must 
 
 The following remain open after the V1 review:
 
-- Concrete status, request-type, classification, and stage values.
+- Additional status, request-type, classification, and stage values beyond the initial ScanRun `INDEX`/`PENDING` creation state.
 - Source remount/relocation recognition and filesystem volume hints.
 - Final symlink and Windows junction traversal behavior.
 - Detailed path equivalence beyond the V1 lossless key policy.

@@ -1,6 +1,6 @@
 # Media Compare
 
-Media Compare is an early-stage application for media comparison workflows. The repository contains a working full-stack scaffold, the first SQLite persistence foundation, and a small REST API for registering and reading scan Sources. Scanning and comparison workflows have not yet been implemented.
+Media Compare is an early-stage application for media comparison workflows. The repository contains a working full-stack scaffold, the first SQLite persistence foundation, REST APIs for Sources, and durable scan-request creation. Filesystem scanning and comparison workflows have not yet been implemented.
 
 ## Stack
 
@@ -51,10 +51,11 @@ During development:
 - Backend: `http://localhost:8080`
 - Health endpoint: `http://localhost:8080/api/health`
 - Source endpoints: `http://localhost:8080/api/sources`
+- Scan-request endpoints: `http://localhost:8080/api/scan-runs`
 - The Vite development server proxies `/api` requests to the backend.
 
 The SQLite database is created locally at `backend/data/media-compare.db` when the backend is run from `backend/`. Local database files are ignored by Git and are not committed.
 
 ## Status
 
-The baseline frontend/backend connection, V1 persistence foundation, and Source registration/read API are working, but filesystem scanning and Media Compare search/comparison functionality have not started. See [`docs/STATUS.md`](docs/STATUS.md) for the current handoff state.
+The baseline frontend/backend connection, V1 persistence foundation, Source API, and durable scan-request API are working. Creating a scan request records intent only; it does not yet start a Job or access the filesystem. See [`docs/STATUS.md`](docs/STATUS.md) for the current handoff state.

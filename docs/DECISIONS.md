@@ -86,6 +86,15 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Validate only that the supplied root path is nonblank, syntactically valid, and absolute for the backend host. Preserve the supplied string and do not require filesystem availability, canonicalize it, resolve symlinks, or call `toRealPath()`.
 - Source update, deletion, relocation, remount recognition, availability checks, and traversal remain deferred.
 
+## Initial Scan Request API
+
+- Expose Source-based scan-request creation through `POST /api/scan-runs` and get-by-ID through `GET /api/scan-runs/{id}`; a list endpoint remains deferred.
+- The first implemented request type is `INDEX`. A new ScanRun uses status `PENDING`, options version `1`, effective options `{}`, no WorkingSet, and no execution timestamps or error.
+- Each selected Source receives a `PENDING` ScanRunSource that snapshots its current `location_revision`, begins at traversal generation `0`, and has no completed generation, execution timestamps, or error.
+- Validate all distinct positive Source IDs and confirm every Source exists before inserting any request row. Create the ScanRun and all ScanRunSource rows in one transaction.
+- Return ScanRunSource rows in ascending Source-ID order rather than promising request-array order.
+- ScanRun creation records durable user intent only. It does not create a Job, access the filesystem, or begin execution.
+
 ## Development
 
 - Favor readable, conventional, learnable code over clever abstractions.
