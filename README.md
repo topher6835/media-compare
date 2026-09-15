@@ -1,6 +1,6 @@
 # Media Compare
 
-Media Compare is an early-stage application for media comparison workflows. The repository contains a working full-stack scaffold, the first SQLite persistence foundation, REST APIs for Sources and scan requests, a durable ScanRun-to-Job handoff, and synchronous DISCOVERY and RECONCILIATION execution. Content assignment and comparison workflows have not yet been implemented.
+Media Compare is an early-stage application for media comparison workflows. The repository contains a working full-stack scaffold, the first SQLite persistence foundation, REST APIs for Sources and scan requests, a durable ScanRun-to-Job handoff, synchronous DISCOVERY and RECONCILIATION execution, and a database-only ContentRecord-assignment pass. Hashing and comparison workflows have not yet been implemented.
 
 ## Stack
 
@@ -54,10 +54,11 @@ During development:
 - Scan-request endpoints: `http://localhost:8080/api/scan-runs`
 - Scan discovery endpoint: `POST http://localhost:8080/api/scan-runs/{id}/execution/discovery`
 - Scan reconciliation endpoint: `POST http://localhost:8080/api/scan-runs/{id}/execution/reconciliation`
+- Content assignment endpoint: `POST http://localhost:8080/api/scan-runs/{id}/content-assignment`
 - The Vite development server proxies `/api` requests to the backend.
 
 The SQLite database is created locally at `backend/data/media-compare.db` when the backend is run from `backend/`. Local database files are ignored by Git and are not committed.
 
 ## Status
 
-The baseline frontend/backend connection, V1 persistence foundation, Source API, scan-request API, durable execution-state handoff, and manually invoked DISCOVERY and RECONCILIATION stages are working. Discovery observes regular files; reconciliation consumes those durable observations, safely marks unseen occurrences missing, and completes the ScanRun. Neither stage hashes or assigns content. See [`docs/STATUS.md`](docs/STATUS.md) for the current handoff state.
+The baseline frontend/backend connection, V1 persistence foundation, Source API, scan-request API, durable execution-state handoff, and manually invoked DISCOVERY and RECONCILIATION stages are working. Discovery observes regular files; reconciliation consumes those durable observations, safely marks unseen occurrences missing, and completes the ScanRun. A repeatable database-only command can then assign one new ContentRecord to each still-unassigned occurrence observed by that completed scan. It does not hash files or infer equality between records. See [`docs/STATUS.md`](docs/STATUS.md) for the current handoff state.

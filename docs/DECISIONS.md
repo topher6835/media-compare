@@ -129,7 +129,18 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Commit each Source's missing sweep, `COMPLETED` transition, completed generation/timestamp, and Source-based Job/stage progress together. Never publish a completed generation separately from its sweep.
 - Job progress mirrors the current stage. Reset it from DISCOVERY file units to zero out of the Source count when RECONCILIATION starts, without incrementing the Job attempt count again.
 - Successful RECONCILIATION completes every Source, the stage, Job, and ScanRun; clears the Job's current stage; and preserves the ScanRun's original start timestamp.
-- Defer generic persistence-failure recovery, content assignment, hashing, analysis, background scheduling, and live progress delivery.
+- Defer generic persistence-failure recovery, hashing, analysis, background scheduling, and live progress delivery.
+
+## Initial ContentRecord Assignment
+
+- Expose synchronous assignment through `POST /api/scan-runs/{id}/content-assignment`, returning assigned and stale-skipped counts. Make repeat calls resumable and idempotent through durable FileEntry state.
+- Require a completed ScanRun and SCAN Job, completed DISCOVERY and RECONCILIATION stages, and completed current traversal generation for every ScanRunSource before selecting candidates. Missing ScanRuns or SCAN handoffs return 404; unsafe lifecycle state returns 409 without mutation.
+- Operate only from durable catalog state. Do not access Source roots, inspect current Source configuration, or require current location revisions.
+- Select only `PRESENT`, content-null FileEntries belonging to the ScanRunSource and its exact completed traversal. Read minimal candidate snapshots in ascending-ID keyset pages of at most 250.
+- Create one distinct ContentRecord per eligible occurrence/version. Size, modification metadata, and even identical bytes do not establish shared identity in this phase; hashing, deduplication, and merge behavior remain deferred.
+- In one per-candidate transaction, insert the ContentRecord and conditionally attach it while presence, null content, observation revision, and size still match. Roll back the insert and count a skip when publication is stale, leaving no orphan ContentRecord. Do not require last-seen traversal identity in the publication guard, so a later unchanged observation remains safe to publish.
+- Preserve existing `current_content_id` across unchanged scans and skip already-assigned entries without creating another record.
+- Do not reopen or mutate the completed SCAN Job and do not create any Job or JobStage for assignment.
 
 ## Development
 

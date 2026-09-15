@@ -2,7 +2,7 @@
 
 ## Status and Scope
 
-The reviewed V1 persistence design is implemented by Flyway migration `V1__create_core_schema.sql`. The application now has the eleven V1 tables, their structural constraints and initial indexes, immutable Java record representations, and small Spring JDBC repositories. The existing schema supports the implemented DISCOVERY and RECONCILIATION lifecycle without another migration.
+The reviewed V1 persistence design is implemented by Flyway migration `V1__create_core_schema.sql`. The application now has the eleven V1 tables, their structural constraints and initial indexes, immutable Java record representations, and small Spring JDBC repositories. The existing schema supports the implemented DISCOVERY, RECONCILIATION, and ContentRecord-assignment behavior without another migration.
 
 The first migration contains exactly eleven application tables. The fields and constraints below describe the implemented schema.
 
@@ -32,7 +32,7 @@ Implemented fields:
 - `size_bytes INTEGER NOT NULL CHECK >= 0`
 - `created_at_ms INTEGER NOT NULL`
 
-A ContentRecord permanently represents one byte-version. Its identity is an internal ID rather than an exact hash. An established record is not mutated to represent replacement bytes. Temporary duplicate records are allowed until explicit reconciliation/merge behavior is designed. V1 has no canonical redirect or merge table.
+A ContentRecord permanently represents one byte-version. Its identity is an internal ID rather than an exact hash. An established record is not mutated to represent replacement bytes. Initial assignment creates one distinct record per eligible unassigned FileEntry occurrence/version, even when separate files have identical bytes and metadata. Exact hashing, equality detection, and merge behavior remain deferred; V1 has no canonical redirect or merge table.
 
 ### `file_entry`
 
@@ -60,6 +60,8 @@ A FileEntry represents a filesystem occurrence, not immutable content. Its occur
 Implemented discovery inserts a new observed occurrence as `PRESENT`, with no ContentRecord, observation revision zero, equal first/last-seen timestamps, and the current ScanRunSource/traversal generation. Re-observation always refreshes path spelling, presence, size, modification time, last-seen time, and traversal identity. A size change, modification-time change, or return from a non-`PRESENT` state increments the revision once and clears `current_content_id`; unchanged metadata preserves both revision and content association.
 
 Implemented reconciliation marks a currently `PRESENT` occurrence `MISSING` when it belongs to the Source being reconciled and its last-seen ScanRunSource/generation pair does not exactly match the completed traversal. Null last-seen fields count as not observed. This update changes only `presence_status`; it preserves `current_content_id`, observation revision, paths, size, modification time, first/last-seen timestamps, and traversal identity. Already-`MISSING` entries remain unchanged.
+
+Implemented ContentRecord assignment selects only `PRESENT`, content-null FileEntries whose last-seen ScanRunSource and generation exactly match a completed ScanRunSource traversal. Candidate reads use ascending FileEntry-ID keyset pages of at most 250 and carry only ID, observation revision, and size. ContentRecord insertion and publication to `current_content_id` share one transaction. The conditional publication requires unchanged presence, null content, observation revision, and size; a stale candidate rolls back the inserted record so no orphan remains. Last-seen traversal identity is intentionally not part of that publication guard, allowing a later unchanged observation of the same occurrence version. Existing content identity survives unchanged rescans, and repeating assignment creates no duplicate record.
 
 When `last_seen_scan_run_source_id` is non-null, the referenced ScanRunSource must have the same `source_id` as the FileEntry. In V1, `CatalogRepository` checks this invariant within the FileEntry insert transaction. The schema retains the direct foreign key and `ON DELETE SET NULL`; no composite foreign key or trigger is used.
 
@@ -262,7 +264,7 @@ Immutable records representing all eleven table row shapes and concrete Spring J
 - `job`
 - `analysis`
 
-`CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` provide focused insert, read, and workflow-specific update operations. They use `JdbcTemplate` directly without a generic repository superclass or ORM. `CatalogRepository` includes Source lookup/listing, FileEntry observation, and an explicit Source-scoped missing update. `ScanRepository` and `JobRepository` expose explicit lifecycle/progress updates used by scan orchestration. Dedicated Spring beans give discovery start/batches/finalization/failure, reconciliation start/finalization, and each Source's atomic missing-sweep/completed-generation boundary real transactions. Filesystem walking remains outside database transactions, and reconciliation performs no filesystem work. `catalog` does not depend on the job runner, `job` remains generic, and `analysis` owns reusable analysis and provenance.
+`CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` provide focused insert, read, and workflow-specific update operations. They use `JdbcTemplate` directly without a generic repository superclass or ORM. `CatalogRepository` includes Source lookup/listing, FileEntry observation, an explicit Source-scoped missing update, bounded ContentRecord-assignment candidate reads, and guarded publication. `ScanRepository` and `JobRepository` expose explicit lifecycle/progress updates used by scan orchestration. Dedicated Spring beans give discovery start/batches/finalization/failure, reconciliation start/finalization, each Source's atomic missing-sweep/completed-generation boundary, and each ContentRecord insert/FileEntry publication a real transaction. Filesystem walking remains outside database transactions; reconciliation and ContentRecord assignment perform no filesystem work. `catalog` does not depend on the job runner, `job` remains generic, and `analysis` owns reusable analysis and provenance.
 
 ## Explicitly Deferred
 

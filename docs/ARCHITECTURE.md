@@ -13,9 +13,10 @@ The repository currently contains a working full-stack scaffold:
 - A singleton execution subresource that creates and reads the initial durable Job handoff for a ScanRun.
 - A synchronous command that executes the pending DISCOVERY stage for a ScanRun.
 - A synchronous command that executes the pending RECONCILIATION stage and completes a ScanRun.
+- A synchronous database-only command that assigns ContentRecords to eligible completed-scan observations.
 - A frontend `/` route that requests and displays the health result.
 
-The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven V1 application tables, structural constraints, foreign keys, and initial indexes. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, and `analysis` feature packages. Source registration/read, durable scan-request creation/read, the ScanRun-to-Job execution handoff, DISCOVERY, and missing-file RECONCILIATION are implemented. Content assignment, hashing, background scheduling, analysis execution, matching, AI, and broader product workflows do not exist yet.
+The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven V1 application tables, structural constraints, foreign keys, and initial indexes. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, and `analysis` feature packages. Source registration/read, durable scan-request creation/read, the ScanRun-to-Job execution handoff, DISCOVERY, missing-file RECONCILIATION, and initial ContentRecord assignment are implemented. Hashing, background scheduling, analysis execution, matching, AI, and broader product workflows do not exist yet.
 
 ## Architectural Style
 
@@ -72,7 +73,7 @@ When a FileEntry records `last_seen_scan_run_source_id`, that ScanRunSource must
 
 The path policy is cross-platform and lossless: preserve observed case and Unicode spelling, use `/` between persisted relative path segments, do not globally lowercase or Unicode-normalize, and do not resolve symlinks or call `toRealPath()` to construct occurrence identity. Where filesystem equivalence is uncertain, preserve separate observations.
 
-A `ContentRecord` represents one immutable byte-version independently of location. It has a stable internal ID rather than a hash primary key. Exact hashing may be deferred. Temporary duplicate ContentRecords are acceptable until a later explicit reconciliation operation; V1 has no canonical redirect or merge table. Transformed copies have separate ContentRecords.
+A `ContentRecord` represents one immutable byte-version independently of location. It has a stable internal ID rather than a hash primary key. Initial assignment creates one distinct record for each eligible unassigned FileEntry occurrence/version; equal size, modification metadata, or bytes do not cause records to be shared. Exact hashing and later merge/deduplication behavior remain deferred. V1 has no canonical redirect or merge table, and transformed copies have separate ContentRecords.
 
 ## Reconciliation and Execution
 
@@ -91,6 +92,10 @@ The implemented RECONCILIATION command is manually and synchronously invoked thr
 For each Source, the exact pair `(last_seen_scan_run_source_id, last_seen_traversal_generation)` identifies FileEntries observed by its completed discovery traversal. Reconciliation marks other currently `PRESENT` entries for that Source `MISSING`, including entries with null last-seen traversal fields. It changes only presence: last-known metadata, traversal identity, content association, and observation revision are preserved. Already-`MISSING` entries and entries belonging to other Sources are not changed.
 
 Each Source's missing sweep, transition to `COMPLETED`, `completed_generation` publication, completion timestamp, and Source-based Job/stage progress update commit in one transaction. Separate short transactions start and finalize RECONCILIATION. Starting the stage resets Job progress to the current stage's Source units without incrementing the Job attempt count. Successful finalization completes RECONCILIATION, the Job, and the ScanRun; clears the Job's current stage; and creates no later stage. Generic persistence-failure recovery remains deferred.
+
+The implemented ContentRecord-assignment command is synchronously invoked through `POST /api/scan-runs/{id}/content-assignment`. Preflight requires a fully completed ScanRun, SCAN Job, DISCOVERY stage, RECONCILIATION stage, and completed generation for every ScanRunSource. The command then uses only durable database state: it does not inspect Source configuration, access Source roots, or revalidate location revisions, and it neither reopens the completed SCAN Job nor creates a Job or JobStage.
+
+For each completed ScanRunSource, eligible `PRESENT`, content-null FileEntries must carry that Source row's exact completed traversal identity. Candidates contain only FileEntry ID, observation revision, and size and are read in ascending-ID keyset pages of at most 250. Each candidate receives its own ContentRecord; metadata is not treated as evidence of byte equality. Publication uses a separate transaction-proxied writer that inserts the ContentRecord and conditionally attaches it only while the FileEntry remains `PRESENT`, content-null, at the expected observation revision and size. A stale conditional update rolls back its insert, is counted as skipped, and does not stop later candidates. The publication guard deliberately does not require an unchanged last-seen traversal pair, so a later unchanged observation can retain the same occurrence version. Existing content associations make the operation resumable and repeatable without duplicate records.
 
 Filesystem failure marks every ScanRunSource participating in that started DISCOVERY attempt, the DISCOVERY stage, Job, and ScanRun failed without creating RECONCILIATION or marking any FileEntry missing. This ensures no child of the terminally failed attempt remains `DISCOVERING`. Earlier committed observation batches remain tagged with their incomplete generations; `completed_generation` remains null, so those partial observations do not authorize a missing sweep. Retry and recovery behavior is not implemented.
 
@@ -207,7 +212,18 @@ POST /api/scan-runs/{id}/execution/reconciliation
     -> RECONCILIATION, Job, and ScanRun completion
 ```
 
-Both execution commands run synchronously in their HTTP requests. Scheduler/background execution, simultaneous-call hardening, retry/recovery, content assignment, and SSE remain deferred.
+The implemented content-assignment slice is:
+
+```text
+POST /api/scan-runs/{id}/content-assignment
+    -> ContentAssignmentController
+    -> ContentAssignmentService
+    -> completed-lifecycle preflight from durable state
+    -> bounded candidate reads
+    -> per-candidate atomic ContentRecord insert + guarded FileEntry publication
+```
+
+All three commands run synchronously in their HTTP requests. Scheduler/background execution, simultaneous-call hardening, retry/recovery, exact hashing, and SSE remain deferred.
 
 ## SQLite and Cross-Platform Requirements
 

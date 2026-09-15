@@ -77,6 +77,41 @@ public class CatalogRepository {
                 id).stream().findFirst();
     }
 
+    public List<ContentAssignmentCandidate> findContentAssignmentCandidates(
+            long scanRunSourceId, long completedGeneration, long afterFileEntryId, int limit) {
+        return jdbcTemplate.query("""
+                SELECT file_entry.id, file_entry.observation_revision, file_entry.size_bytes
+                FROM file_entry
+                JOIN scan_run_source
+                  ON scan_run_source.id = ?
+                 AND scan_run_source.source_id = file_entry.source_id
+                WHERE file_entry.presence_status = 'PRESENT'
+                  AND file_entry.current_content_id IS NULL
+                  AND file_entry.last_seen_scan_run_source_id = scan_run_source.id
+                  AND file_entry.last_seen_traversal_generation = ?
+                  AND file_entry.id > ?
+                ORDER BY file_entry.id
+                LIMIT ?
+                """, (resultSet, rowNumber) -> new ContentAssignmentCandidate(
+                        resultSet.getLong("id"),
+                        resultSet.getLong("observation_revision"),
+                        resultSet.getLong("size_bytes")),
+                scanRunSourceId, completedGeneration, afterFileEntryId, limit);
+    }
+
+    public int attachContentIfCurrent(long fileEntryId, long expectedObservationRevision,
+            long expectedSizeBytes, long contentRecordId) {
+        return jdbcTemplate.update("""
+                UPDATE file_entry
+                SET current_content_id = ?
+                WHERE id = ?
+                  AND presence_status = 'PRESENT'
+                  AND current_content_id IS NULL
+                  AND observation_revision = ?
+                  AND size_bytes = ?
+                """, contentRecordId, fileEntryId, expectedObservationRevision, expectedSizeBytes);
+    }
+
     @Transactional
     public FileEntry insert(FileEntry fileEntry) {
         validateLastSeenSource(fileEntry);
