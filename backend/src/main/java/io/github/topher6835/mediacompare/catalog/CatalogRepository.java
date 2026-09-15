@@ -203,6 +203,21 @@ public class CatalogRepository {
                 """, CatalogRepository::mapFileEntry, sourceId, pathKey).stream().findFirst();
     }
 
+    public int markUnseenPresentFilesMissing(long sourceId, long scanRunSourceId, long traversalGeneration) {
+        return jdbcTemplate.update("""
+                UPDATE file_entry
+                SET presence_status = 'MISSING'
+                WHERE source_id = ?
+                  AND presence_status = 'PRESENT'
+                  AND (
+                      last_seen_scan_run_source_id IS NULL
+                      OR last_seen_traversal_generation IS NULL
+                      OR last_seen_scan_run_source_id <> ?
+                      OR last_seen_traversal_generation <> ?
+                  )
+                """, sourceId, scanRunSourceId, traversalGeneration);
+    }
+
     private void updateObservedFileEntry(FileEntry fileEntry) {
         jdbcTemplate.update("""
                 UPDATE file_entry

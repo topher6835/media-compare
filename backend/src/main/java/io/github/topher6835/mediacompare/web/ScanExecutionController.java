@@ -8,6 +8,8 @@ import io.github.topher6835.mediacompare.scan.ScanExecutionDetails;
 import io.github.topher6835.mediacompare.scan.ScanExecutionService;
 import io.github.topher6835.mediacompare.scan.DiscoveryConflictException;
 import io.github.topher6835.mediacompare.scan.DiscoveryExecutionFailedException;
+import io.github.topher6835.mediacompare.scan.ReconciliationConflictException;
+import io.github.topher6835.mediacompare.scan.ReconciliationService;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -23,9 +25,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class ScanExecutionController {
 
     private final ScanExecutionService scanExecutionService;
+    private final ReconciliationService reconciliationService;
 
-    public ScanExecutionController(ScanExecutionService scanExecutionService) {
+    public ScanExecutionController(ScanExecutionService scanExecutionService,
+            ReconciliationService reconciliationService) {
         this.scanExecutionService = scanExecutionService;
+        this.reconciliationService = reconciliationService;
     }
 
     @PostMapping
@@ -48,6 +53,11 @@ public class ScanExecutionController {
         return ResponseEntity.ok(ScanExecutionResponse.from(scanExecutionService.executeDiscovery(scanRunId)));
     }
 
+    @PostMapping("/reconciliation")
+    public ResponseEntity<ScanExecutionResponse> executeReconciliation(@PathVariable long scanRunId) {
+        return ResponseEntity.ok(ScanExecutionResponse.from(reconciliationService.execute(scanRunId)));
+    }
+
     @ExceptionHandler(NoSuchElementException.class)
     public ResponseEntity<Void> missingScanRun() {
         return ResponseEntity.notFound().build();
@@ -60,6 +70,11 @@ public class ScanExecutionController {
 
     @ExceptionHandler(DiscoveryConflictException.class)
     public ResponseEntity<Void> discoveryConflict() {
+        return ResponseEntity.status(HttpStatus.CONFLICT).build();
+    }
+
+    @ExceptionHandler(ReconciliationConflictException.class)
+    public ResponseEntity<Void> reconciliationConflict() {
         return ResponseEntity.status(HttpStatus.CONFLICT).build();
     }
 

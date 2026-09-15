@@ -143,6 +143,26 @@ public class ScanRepository {
                 """, failedAtMs, errorMessage, scanRunId);
     }
 
+    public int completeSourceReconciliation(long scanRunSourceId, long traversalGeneration,
+            long completedAtMs) {
+        return jdbcTemplate.update("""
+                UPDATE scan_run_source
+                SET status = 'COMPLETED', completed_generation = traversal_generation,
+                    completed_at_ms = ?, error_message = NULL
+                WHERE id = ? AND status = 'DISCOVERED'
+                  AND traversal_generation = ? AND traversal_generation > 0
+                  AND completed_generation IS NULL AND completed_at_ms IS NULL
+                """, completedAtMs, scanRunSourceId, traversalGeneration);
+    }
+
+    public int completeScanRun(long scanRunId, long completedAtMs) {
+        return jdbcTemplate.update("""
+                UPDATE scan_run
+                SET status = 'COMPLETED', finished_at_ms = ?, error_message = NULL
+                WHERE id = ? AND status = 'RUNNING'
+                """, completedAtMs, scanRunId);
+    }
+
     private static long generatedId(GeneratedKeyHolder keyHolder) {
         return Objects.requireNonNull(keyHolder.getKey(), "Database did not return a generated key").longValue();
     }

@@ -12,9 +12,10 @@ The repository currently contains a working full-stack scaffold:
 - REST endpoints to create and read durable scan requests under `/api/scan-runs`.
 - A singleton execution subresource that creates and reads the initial durable Job handoff for a ScanRun.
 - A synchronous command that executes the pending DISCOVERY stage for a ScanRun.
+- A synchronous command that executes the pending RECONCILIATION stage and completes a ScanRun.
 - A frontend `/` route that requests and displays the health result.
 
-The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven V1 application tables, structural constraints, foreign keys, and initial indexes. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, and `analysis` feature packages. Source registration/read, durable scan-request creation/read, the ScanRun-to-Job execution handoff, and the first actual DISCOVERY execution are implemented. Reconciliation, hashing, background scheduling, analysis execution, matching, AI, and broader product workflows do not exist yet.
+The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven V1 application tables, structural constraints, foreign keys, and initial indexes. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, and `analysis` feature packages. Source registration/read, durable scan-request creation/read, the ScanRun-to-Job execution handoff, DISCOVERY, and missing-file RECONCILIATION are implemented. Content assignment, hashing, background scheduling, analysis execution, matching, AI, and broader product workflows do not exist yet.
 
 ## Architectural Style
 
@@ -83,7 +84,13 @@ The implemented DISCOVERY command is manually and synchronously invoked through 
 
 Each Source root is traversed recursively with Java NIO `Files.walkFileTree(...)` without opting into link following. Only regular-file entries are observed. Persisted relative paths are derived with NIO relativization, serialize path segments with `/`, preserve observed spelling, and initially serve unchanged as `path_key`. Size and modification epoch-second/nanosecond metadata are captured without millisecond truncation. Discovery creates or refreshes FileEntry occurrences only; it creates no ContentRecord, hash, or analysis row.
 
-File observations and progress are committed in transactions of at most 250 files. No database write transaction spans filesystem traversal. A first traversal advances generation from zero to one. Successful discovery leaves each ScanRunSource `DISCOVERED` with `completed_generation` and `completed_at_ms` still null, completes DISCOVERY, and creates one pending RECONCILIATION stage while the ScanRun and Job remain `RUNNING`. Missing-file reconciliation remains deferred.
+File observations and progress are committed in transactions of at most 250 files. No database write transaction spans filesystem traversal. A first traversal advances generation from zero to one. Successful discovery leaves each ScanRunSource `DISCOVERED` with `completed_generation` and `completed_at_ms` still null, completes DISCOVERY, and creates one pending RECONCILIATION stage while the ScanRun and Job remain `RUNNING`.
+
+The implemented RECONCILIATION command is manually and synchronously invoked through `POST /api/scan-runs/{id}/execution/reconciliation`. It performs no filesystem access and does not revalidate Source paths or location revisions. Preflight instead requires the durable ScanRun, SCAN Job, DISCOVERY and RECONCILIATION stages, and every ScanRunSource to be at the expected successful phase boundary.
+
+For each Source, the exact pair `(last_seen_scan_run_source_id, last_seen_traversal_generation)` identifies FileEntries observed by its completed discovery traversal. Reconciliation marks other currently `PRESENT` entries for that Source `MISSING`, including entries with null last-seen traversal fields. It changes only presence: last-known metadata, traversal identity, content association, and observation revision are preserved. Already-`MISSING` entries and entries belonging to other Sources are not changed.
+
+Each Source's missing sweep, transition to `COMPLETED`, `completed_generation` publication, completion timestamp, and Source-based Job/stage progress update commit in one transaction. Separate short transactions start and finalize RECONCILIATION. Starting the stage resets Job progress to the current stage's Source units without incrementing the Job attempt count. Successful finalization completes RECONCILIATION, the Job, and the ScanRun; clears the Job's current stage; and creates no later stage. Generic persistence-failure recovery remains deferred.
 
 Filesystem failure marks every ScanRunSource participating in that started DISCOVERY attempt, the DISCOVERY stage, Job, and ScanRun failed without creating RECONCILIATION or marking any FileEntry missing. This ensures no child of the terminally failed attempt remains `DISCOVERING`. Earlier committed observation batches remain tagged with their incomplete generations; `completed_generation` remains null, so those partial observations do not authorize a missing sweep. Retry and recovery behavior is not implemented.
 
@@ -189,7 +196,18 @@ POST /api/scan-runs/{id}/execution/discovery
     -> DISCOVERY completion and pending RECONCILIATION stage
 ```
 
-This command runs synchronously in the HTTP request. Scheduler/background execution, simultaneous-call hardening, retry/recovery, reconciliation, and SSE remain deferred.
+The implemented reconciliation-execution slice is:
+
+```text
+POST /api/scan-runs/{id}/execution/reconciliation
+    -> ScanExecutionController
+    -> ReconciliationService
+    -> preflight durable DISCOVERY results and execution state
+    -> per-Source missing sweep + completed generation transaction
+    -> RECONCILIATION, Job, and ScanRun completion
+```
+
+Both execution commands run synchronously in their HTTP requests. Scheduler/background execution, simultaneous-call hardening, retry/recovery, content assignment, and SSE remain deferred.
 
 ## SQLite and Cross-Platform Requirements
 
@@ -221,4 +239,4 @@ The following remain open after the V1 review:
 
 The architecture is intended to support folders, multiple unrelated folders, whole drives, persistent indexing, incremental/reconciliation scans, exact duplicate and transformed-copy detection, similar/related media, resumable analysis, manual grouping/classification overrides, optional face analysis, optional local/cloud AI, and later explicit safeguarded filesystem modification.
 
-Only the initial Source registration, scan-request/handoff, and regular-file discovery portions of these capabilities are implemented.
+Only the initial Source registration, scan-request/handoff, regular-file discovery, and safe missing-file reconciliation portions of these capabilities are implemented.

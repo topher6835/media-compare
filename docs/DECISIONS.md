@@ -119,6 +119,18 @@ The initial persistence implementation uses immutable Java records for row-shape
 - On filesystem failure, fail every ScanRunSource participating in the started DISCOVERY attempt along with the DISCOVERY stage, Job, and ScanRun, so no child remains `DISCOVERING`. Preserve allocated generations and committed partial observations, leave every `completed_generation` null, do not create RECONCILIATION, and do not perform a missing sweep.
 - Defer simultaneous-call hardening, background scheduling, retry/recovery, and final symlink/junction policy.
 
+## Initial RECONCILIATION Execution
+
+- Expose explicit RECONCILIATION execution through `POST /api/scan-runs/{id}/execution/reconciliation`; run it synchronously and create no later stage.
+- Consume only durable DISCOVERY observations. Do not access Source paths, inspect the filesystem, or require current Source location revisions during reconciliation.
+- Require a running ScanRun and SCAN Job at RECONCILIATION, a completed DISCOVERY stage, a pending RECONCILIATION stage, and only `DISCOVERED` Sources with positive uncompleted traversal generations before mutation.
+- Treat an exact `(scan_run_source_id, traversal_generation)` match as proof that a FileEntry was seen in the completed traversal. For the Source being reconciled, mark other currently `PRESENT` entries `MISSING`, including entries with null last-seen traversal fields.
+- Changing an occurrence to `MISSING` changes only presence. Preserve content association, observation revision, paths, filesystem metadata, seen timestamps, and last-seen traversal identity; leave already-`MISSING` entries unchanged.
+- Commit each Source's missing sweep, `COMPLETED` transition, completed generation/timestamp, and Source-based Job/stage progress together. Never publish a completed generation separately from its sweep.
+- Job progress mirrors the current stage. Reset it from DISCOVERY file units to zero out of the Source count when RECONCILIATION starts, without incrementing the Job attempt count again.
+- Successful RECONCILIATION completes every Source, the stage, Job, and ScanRun; clears the Job's current stage; and preserves the ScanRun's original start timestamp.
+- Defer generic persistence-failure recovery, content assignment, hashing, analysis, background scheduling, and live progress delivery.
+
 ## Development
 
 - Favor readable, conventional, learnable code over clever abstractions.

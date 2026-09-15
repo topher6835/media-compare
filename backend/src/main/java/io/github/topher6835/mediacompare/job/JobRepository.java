@@ -181,6 +181,56 @@ public class JobRepository {
                 """, failedAtMs, errorMessage, jobId);
     }
 
+    public int startReconciliation(long jobId, long jobStageId, long sourceCount, long startedAtMs) {
+        int stageRows = jdbcTemplate.update("""
+                UPDATE job_stage
+                SET status = 'RUNNING', progress_completed = 0, progress_total = ?,
+                    attempt_count = attempt_count + 1, started_at_ms = ?, finished_at_ms = NULL,
+                    error_message = NULL
+                WHERE id = ? AND stage_type = 'RECONCILIATION' AND status = 'PENDING'
+                """, sourceCount, startedAtMs, jobStageId);
+        int jobRows = jdbcTemplate.update("""
+                UPDATE job
+                SET progress_completed = 0, progress_total = ?, finished_at_ms = NULL,
+                    error_message = NULL
+                WHERE id = ? AND job_type = 'SCAN' AND status = 'RUNNING'
+                  AND current_stage_type = 'RECONCILIATION'
+                """, sourceCount, jobId);
+        return stageRows + jobRows;
+    }
+
+    public int updateReconciliationProgress(long jobId, long jobStageId, long progressCompleted) {
+        int stageRows = jdbcTemplate.update("""
+                UPDATE job_stage SET progress_completed = ?
+                WHERE id = ? AND stage_type = 'RECONCILIATION' AND status = 'RUNNING'
+                """, progressCompleted, jobStageId);
+        int jobRows = jdbcTemplate.update("""
+                UPDATE job SET progress_completed = ?
+                WHERE id = ? AND status = 'RUNNING' AND current_stage_type = 'RECONCILIATION'
+                """, progressCompleted, jobId);
+        return stageRows + jobRows;
+    }
+
+    public int completeReconciliationStage(long jobStageId, long sourceCount, long finishedAtMs) {
+        return jdbcTemplate.update("""
+                UPDATE job_stage
+                SET status = 'COMPLETED', progress_completed = ?, progress_total = ?,
+                    finished_at_ms = ?, error_message = NULL
+                WHERE id = ? AND stage_type = 'RECONCILIATION' AND status = 'RUNNING'
+                """, sourceCount, sourceCount, finishedAtMs, jobStageId);
+    }
+
+    public int completeJob(long jobId, long sourceCount, long finishedAtMs) {
+        return jdbcTemplate.update("""
+                UPDATE job
+                SET status = 'COMPLETED', current_stage_type = NULL,
+                    progress_completed = ?, progress_total = ?, finished_at_ms = ?,
+                    error_message = NULL
+                WHERE id = ? AND job_type = 'SCAN' AND status = 'RUNNING'
+                  AND current_stage_type = 'RECONCILIATION'
+                """, sourceCount, sourceCount, finishedAtMs, jobId);
+    }
+
     private static long generatedId(GeneratedKeyHolder keyHolder) {
         return Objects.requireNonNull(keyHolder.getKey(), "Database did not return a generated key").longValue();
     }

@@ -2,11 +2,11 @@
 
 ## Current State
 
-Media Compare is a fresh v2 repository with a working full-stack scaffold. The repository contains separate `backend/` and `frontend/` projects. The backend can register/read Sources, create/read durable Source-based scan requests, create/read the initial durable ScanRun-to-Job execution handoff, and synchronously execute the pending DISCOVERY stage through REST. Discovery is the first actual filesystem operation; reconciliation, media analysis, comparison, and cleanup are not implemented.
+Media Compare is a fresh v2 repository with a working full-stack scaffold. The repository contains separate `backend/` and `frontend/` projects. The backend can register/read Sources, create/read durable Source-based scan requests, create/read the durable ScanRun-to-Job execution handoff, and synchronously execute DISCOVERY followed by safe missing-file RECONCILIATION through REST. Content assignment, media analysis, comparison, and cleanup are not implemented.
 
-The backend is a Java 21 and Spring Boot 4.1.1 Maven application. It connects to a local SQLite database, starts Flyway, exposes `GET /api/health`, provides Source endpoints under `/api/sources`, scan-request endpoints under `/api/scan-runs`, execution-handoff endpoints under `/api/scan-runs/{id}/execution`, and `POST /api/scan-runs/{id}/execution/discovery`. The frontend is a React and TypeScript Vite application with React Router; its `/` route requests the backend health endpoint through the Vite proxy. No Source, ScanRun, or execution frontend exists.
+The backend is a Java 21 and Spring Boot 4.1.1 Maven application. It connects to a local SQLite database, starts Flyway, exposes `GET /api/health`, provides Source endpoints under `/api/sources`, scan-request endpoints under `/api/scan-runs`, execution-handoff endpoints under `/api/scan-runs/{id}/execution`, and synchronous DISCOVERY and RECONCILIATION POST endpoints. The frontend is a React and TypeScript Vite application with React Router; its `/` route requests the backend health endpoint through the Vite proxy. No Source, ScanRun, or execution frontend exists.
 
-The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven application tables with their structural constraints, foreign keys, and initial indexes; no new migration was needed for discovery. Immutable Java records and focused Spring JDBC repositories provide persistence under the reviewed feature packages. `SourceService` owns Source registration/read behavior. `ScanRunService` atomically records scan intent. `ScanExecutionService` keeps scan-specific Job orchestration in `scan`, creates the pending execution handoff, and coordinates discovery without holding a write transaction across filesystem traversal. Reconciliation, scheduling/background execution, hashing, analysis execution, matching, AI, and filesystem modification remain unimplemented.
+The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven application tables with their structural constraints, foreign keys, and initial indexes; no new migration was needed for DISCOVERY or RECONCILIATION. Immutable Java records and focused Spring JDBC repositories provide persistence under the reviewed feature packages. `SourceService` owns Source registration/read behavior. `ScanRunService` atomically records scan intent. Scan orchestration creates the execution handoff, coordinates discovery outside long write transactions, and reconciles durable observations without filesystem access. Content assignment, scheduling/background execution, hashing, analysis execution, matching, AI, and filesystem modification remain unimplemented.
 
 ## Documentation
 
@@ -62,19 +62,28 @@ The durable documentation baseline is:
 - Discovery never marks an unobserved FileEntry missing and creates no ContentRecord, hash, or analysis row.
 - Missing, non-directory, inaccessible, or traversal-failing roots fail every ScanRunSource participating in that started DISCOVERY attempt, plus the DISCOVERY stage, Job, and ScanRun, so no child remains `DISCOVERING`; no RECONCILIATION is created. Allocated generations and previously committed observations remain, while every `completed_generation` stays null and no missing sweep is authorized.
 - Discovery integration tests use temporary paths and cover recursive/portable paths, metadata, lifecycle/progress, insert/update invalidation, Source-revision preflight, missing-root and deterministic mid-traversal failure, symbolic-link skipping, transaction boundaries, and a 251-file multi-batch traversal.
+- `POST /api/scan-runs/{id}/execution/reconciliation` synchronously executes an eligible pending RECONCILIATION stage and returns the completed execution with HTTP 200.
+- Reconciliation preflight requires a `RUNNING` ScanRun, a `RUNNING` SCAN Job whose current stage is RECONCILIATION, completed DISCOVERY, pending RECONCILIATION, and only `DISCOVERED` ScanRunSources with positive traversal generations and null completion state. Missing ScanRuns/executions return 404; ineligible state returns 409 before mutation.
+- Reconciliation uses no filesystem or current Source configuration data. It succeeds after Source roots are removed or location revisions change because it consumes durable FileEntry traversal identity.
+- An exact current `(scan_run_source_id, traversal_generation)` pair keeps an entry `PRESENT`. Other currently-present entries for that Source, including rows with null last-seen fields, become `MISSING`; entries belonging to unselected Sources are untouched.
+- Becoming `MISSING` preserves content association, observation revision, path, filesystem metadata, seen timestamps, and last-seen traversal identity. Already-missing entries remain unchanged.
+- Each Source's missing sweep, transition to `COMPLETED`, completed-generation/timestamp publication, and progress update share one transaction. A failure within that boundary rolls all of those changes back together; generic recovery after separately committed Sources remains deferred.
+- RECONCILIATION progress counts completed Sources. Job progress mirrors the current stage and resets from DISCOVERY file units to zero out of the Source count when reconciliation starts.
+- Successful reconciliation completes all ScanRunSources, the RECONCILIATION stage, the Job, and the ScanRun; clears the Job's current stage; preserves the Job attempt count and ScanRun start timestamp; and creates no subsequent stage.
+- Reconciliation creates no ContentRecord, hash, or analysis row. Integration tests cover lifecycle/final state, multi-Source isolation, empty Sources, exact and null traversal identities, field preservation, unavailable roots, stale Source revisions, conflicts, repeat prevention, and transactional rollback.
 - The frontend production build succeeds.
 - React Router is wired through `BrowserRouter` and a `/` route.
 - The Vite development server starts on port `5173`.
 - Vite proxies `/api` to `http://localhost:8080`.
 - A request to `/api/health` through Vite reaches the backend and returns `ok`.
 - The frontend renders the health request result.
-- The durable execution handoff is committed on `main`; local `main` and `origin/main` point to `003b934` (`Add durable scan execution handoff`). The DISCOVERY increment is currently uncommitted.
+- The DISCOVERY implementation is committed on `main`; local `main` and `origin/main` point to `0e273a0` (`Add filesystem discovery execution`). The RECONCILIATION increment is currently uncommitted.
 - Git origin uses `git@github-personal:topher6835/media-compare.git`, with repository-local identity configured for `topher6835`.
 
 ## Known Limitations / Not Yet Implemented
 
-- No Source update, deletion, relocation/remount recognition, or reconciliation workflow exists.
-- No ScanRun list, cancellation, retry/recovery, WorkingSet request, custom options, scheduling, background execution, or RECONCILIATION execution exists.
+- No Source update, deletion, or relocation/remount recognition workflow exists.
+- No ScanRun list, cancellation, retry/recovery, WorkingSet request, custom options, scheduling, or background execution exists.
 - Simultaneous duplicate execution-request hardening remains deferred with the broader scheduling/concurrency design.
 - No exact hashing, content reconciliation, media metadata, fingerprints, embeddings, face analysis, or AI integration exists.
 - No general durable worker, pause/resume, startup recovery, or live progress delivery exists.
@@ -85,4 +94,4 @@ The durable documentation baseline is:
 
 ## Next Recommended Step
 
-Implement RECONCILIATION/missing-file completion as the next deliberate increment. It should consume a successfully discovered traversal generation, apply the missing-file sweep only at the safe completion boundary, and set `completed_generation`/completion state atomically. Hashing, analysis, background scheduling, retry/recovery, SSE, and final symlink/junction semantics should remain deferred unless explicitly brought into scope.
+Implement the first content reconciliation/ContentRecord-assignment phase for newly discovered or invalidated FileEntries. Define its safe identity and publication rules before exact hashing or media-specific analysis. Background scheduling, retry/recovery, SSE, and final symlink/junction semantics should remain deferred unless explicitly brought into scope.
