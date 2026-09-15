@@ -11,9 +11,10 @@ The repository currently contains a working full-stack scaffold:
 - REST endpoints to register and read Sources under `/api/sources`.
 - REST endpoints to create and read durable scan requests under `/api/scan-runs`.
 - A singleton execution subresource that creates and reads the initial durable Job handoff for a ScanRun.
+- A synchronous command that executes the pending DISCOVERY stage for a ScanRun.
 - A frontend `/` route that requests and displays the health result.
 
-The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven V1 application tables, structural constraints, foreign keys, and initial indexes. Simple immutable records and Spring JDBC repositories provide insert/read access under the `catalog`, `scan`, `job`, and `analysis` feature packages. Source registration/read, durable scan-request creation/read, and the initial ScanRun-to-Job execution handoff are implemented. Filesystem scanning, hashing, reconciliation execution, Job execution, analysis execution, matching, AI, and broader product workflows do not exist yet.
+The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven V1 application tables, structural constraints, foreign keys, and initial indexes. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, and `analysis` feature packages. Source registration/read, durable scan-request creation/read, the ScanRun-to-Job execution handoff, and the first actual DISCOVERY execution are implemented. Reconciliation, hashing, background scheduling, analysis execution, matching, AI, and broader product workflows do not exist yet.
 
 ## Architectural Style
 
@@ -77,6 +78,14 @@ A `ContentRecord` represents one immutable byte-version independently of locatio
 Revisiting a Source performs lightweight discovery and reconciliation before expensive analysis. Each root traversal receives a fresh positive traversal generation. A missing-file sweep is permitted only after a complete successful traversal of the intended scope. Interrupted, cancelled, incomplete, inaccessible, or offline scans do not mark previously known files missing. The missing update and completed-generation state are committed together.
 
 `observation_revision` allows future workers to reject stale publication after a FileEntry may have changed. Discovery may restart after application shutdown; fragile filesystem iterator cursors are not persisted. Directory-level traversal checkpoints remain deferred.
+
+The implemented DISCOVERY command is manually and synchronously invoked through `POST /api/scan-runs/{id}/execution/discovery`. Before filesystem work or state mutation, it verifies the ScanRun Source snapshots against every current Source location revision and verifies that the SCAN Job and DISCOVERY stage are pending and eligible. It then starts the ScanRun, Job, stage, and Source traversal state in a short transaction.
+
+Each Source root is traversed recursively with Java NIO `Files.walkFileTree(...)` without opting into link following. Only regular-file entries are observed. Persisted relative paths are derived with NIO relativization, serialize path segments with `/`, preserve observed spelling, and initially serve unchanged as `path_key`. Size and modification epoch-second/nanosecond metadata are captured without millisecond truncation. Discovery creates or refreshes FileEntry occurrences only; it creates no ContentRecord, hash, or analysis row.
+
+File observations and progress are committed in transactions of at most 250 files. No database write transaction spans filesystem traversal. A first traversal advances generation from zero to one. Successful discovery leaves each ScanRunSource `DISCOVERED` with `completed_generation` and `completed_at_ms` still null, completes DISCOVERY, and creates one pending RECONCILIATION stage while the ScanRun and Job remain `RUNNING`. Missing-file reconciliation remains deferred.
+
+Filesystem failure marks every ScanRunSource participating in that started DISCOVERY attempt, the DISCOVERY stage, Job, and ScanRun failed without creating RECONCILIATION or marking any FileEntry missing. This ensures no child of the terminally failed attempt remains `DISCOVERING`. Earlier committed observation batches remain tagged with their incomplete generations; `completed_generation` remains null, so those partial observations do not authorize a missing sweep. Retry and recovery behavior is not implemented.
 
 `ScanRun` records user intent, selected Sources or WorkingSet, request type, options, and lifecycle. Its options become immutable when execution begins. The first implemented request creation accepts one or more registered Source IDs and atomically writes one ScanRun plus its ScanRunSource rows. It uses request type `INDEX`, initial status `PENDING`, options version `1`, and effective options `{}`. Each child begins `PENDING`, snapshots the Source's current location revision, and has traversal generation `0` with no completion or execution state. Child responses are ordered by Source ID.
 
@@ -168,6 +177,20 @@ POST/GET /api/scan-runs/{id}/execution
 
 The POST atomically creates a pending `SCAN` Job and its one pending `DISCOVERY` stage. The GET reads that durable state with stages ordered by database ID. Neither endpoint starts work, checks Source availability, or accesses the filesystem.
 
+The implemented discovery-execution slice is:
+
+```text
+POST /api/scan-runs/{id}/execution/discovery
+    -> ScanExecutionController
+    -> ScanExecutionService
+    -> preflight Source snapshots and pending execution state
+    -> Java NIO Source traversal outside write transactions
+    -> bounded FileEntry/progress transactions
+    -> DISCOVERY completion and pending RECONCILIATION stage
+```
+
+This command runs synchronously in the HTTP request. Scheduler/background execution, simultaneous-call hardening, retry/recovery, reconciliation, and SSE remain deferred.
+
 ## SQLite and Cross-Platform Requirements
 
 SQLite remains the single local catalog database. Spring JDBC and Flyway provide persistence access and migration ownership. SQL should enforce structural invariants such as nullability, foreign keys, uniqueness, numeric ranges, and valid nanosecond values. Evolving status and type values should initially be validated in Java rather than rigid SQLite membership checks.
@@ -198,4 +221,4 @@ The following remain open after the V1 review:
 
 The architecture is intended to support folders, multiple unrelated folders, whole drives, persistent indexing, incremental/reconciliation scans, exact duplicate and transformed-copy detection, similar/related media, resumable analysis, manual grouping/classification overrides, optional face analysis, optional local/cloud AI, and later explicit safeguarded filesystem modification.
 
-None of these product capabilities is implemented by the current scaffold.
+Only the initial Source registration, scan-request/handoff, and regular-file discovery portions of these capabilities are implemented.

@@ -102,6 +102,47 @@ public class ScanRepository {
                 """, ScanRepository::mapScanRunSource, scanRunId);
     }
 
+    public int startScanRun(long scanRunId, long startedAtMs) {
+        return jdbcTemplate.update("""
+                UPDATE scan_run
+                SET status = 'RUNNING', started_at_ms = ?, finished_at_ms = NULL, error_message = NULL
+                WHERE id = ? AND status = 'PENDING'
+                """, startedAtMs, scanRunId);
+    }
+
+    public int startSourceDiscovery(long scanRunSourceId, long traversalGeneration, long startedAtMs) {
+        return jdbcTemplate.update("""
+                UPDATE scan_run_source
+                SET status = 'DISCOVERING', traversal_generation = ?, started_at_ms = ?,
+                    completed_at_ms = NULL, error_message = NULL
+                WHERE id = ? AND status = 'PENDING'
+                """, traversalGeneration, startedAtMs, scanRunSourceId);
+    }
+
+    public int completeSourceDiscovery(long scanRunSourceId) {
+        return jdbcTemplate.update("""
+                UPDATE scan_run_source
+                SET status = 'DISCOVERED', completed_at_ms = NULL, error_message = NULL
+                WHERE id = ? AND status = 'DISCOVERING'
+                """, scanRunSourceId);
+    }
+
+    public int failSourceDiscovery(long scanRunSourceId, long failedAtMs, String errorMessage) {
+        return jdbcTemplate.update("""
+                UPDATE scan_run_source
+                SET status = 'FAILED', completed_at_ms = ?, error_message = ?
+                WHERE id = ? AND status = 'DISCOVERING'
+                """, failedAtMs, errorMessage, scanRunSourceId);
+    }
+
+    public int failScanRun(long scanRunId, long failedAtMs, String errorMessage) {
+        return jdbcTemplate.update("""
+                UPDATE scan_run
+                SET status = 'FAILED', finished_at_ms = ?, error_message = ?
+                WHERE id = ? AND status = 'RUNNING'
+                """, failedAtMs, errorMessage, scanRunId);
+    }
+
     private static long generatedId(GeneratedKeyHolder keyHolder) {
         return Objects.requireNonNull(keyHolder.getKey(), "Database did not return a generated key").longValue();
     }

@@ -105,6 +105,20 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Enforce at most one sequential `SCAN` handoff per ScanRun in the service/repository boundary and return HTTP 409 for duplicate POST. Do not add `UNIQUE(scan_run_id)`; concurrent duplicate hardening remains deferred.
 - Read JobStages in stable ascending database-ID order until a deliberate multi-stage ordering model exists.
 
+## Initial DISCOVERY Execution
+
+- Expose explicit DISCOVERY execution through `POST /api/scan-runs/{id}/execution/discovery`; run it synchronously in the request for this increment.
+- Before state mutation or filesystem access, require unchanged Source location revisions and a pending SCAN Job whose current pending stage is DISCOVERY. Missing ScanRuns/executions return 404 and ineligible or stale-snapshot requests return 409.
+- Traverse registered roots recursively with Java NIO `Files.walkFileTree(...)`, without opting into link following. Observe regular files only and skip symbolic-link entries.
+- Derive Source-relative paths with Java NIO and serialize segments with `/`. Preserve observed case and Unicode spelling; use that portable relative path unchanged as the initial `path_key`.
+- Preserve filesystem modification time as epoch seconds plus nanoseconds rather than deriving it through milliseconds.
+- Discovery creates and refreshes FileEntry occurrences only. It creates no ContentRecord, hash, or analysis artifact and never marks an unobserved entry missing.
+- Commit FileEntry observations and Job/DISCOVERY progress in fixed batches of at most 250. Keep filesystem walking outside database write transactions.
+- Allocate traversal generation one for the first traversal. Successful discovery ends at ScanRunSource `DISCOVERED` while `completed_generation` and `completed_at_ms` remain null until reconciliation/missing-file completion.
+- On success, complete DISCOVERY and create one pending RECONCILIATION stage while the ScanRun and Job remain `RUNNING`. Do not execute reconciliation in this increment.
+- On filesystem failure, fail every ScanRunSource participating in the started DISCOVERY attempt along with the DISCOVERY stage, Job, and ScanRun, so no child remains `DISCOVERING`. Preserve allocated generations and committed partial observations, leave every `completed_generation` null, do not create RECONCILIATION, and do not perform a missing sweep.
+- Defer simultaneous-call hardening, background scheduling, retry/recovery, and final symlink/junction policy.
+
 ## Development
 
 - Favor readable, conventional, learnable code over clever abstractions.

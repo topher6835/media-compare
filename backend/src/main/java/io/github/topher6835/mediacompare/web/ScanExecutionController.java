@@ -6,6 +6,8 @@ import java.util.NoSuchElementException;
 import io.github.topher6835.mediacompare.scan.ScanExecutionAlreadyExistsException;
 import io.github.topher6835.mediacompare.scan.ScanExecutionDetails;
 import io.github.topher6835.mediacompare.scan.ScanExecutionService;
+import io.github.topher6835.mediacompare.scan.DiscoveryConflictException;
+import io.github.topher6835.mediacompare.scan.DiscoveryExecutionFailedException;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -41,6 +43,11 @@ public class ScanExecutionController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
+    @PostMapping("/discovery")
+    public ResponseEntity<ScanExecutionResponse> executeDiscovery(@PathVariable long scanRunId) {
+        return ResponseEntity.ok(ScanExecutionResponse.from(scanExecutionService.executeDiscovery(scanRunId)));
+    }
+
     @ExceptionHandler(NoSuchElementException.class)
     public ResponseEntity<Void> missingScanRun() {
         return ResponseEntity.notFound().build();
@@ -49,5 +56,15 @@ public class ScanExecutionController {
     @ExceptionHandler(ScanExecutionAlreadyExistsException.class)
     public ResponseEntity<Void> executionAlreadyExists() {
         return ResponseEntity.status(HttpStatus.CONFLICT).build();
+    }
+
+    @ExceptionHandler(DiscoveryConflictException.class)
+    public ResponseEntity<Void> discoveryConflict() {
+        return ResponseEntity.status(HttpStatus.CONFLICT).build();
+    }
+
+    @ExceptionHandler(DiscoveryExecutionFailedException.class)
+    public ResponseEntity<Void> discoveryFailed() {
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
     }
 }

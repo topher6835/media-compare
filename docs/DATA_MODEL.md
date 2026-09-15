@@ -2,7 +2,7 @@
 
 ## Status and Scope
 
-The reviewed V1 persistence design is implemented by Flyway migration `V1__create_core_schema.sql`. The application now has the eleven V1 tables, their structural constraints and initial indexes, immutable Java record representations, and small Spring JDBC repositories.
+The reviewed V1 persistence design is implemented by Flyway migration `V1__create_core_schema.sql`. The application now has the eleven V1 tables, their structural constraints and initial indexes, immutable Java record representations, and small Spring JDBC repositories. The existing schema supports the implemented DISCOVERY lifecycle without another migration.
 
 The first migration contains exactly eleven application tables. The fields and constraints below describe the implemented schema.
 
@@ -56,6 +56,8 @@ Implemented fields:
 The uniqueness rule is `UNIQUE(source_id, path_key)`. `relative_path` preserves observed case and Unicode spelling through Java NIO. Persisted portable relative paths use `/` between segments. V1 does not globally lowercase paths, Unicode-normalize them, resolve symlinks, or call `toRealPath()` to construct occurrence identity. Where equivalence is uncertain, observations remain separate. Initially `path_key` may match the portable serialized path while remaining a separate field for future lookup policy.
 
 A FileEntry represents a filesystem occurrence, not immutable content. Its occurrence remains historically useful when the file disappears. `PRESENT` and `MISSING` are the minimum conceptual presence states. `observation_revision` increments when an observation indicates that bytes or content association may have changed; seeing the same unchanged file does not increment it.
+
+Implemented discovery inserts a new observed occurrence as `PRESENT`, with no ContentRecord, observation revision zero, equal first/last-seen timestamps, and the current ScanRunSource/traversal generation. Re-observation always refreshes path spelling, presence, size, modification time, last-seen time, and traversal identity. A size change, modification-time change, or return from a non-`PRESENT` state increments the revision once and clears `current_content_id`; unchanged metadata preserves both revision and content association.
 
 When `last_seen_scan_run_source_id` is non-null, the referenced ScanRunSource must have the same `source_id` as the FileEntry. In V1, `CatalogRepository` checks this invariant within the FileEntry insert transaction. The schema retains the direct foreign key and `ON DELETE SET NULL`; no composite foreign key or trigger is used.
 
@@ -118,6 +120,8 @@ Initial request creation writes one row for each selected Source with `status = 
 
 Each traversal from a Source root receives a fresh positive generation. A traversal restarted after interruption receives a new generation, so `traversal_generation` may be greater than the last `completed_generation` while newer work is in progress. A completed generation is positive and cannot exceed the current traversal generation. V1 allows only one active reconciliation traversal per Source initially. A missing-file sweep is authorized only after a complete successful traversal of the intended scope. Cancellation, inaccessible directories, offline Sources, and incomplete traversal must not mark previous entries missing. The missing update and completed-generation state are committed together. Discovery may restart after shutdown; directory-level traversal checkpoints are deferred.
 
+The first implemented traversal advances generation zero to one and moves a Source from `PENDING` through `DISCOVERING` to `DISCOVERED`. Successful filesystem discovery deliberately leaves `completed_generation` and `completed_at_ms` null because reconciliation and the missing-file sweep have not completed. A terminal filesystem failure records `FAILED` state and the same completion timestamp for every ScanRunSource participating in that started attempt, so none remains `DISCOVERING`; each allocated traversal generation is preserved and each `completed_generation` remains null.
+
 ### `job`
 
 Implemented fields:
@@ -139,6 +143,8 @@ Job is the durable execution authority. ScanRun remains the user-request and ope
 
 The execution API currently permits one sequentially created `SCAN` Job per ScanRun. `ScanExecutionService` enforces that API behavior; no `UNIQUE(scan_run_id)` constraint was added because Job remains generic. Simultaneous duplicate-request hardening, detailed scheduling, and recovery are deferred.
 
+When DISCOVERY starts, the Job becomes `RUNNING`, increments its attempt count, records its start time, and reports persisted regular-file observations as progress while total remains null. Successful discovery sets completed and total progress to the final observation count, keeps the Job `RUNNING`, and changes its current stage to `RECONCILIATION`. Filesystem failure instead marks the Job `FAILED` with finish/error state.
+
 ### `job_stage`
 
 Implemented fields:
@@ -158,6 +164,8 @@ Implemented fields:
 The uniqueness rule is `UNIQUE(job_id, stage_type)`. A V1 stage row is an aggregate durable checkpoint for one stage type within a Job. Retry and resume update that row. Stage-instance and attempt-history tables are deferred.
 
 The initial handoff creates exactly one `DISCOVERY` stage with `status = PENDING`, zero completed progress, null total progress, zero attempts, the same creation timestamp as its Job, and null execution timestamps/error. Job and stage creation occur in one service transaction. Stage reads use stable ascending database-ID order; a deliberate multi-stage ordering model remains deferred.
+
+Execution moves DISCOVERY to `RUNNING`, increments its attempt count, and updates progress in the same bounded transactions as FileEntry observations. Success completes it with equal final completed/total counts and creates exactly one pending `RECONCILIATION` stage. Reconciliation execution is not implemented. Filesystem failure marks DISCOVERY failed and does not create the next stage.
 
 ### `analysis_record`
 
@@ -252,7 +260,7 @@ Immutable records representing all eleven table row shapes and concrete Spring J
 - `job`
 - `analysis`
 
-`CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` provide focused insert and read operations. They use `JdbcTemplate` directly without a generic repository superclass or ORM. `CatalogRepository` includes Source lookup by ID and deterministic ID-ordered Source listing. `ScanRepository` includes ScanRun lookup and Source-ID-ordered child lookup. `JobRepository` supports explicit Job lookup by ScanRun/type and database-ID-ordered stage reads without owning scan orchestration. `catalog` does not depend on the job runner, `job` remains generic, and `analysis` owns reusable analysis and provenance. The `web` boundary contains thin Source, ScanRun, and scan-execution REST controllers; later HTTP/SSE endpoints remain deferred.
+`CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` provide focused insert, read, and workflow-specific update operations. They use `JdbcTemplate` directly without a generic repository superclass or ORM. `CatalogRepository` includes Source lookup/listing and FileEntry observation behavior. `ScanRepository` and `JobRepository` expose explicit lifecycle/progress updates used by scan orchestration. Dedicated Spring beans give start, each at-most-250-file observation/progress batch, finalization, and failure persistence real transaction boundaries while filesystem walking remains outside a transaction. `catalog` does not depend on the job runner, `job` remains generic, and `analysis` owns reusable analysis and provenance.
 
 ## Explicitly Deferred
 

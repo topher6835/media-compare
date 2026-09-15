@@ -108,6 +108,79 @@ public class JobRepository {
                 """, JobRepository::mapJobStage, jobId);
     }
 
+    public Optional<JobStage> findJobStageByJobIdAndType(long jobId, String stageType) {
+        return jdbcTemplate.query("""
+                SELECT * FROM job_stage
+                WHERE job_id = ? AND stage_type = ?
+                """, JobRepository::mapJobStage, jobId, stageType).stream().findFirst();
+    }
+
+    public int startJob(long jobId, long startedAtMs) {
+        return jdbcTemplate.update("""
+                UPDATE job
+                SET status = 'RUNNING', attempt_count = attempt_count + 1, started_at_ms = ?,
+                    finished_at_ms = NULL, error_message = NULL
+                WHERE id = ? AND job_type = 'SCAN' AND status = 'PENDING'
+                  AND current_stage_type = 'DISCOVERY'
+                """, startedAtMs, jobId);
+    }
+
+    public int startStage(long jobStageId, long startedAtMs) {
+        return jdbcTemplate.update("""
+                UPDATE job_stage
+                SET status = 'RUNNING', progress_completed = 0, progress_total = NULL,
+                    attempt_count = attempt_count + 1, started_at_ms = ?, finished_at_ms = NULL,
+                    error_message = NULL
+                WHERE id = ? AND stage_type = 'DISCOVERY' AND status = 'PENDING'
+                """, startedAtMs, jobStageId);
+    }
+
+    public int updateDiscoveryProgress(long jobId, long jobStageId, long progressCompleted) {
+        int stageRows = jdbcTemplate.update("""
+                UPDATE job_stage SET progress_completed = ?
+                WHERE id = ? AND stage_type = 'DISCOVERY' AND status = 'RUNNING'
+                """, progressCompleted, jobStageId);
+        int jobRows = jdbcTemplate.update("""
+                UPDATE job SET progress_completed = ?
+                WHERE id = ? AND status = 'RUNNING' AND current_stage_type = 'DISCOVERY'
+                """, progressCompleted, jobId);
+        return stageRows + jobRows;
+    }
+
+    public int completeDiscoveryStage(long jobStageId, long finalCount, long finishedAtMs) {
+        return jdbcTemplate.update("""
+                UPDATE job_stage
+                SET status = 'COMPLETED', progress_completed = ?, progress_total = ?,
+                    finished_at_ms = ?, error_message = NULL
+                WHERE id = ? AND stage_type = 'DISCOVERY' AND status = 'RUNNING'
+                """, finalCount, finalCount, finishedAtMs, jobStageId);
+    }
+
+    public int advanceJobToReconciliation(long jobId, long finalCount) {
+        return jdbcTemplate.update("""
+                UPDATE job
+                SET current_stage_type = 'RECONCILIATION', progress_completed = ?, progress_total = ?,
+                    finished_at_ms = NULL, error_message = NULL
+                WHERE id = ? AND status = 'RUNNING' AND current_stage_type = 'DISCOVERY'
+                """, finalCount, finalCount, jobId);
+    }
+
+    public int failDiscoveryStage(long jobStageId, long failedAtMs, String errorMessage) {
+        return jdbcTemplate.update("""
+                UPDATE job_stage
+                SET status = 'FAILED', finished_at_ms = ?, error_message = ?
+                WHERE id = ? AND stage_type = 'DISCOVERY' AND status = 'RUNNING'
+                """, failedAtMs, errorMessage, jobStageId);
+    }
+
+    public int failJob(long jobId, long failedAtMs, String errorMessage) {
+        return jdbcTemplate.update("""
+                UPDATE job
+                SET status = 'FAILED', finished_at_ms = ?, error_message = ?
+                WHERE id = ? AND status = 'RUNNING' AND current_stage_type = 'DISCOVERY'
+                """, failedAtMs, errorMessage, jobId);
+    }
+
     private static long generatedId(GeneratedKeyHolder keyHolder) {
         return Objects.requireNonNull(keyHolder.getKey(), "Database did not return a generated key").longValue();
     }

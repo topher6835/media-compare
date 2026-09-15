@@ -81,6 +81,59 @@ public class CatalogRepository {
     public FileEntry insert(FileEntry fileEntry) {
         validateLastSeenSource(fileEntry);
 
+        return insertFileEntry(fileEntry);
+    }
+
+    public FileEntry observeFile(FileObservation observation) {
+        validateLastSeenSource(observation.sourceId(), observation.scanRunSourceId());
+
+        Optional<FileEntry> existingEntry = findFileEntryBySourceIdAndPathKey(
+                observation.sourceId(), observation.pathKey());
+        if (existingEntry.isEmpty()) {
+            return insertFileEntry(new FileEntry(
+                    null,
+                    observation.sourceId(),
+                    observation.relativePath(),
+                    observation.pathKey(),
+                    null,
+                    "PRESENT",
+                    observation.sizeBytes(),
+                    observation.modifiedTimeEpochSecond(),
+                    observation.modifiedTimeNano(),
+                    0,
+                    observation.observedAtMs(),
+                    observation.observedAtMs(),
+                    observation.scanRunSourceId(),
+                    observation.traversalGeneration()));
+        }
+
+        FileEntry existing = existingEntry.orElseThrow();
+        boolean bytesMayHaveChanged = existing.sizeBytes() != observation.sizeBytes()
+                || !Objects.equals(existing.modifiedTimeEpochSecond(), observation.modifiedTimeEpochSecond())
+                || !Objects.equals(existing.modifiedTimeNano(), observation.modifiedTimeNano())
+                || !"PRESENT".equals(existing.presenceStatus());
+
+        FileEntry updated = new FileEntry(
+                existing.id(),
+                existing.sourceId(),
+                observation.relativePath(),
+                existing.pathKey(),
+                bytesMayHaveChanged ? null : existing.currentContentId(),
+                "PRESENT",
+                observation.sizeBytes(),
+                observation.modifiedTimeEpochSecond(),
+                observation.modifiedTimeNano(),
+                bytesMayHaveChanged ? existing.observationRevision() + 1 : existing.observationRevision(),
+                existing.firstSeenAtMs(),
+                observation.observedAtMs(),
+                observation.scanRunSourceId(),
+                observation.traversalGeneration());
+        updateObservedFileEntry(updated);
+        return updated;
+    }
+
+    private FileEntry insertFileEntry(FileEntry fileEntry) {
+
         var keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             PreparedStatement statement = connection.prepareStatement("""
@@ -119,35 +172,56 @@ public class CatalogRepository {
             return;
         }
 
+        validateLastSeenSource(fileEntry.sourceId(), fileEntry.lastSeenScanRunSourceId());
+    }
+
+    private void validateLastSeenSource(long sourceId, long scanRunSourceId) {
+
         Integer matchingRows = jdbcTemplate.queryForObject("""
                 SELECT COUNT(*)
                 FROM scan_run_source
                 WHERE id = ? AND source_id = ?
-                """, Integer.class, fileEntry.lastSeenScanRunSourceId(), fileEntry.sourceId());
+                """, Integer.class, scanRunSourceId, sourceId);
 
         if (matchingRows == null || matchingRows != 1) {
             throw new DataIntegrityViolationException(
-                    "FileEntry Source " + fileEntry.sourceId()
-                            + " does not match ScanRunSource " + fileEntry.lastSeenScanRunSourceId());
+                    "FileEntry Source " + sourceId
+                            + " does not match ScanRunSource " + scanRunSourceId);
         }
     }
 
     public Optional<FileEntry> findFileEntryById(long id) {
-        return jdbcTemplate.query("SELECT * FROM file_entry WHERE id = ?", (resultSet, rowNumber) -> new FileEntry(
-                resultSet.getLong("id"),
-                resultSet.getLong("source_id"),
-                resultSet.getString("relative_path"),
-                resultSet.getString("path_key"),
-                nullableLong(resultSet, "current_content_id"),
-                resultSet.getString("presence_status"),
-                resultSet.getLong("size_bytes"),
-                nullableLong(resultSet, "modified_time_epoch_second"),
-                nullableInteger(resultSet, "modified_time_nano"),
-                resultSet.getLong("observation_revision"),
-                resultSet.getLong("first_seen_at_ms"),
-                resultSet.getLong("last_seen_at_ms"),
-                nullableLong(resultSet, "last_seen_scan_run_source_id"),
-                nullableLong(resultSet, "last_seen_traversal_generation")), id).stream().findFirst();
+        return jdbcTemplate.query("SELECT * FROM file_entry WHERE id = ?", CatalogRepository::mapFileEntry, id)
+                .stream()
+                .findFirst();
+    }
+
+    public Optional<FileEntry> findFileEntryBySourceIdAndPathKey(long sourceId, String pathKey) {
+        return jdbcTemplate.query("""
+                SELECT * FROM file_entry
+                WHERE source_id = ? AND path_key = ?
+                """, CatalogRepository::mapFileEntry, sourceId, pathKey).stream().findFirst();
+    }
+
+    private void updateObservedFileEntry(FileEntry fileEntry) {
+        jdbcTemplate.update("""
+                UPDATE file_entry
+                SET relative_path = ?, current_content_id = ?, presence_status = ?, size_bytes = ?,
+                    modified_time_epoch_second = ?, modified_time_nano = ?, observation_revision = ?,
+                    last_seen_at_ms = ?, last_seen_scan_run_source_id = ?, last_seen_traversal_generation = ?
+                WHERE id = ?
+                """,
+                fileEntry.relativePath(),
+                fileEntry.currentContentId(),
+                fileEntry.presenceStatus(),
+                fileEntry.sizeBytes(),
+                fileEntry.modifiedTimeEpochSecond(),
+                fileEntry.modifiedTimeNano(),
+                fileEntry.observationRevision(),
+                fileEntry.lastSeenAtMs(),
+                fileEntry.lastSeenScanRunSourceId(),
+                fileEntry.lastSeenTraversalGeneration(),
+                fileEntry.id());
     }
 
     public WorkingSet insert(WorkingSet workingSet) {
@@ -207,6 +281,24 @@ public class CatalogRepository {
                 resultSet.getLong("location_revision"),
                 resultSet.getLong("created_at_ms"),
                 resultSet.getLong("updated_at_ms"));
+    }
+
+    private static FileEntry mapFileEntry(ResultSet resultSet, int rowNumber) throws SQLException {
+        return new FileEntry(
+                resultSet.getLong("id"),
+                resultSet.getLong("source_id"),
+                resultSet.getString("relative_path"),
+                resultSet.getString("path_key"),
+                nullableLong(resultSet, "current_content_id"),
+                resultSet.getString("presence_status"),
+                resultSet.getLong("size_bytes"),
+                nullableLong(resultSet, "modified_time_epoch_second"),
+                nullableInteger(resultSet, "modified_time_nano"),
+                resultSet.getLong("observation_revision"),
+                resultSet.getLong("first_seen_at_ms"),
+                resultSet.getLong("last_seen_at_ms"),
+                nullableLong(resultSet, "last_seen_scan_run_source_id"),
+                nullableLong(resultSet, "last_seen_traversal_generation"));
     }
 
     private static Long nullableLong(ResultSet resultSet, String columnName) throws SQLException {
