@@ -176,6 +176,16 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Use backend `filterMatch` and occurrence `matchesFilter` values to explain retained-occurrence matches. Preserve all whole-group summary values and keep every detail occurrence visible, including nonmatches.
 - Keep the workflow read-only. Members have no preferred/keeper designation and the potential savings figure remains explicitly estimated.
 
+## Frontend Source Management and Indexing
+
+- Expose Source registration and browsing at `/sources` with an explicit absolute-path text field interpreted by the local backend. The frontend does not inspect filesystem availability or impose platform-specific path rules beyond macOS and Windows examples.
+- Treat Source registration as configuration only. The frontend performs no filesystem mutation and does not add Source editing or deletion.
+- Let one user action sequentially invoke the existing Source-based `INDEX` ScanRun creation, `SCAN` execution handoff, DISCOVERY, RECONCILIATION, ContentRecord assignment, and exact-hashing endpoints. Validate returned durable IDs and expected lifecycle boundaries before advancing.
+- Keep current orchestration in browser-local React state. Synchronous requests expose their active stage and supplied counts; do not fake polling or percentage completion. Refresh-safe recovery, background workers, and SSE remain deferred.
+- Guard registration and analysis actions against obvious repeated submissions in the current page, while leaving concurrency correctness to the backend.
+- Stop on the first failed stage, retain known ScanRun/Job identifiers, and do not automatically retry. A new attempt creates a new ScanRun because retry/recovery semantics are not implemented.
+- After hashing returns, present analysis as complete and link to the existing exact duplicate workflow without implying that duplicate groups exist. If hashing reports skipped or failed candidates, present a completed-with-issues warning (not a failed run) while retaining the link for successfully hashed content.
+
 ## Development
 
 - Favor readable, conventional, learnable code over clever abstractions.

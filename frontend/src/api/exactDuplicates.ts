@@ -1,3 +1,7 @@
+import { requestJson } from './http.ts'
+
+export { ApiError } from './http.ts'
+
 export type TechnicalFileCategory = 'PHOTO' | 'VIDEO' | 'DOCUMENT'
 
 export interface ExactDuplicateFilters {
@@ -132,26 +136,10 @@ export function hasExactDuplicateFilters(
   return filters.fileCategories.length > 0 || filters.extensions.length > 0
 }
 
-export class ApiError extends Error {
-  readonly status: number
-
-  constructor(status: number) {
-    super(`Request failed with status ${status}`)
-    this.name = 'ApiError'
-    this.status = status
-  }
-}
-
 async function getJson<T>(url: string): Promise<T> {
-  const response = await fetch(url, {
+  return requestJson<T>(url, {
     headers: { Accept: 'application/json' },
   })
-
-  if (!response.ok) {
-    throw new ApiError(response.status)
-  }
-
-  return (await response.json()) as T
 }
 
 export function getExactDuplicateGroups(

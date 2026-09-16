@@ -16,7 +16,7 @@ The repository currently contains a working full-stack scaffold:
 - A synchronous database-only command that assigns ContentRecords to eligible completed-scan observations.
 - A synchronous command that publishes exact SHA-256 analysis for safe assigned-content candidates.
 - Read-only APIs that derive exact duplicate groups and retained occurrences from trusted SHA-256 artifacts, with catalog-correct file-category and extension filtering.
-- Frontend `/duplicates` and `/duplicates/:digestHex` routes that browse the derived exact groups and their retained catalog evidence, in addition to the `/` health route.
+- Frontend `/sources`, `/duplicates`, and `/duplicates/:digestHex` routes for Source registration/indexing and derived exact-group browsing, in addition to the `/` health route.
 
 The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven V1 application tables, structural constraints, foreign keys, and initial indexes. Java migration `V2__add_file_entry_extension_key` adds and backfills normalized FileEntry extension metadata plus its lookup index without adding a table. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, `analysis`, and `matching` feature packages. Source registration/read, durable scan-request creation/read, the ScanRun-to-Job execution handoff, DISCOVERY, missing-file RECONCILIATION, initial ContentRecord assignment, exact SHA-256 analysis, and derived exact duplicate reporting/filtering are implemented. Background scheduling, broader analysis/matching, AI, and broader product workflows do not exist yet.
 
@@ -112,7 +112,11 @@ List queries use ascending digest keyset pagination and digest-led grouping thro
 
 Detail reads always return distinct ContentRecord members and all retained current FileEntry associations, including `MISSING` entries, even when an active filter matches none. Occurrences expose their normalized extension, derived technical `FileCategory`, and match flag. The catalog-wide filter-options endpoint counts extensions across retained occurrences in valid exact groups. `FileCategory` is a small backend classifier (`PHOTO`, `VIDEO`, `DOCUMENT`) derived from extension metadata, not persisted, and is separate from future user Tags/Categories. The schema cannot reconstruct superseded associations that are no longer retained. The potential-storage-savings value is an estimate of logical present-occurrence bytes, not actual recoverable filesystem allocation. Grouping and filtering perform no filesystem access, hashing, or durable mutation.
 
-The React frontend consumes these endpoints through a small typed API module. `/duplicates` exposes multi-select Photos, Videos, and Documents controls plus extensions loaded independently from the filter-options endpoint. Active filters are canonical repeated URL parameters; unsupported categories are removed while selected extensions absent from current options remain visible and requested. Category choices use OR, extension choices use OR, and the two dimensions combine with AND according to the backend contract.
+The React frontend consumes these endpoints through small typed API modules and a shared JSON/HTTP error boundary. `/sources` lists and registers Sources using the backend's public fields and explicit absolute-path contract. One Source can be analyzed at a time from this page. The browser sequentially creates an `INDEX` ScanRun and `SCAN` execution, then invokes DISCOVERY, RECONCILIATION, ContentRecord assignment, and exact hashing. Each response is checked for the expected durable IDs and lifecycle boundary before the next call begins. Stage labels and supplied counts are presentation state only; backend state remains authoritative.
+
+The pipeline calls are synchronous HTTP requests. The active stage remains visible and duplicate starts are guarded while a run is active, but there is no polling or claim of background execution. In-browser orchestration state is not durable: navigation or refresh during a request can interrupt the remaining client sequence, and the current read endpoints are not used to construct a recovery engine. A failed attempt is not retried automatically; the UI retains known ScanRun/Job IDs and permits a new ScanRun. A successful hashing response with skipped or failed candidates still completes the backend stage; the frontend reports that overall run as completed with issues and keeps exact duplicate browsing available for successfully hashed content. Source registration and the indexing frontend perform no filesystem mutation.
+
+`/duplicates` exposes multi-select Photos, Videos, and Documents controls plus extensions loaded independently from the filter-options endpoint. Active filters are canonical repeated URL parameters; unsupported categories are removed while selected extensions absent from current options remain visible and requested. Category choices use OR, extension choices use OR, and the two dimensions combine with AND according to the backend contract.
 
 The list appends keyset pages with duplicate-digest protection and retains loaded rows plus scroll position in browser memory only when the current URL has the same order-insensitive canonical filter key. Filter changes mount a fresh result state, reset cursor/scroll/errors, and start at the first page. Filtered cards use `filterMatch` to describe matching and additional retained occurrences while leaving whole-group values unchanged. Filter-option failure does not block list or category use.
 
@@ -271,6 +275,11 @@ GET /api/exact-duplicate-groups/filter-options
 The frontend consumes that slice as:
 
 ```text
+/sources
+    -> typed Source API registration/list
+    -> one-click browser orchestration of the existing synchronous pipeline
+    -> stage progress, supplied counts, safe failure state, and durable IDs
+    -> completion link to /duplicates
 /duplicates
     -> typed exact-duplicate API client
     -> URL-backed File Type and Extension controls
@@ -281,7 +290,7 @@ The frontend consumes that slice as:
     -> filter-keyed browser-memory list context and recent-visit trail
 ```
 
-These commands and reads run synchronously in their HTTP requests. Scheduler/background execution, simultaneous-call hardening, retry/recovery, materialized equality decisions, and SSE remain deferred.
+These commands and reads run synchronously in their HTTP requests. Refresh-safe orchestration recovery, scheduler/background execution, simultaneous-call hardening, retry/recovery, materialized equality decisions, and SSE remain deferred.
 
 ## SQLite and Cross-Platform Requirements
 
@@ -313,4 +322,4 @@ The following remain open after the V1 review:
 
 The architecture is intended to support folders, multiple unrelated folders, whole drives, persistent indexing, incremental/reconciliation scans, exact duplicate and transformed-copy detection, similar/related media, resumable analysis, manual grouping/classification overrides, optional face analysis, optional local/cloud AI, and later explicit safeguarded filesystem modification.
 
-Source registration, scan-request/handoff, regular-file discovery, safe missing-file reconciliation, provisional ContentRecord assignment, exact SHA-256 analysis, and derived exact duplicate reporting are implemented.
+Source registration, scan-request/handoff, regular-file discovery, safe missing-file reconciliation, provisional ContentRecord assignment, exact SHA-256 analysis, derived exact duplicate reporting, and frontend Source-to-duplicates orchestration are implemented. Similarity analysis, AI, review metadata, and filesystem cleanup remain deferred.

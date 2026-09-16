@@ -3,6 +3,7 @@ import { Link, Route, Routes } from 'react-router-dom'
 import { DuplicateDetailPage } from './duplicates/DuplicateDetailPage.tsx'
 import { DuplicatesPage } from './duplicates/DuplicatesPage.tsx'
 import { HomePage } from './HomePage.tsx'
+import { SourcesPage } from './sources/SourcesPage.tsx'
 
 function AppHeader() {
   return (
@@ -11,6 +12,7 @@ function AppHeader() {
         Media Compare
       </Link>
       <nav aria-label="Primary navigation">
+        <Link to="/sources">Sources</Link>
         <Link to="/duplicates">Exact Duplicates</Link>
       </nav>
     </header>
@@ -24,6 +26,7 @@ function App() {
       <main>
         <Routes>
           <Route path="/" element={<HomePage />} />
+          <Route path="/sources" element={<SourcesPage />} />
           <Route path="/duplicates" element={<DuplicatesPage />} />
           <Route
             path="/duplicates/:digestHex"
