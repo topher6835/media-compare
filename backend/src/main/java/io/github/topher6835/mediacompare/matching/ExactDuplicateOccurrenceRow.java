@@ -1,15 +1,11 @@
 package io.github.topher6835.mediacompare.matching;
 
-import io.github.topher6835.mediacompare.catalog.FileCategory;
-
-public record ExactDuplicateOccurrence(
+record ExactDuplicateOccurrenceRow(
         long fileEntryId,
         long contentRecordId,
         long sourceId,
         String sourceName,
         String relativePath,
-        String presenceStatus,
         String extensionKey,
-        FileCategory fileCategory,
-        boolean matchesFilter) {
+        String presenceStatus) {
 }

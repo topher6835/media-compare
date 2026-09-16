@@ -190,6 +190,7 @@ public class CatalogRepository {
                     observation.sourceId(),
                     observation.relativePath(),
                     observation.pathKey(),
+                    FileExtensionNormalizer.fromRelativePath(observation.relativePath()),
                     null,
                     "PRESENT",
                     observation.sizeBytes(),
@@ -213,6 +214,7 @@ public class CatalogRepository {
                 existing.sourceId(),
                 observation.relativePath(),
                 existing.pathKey(),
+                FileExtensionNormalizer.fromRelativePath(observation.relativePath()),
                 bytesMayHaveChanged ? null : existing.currentContentId(),
                 "PRESENT",
                 observation.sizeBytes(),
@@ -228,35 +230,38 @@ public class CatalogRepository {
     }
 
     private FileEntry insertFileEntry(FileEntry fileEntry) {
-
+        String extensionKey = FileExtensionNormalizer.fromRelativePath(fileEntry.relativePath());
         var keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             PreparedStatement statement = connection.prepareStatement("""
                     INSERT INTO file_entry (
-                        source_id, relative_path, path_key, current_content_id, presence_status, size_bytes,
+                        source_id, relative_path, path_key, extension_key, current_content_id,
+                        presence_status, size_bytes,
                         modified_time_epoch_second, modified_time_nano, observation_revision,
                         first_seen_at_ms, last_seen_at_ms, last_seen_scan_run_source_id,
                         last_seen_traversal_generation
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, Statement.RETURN_GENERATED_KEYS);
             statement.setLong(1, fileEntry.sourceId());
             statement.setString(2, fileEntry.relativePath());
             statement.setString(3, fileEntry.pathKey());
-            setNullableLong(statement, 4, fileEntry.currentContentId());
-            statement.setString(5, fileEntry.presenceStatus());
-            statement.setLong(6, fileEntry.sizeBytes());
-            setNullableLong(statement, 7, fileEntry.modifiedTimeEpochSecond());
-            setNullableInteger(statement, 8, fileEntry.modifiedTimeNano());
-            statement.setLong(9, fileEntry.observationRevision());
-            statement.setLong(10, fileEntry.firstSeenAtMs());
-            statement.setLong(11, fileEntry.lastSeenAtMs());
-            setNullableLong(statement, 12, fileEntry.lastSeenScanRunSourceId());
-            setNullableLong(statement, 13, fileEntry.lastSeenTraversalGeneration());
+            statement.setString(4, extensionKey);
+            setNullableLong(statement, 5, fileEntry.currentContentId());
+            statement.setString(6, fileEntry.presenceStatus());
+            statement.setLong(7, fileEntry.sizeBytes());
+            setNullableLong(statement, 8, fileEntry.modifiedTimeEpochSecond());
+            setNullableInteger(statement, 9, fileEntry.modifiedTimeNano());
+            statement.setLong(10, fileEntry.observationRevision());
+            statement.setLong(11, fileEntry.firstSeenAtMs());
+            statement.setLong(12, fileEntry.lastSeenAtMs());
+            setNullableLong(statement, 13, fileEntry.lastSeenScanRunSourceId());
+            setNullableLong(statement, 14, fileEntry.lastSeenTraversalGeneration());
             return statement;
         }, keyHolder);
 
         return new FileEntry(generatedId(keyHolder), fileEntry.sourceId(), fileEntry.relativePath(),
-                fileEntry.pathKey(), fileEntry.currentContentId(), fileEntry.presenceStatus(), fileEntry.sizeBytes(),
+                fileEntry.pathKey(), extensionKey, fileEntry.currentContentId(),
+                fileEntry.presenceStatus(), fileEntry.sizeBytes(),
                 fileEntry.modifiedTimeEpochSecond(), fileEntry.modifiedTimeNano(), fileEntry.observationRevision(),
                 fileEntry.firstSeenAtMs(), fileEntry.lastSeenAtMs(), fileEntry.lastSeenScanRunSourceId(),
                 fileEntry.lastSeenTraversalGeneration());
@@ -316,12 +321,13 @@ public class CatalogRepository {
     private void updateObservedFileEntry(FileEntry fileEntry) {
         jdbcTemplate.update("""
                 UPDATE file_entry
-                SET relative_path = ?, current_content_id = ?, presence_status = ?, size_bytes = ?,
+                SET relative_path = ?, extension_key = ?, current_content_id = ?, presence_status = ?, size_bytes = ?,
                     modified_time_epoch_second = ?, modified_time_nano = ?, observation_revision = ?,
                     last_seen_at_ms = ?, last_seen_scan_run_source_id = ?, last_seen_traversal_generation = ?
                 WHERE id = ?
                 """,
                 fileEntry.relativePath(),
+                FileExtensionNormalizer.fromRelativePath(fileEntry.relativePath()),
                 fileEntry.currentContentId(),
                 fileEntry.presenceStatus(),
                 fileEntry.sizeBytes(),
@@ -399,6 +405,7 @@ public class CatalogRepository {
                 resultSet.getLong("source_id"),
                 resultSet.getString("relative_path"),
                 resultSet.getString("path_key"),
+                resultSet.getString("extension_key"),
                 nullableLong(resultSet, "current_content_id"),
                 resultSet.getString("presence_status"),
                 resultSet.getLong("size_bytes"),

@@ -1,6 +1,6 @@
 # Media Compare
 
-Media Compare is an early-stage application for media comparison workflows. The repository contains a working full-stack scaffold, the first SQLite persistence foundation, REST APIs for Sources and scan requests, a durable ScanRun-to-Job handoff, synchronous DISCOVERY and RECONCILIATION execution, a database-only ContentRecord-assignment pass, exact SHA-256 hashing for assigned content, and read-only exact duplicate browsing. Broader comparison and cleanup workflows have not yet been implemented.
+Media Compare is an early-stage application for media comparison workflows. The repository contains a working full-stack scaffold, a SQLite persistence foundation, REST APIs for Sources and scan requests, a durable ScanRun-to-Job handoff, synchronous DISCOVERY and RECONCILIATION execution, a database-only ContentRecord-assignment pass, exact SHA-256 hashing for assigned content, and read-only exact duplicate browsing with backend file-category and extension filtering. Broader comparison and cleanup workflows have not yet been implemented.
 
 ## Stack
 
@@ -56,7 +56,7 @@ During development:
 - Scan reconciliation endpoint: `POST http://localhost:8080/api/scan-runs/{id}/execution/reconciliation`
 - Content assignment endpoint: `POST http://localhost:8080/api/scan-runs/{id}/content-assignment`
 - Content hashing endpoint: `POST http://localhost:8080/api/scan-runs/{id}/content-hashing`
-- Exact duplicate endpoints: `GET http://localhost:8080/api/exact-duplicate-groups` and `GET http://localhost:8080/api/exact-duplicate-groups/{digestHex}`
+- Exact duplicate endpoints: `GET http://localhost:8080/api/exact-duplicate-groups`, `GET http://localhost:8080/api/exact-duplicate-groups/filter-options`, and `GET http://localhost:8080/api/exact-duplicate-groups/{digestHex}`. List and detail reads accept repeated `fileCategory` and `extension` query parameters.
 - Exact duplicate frontend: `http://localhost:5173/duplicates`
 - The Vite development server proxies `/api` requests to the backend.
 
@@ -64,4 +64,4 @@ The SQLite database is created locally at `backend/data/media-compare.db` when t
 
 ## Status
 
-The baseline frontend/backend connection, V1 persistence foundation, Source API, scan-request API, durable execution-state handoff, and manually invoked DISCOVERY and RECONCILIATION stages are working. Discovery observes regular files; reconciliation consumes those durable observations, safely marks unseen occurrences missing, and completes the ScanRun. A repeatable database-only command then assigns one new ContentRecord to each still-unassigned occurrence observed by that completed scan. Exact hashing streams safe candidates with SHA-256 and publishes reusable `AnalysisRecord`/`ContentHash` artifacts. Exact duplicate APIs derive groups of two or more ContentRecords from those trusted artifacts without materializing groups or merging ContentRecords. The read-only frontend can browse those groups and inspect their members and retained occurrences. See [`docs/STATUS.md`](docs/STATUS.md) for the current handoff state.
+The baseline frontend/backend connection, persistence foundation, Source API, scan-request API, durable execution-state handoff, and manually invoked DISCOVERY and RECONCILIATION stages are working. Discovery observes regular files and stores a normalized technical extension on each FileEntry; reconciliation consumes those durable observations, safely marks unseen occurrences missing while preserving that metadata, and completes the ScanRun. A repeatable database-only command then assigns one new ContentRecord to each still-unassigned occurrence observed by that completed scan. Exact hashing streams safe candidates with SHA-256 and publishes reusable `AnalysisRecord`/`ContentHash` artifacts. Exact duplicate APIs derive groups of two or more ContentRecords from those trusted artifacts without materializing groups or merging ContentRecords, and can select complete groups through matching retained `PRESENT` or `MISSING` occurrences. Technical `PHOTO`, `VIDEO`, and `DOCUMENT` classification is backend-derived from extensions and is unrelated to future user tags/categories. The read-only frontend can browse groups and inspect their members and retained occurrences, but filter controls are not implemented yet. See [`docs/STATUS.md`](docs/STATUS.md) for the current handoff state.

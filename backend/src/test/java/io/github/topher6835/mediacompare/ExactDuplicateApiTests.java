@@ -3,6 +3,7 @@ package io.github.topher6835.mediacompare;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -21,6 +22,7 @@ import io.github.topher6835.mediacompare.catalog.ContentRecord;
 import io.github.topher6835.mediacompare.catalog.FileEntry;
 import io.github.topher6835.mediacompare.catalog.Source;
 import io.github.topher6835.mediacompare.matching.ExactDuplicateIntegrityException;
+import io.github.topher6835.mediacompare.matching.ExactDuplicateFilter;
 import io.github.topher6835.mediacompare.matching.ExactDuplicateService;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -191,6 +193,11 @@ class ExactDuplicateApiTests {
 
         assertThrows(ExactDuplicateIntegrityException.class,
                 () -> exactDuplicateService.findGroups(null, null));
+        assertThrows(ExactDuplicateIntegrityException.class,
+                () -> exactDuplicateService.findGroups(
+                        null, null, ExactDuplicateFilter.from(null, List.of("jpg"))));
+        assertThrows(ExactDuplicateIntegrityException.class,
+                () -> exactDuplicateService.findFilterOptions());
     }
 
     static Stream<Object[]> invalidArtifacts() {
@@ -251,10 +258,207 @@ class ExactDuplicateApiTests {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    void filtersThroughRetainedOccurrencesWhileKeepingWholeGroupValues() throws Exception {
+        String digest = digest(60);
+        Source firstSource = insertSource("First", temporaryDirectory.resolve("unavailable-first"));
+        Source secondSource = insertSource("Second", temporaryDirectory.resolve("unavailable-second"));
+        ContentRecord first = insertHashedContent(100, digest);
+        ContentRecord second = insertHashedContent(100, digest);
+        insertHashedContent(100, digest);
+        insertOccurrence(firstSource, first, "photos/first.JPG", "PRESENT");
+        insertOccurrence(secondSource, first, "photos/second.jpeg", "MISSING");
+        insertOccurrence(firstSource, second, "videos/clip.MP4", "PRESENT");
+        insertOccurrence(secondSource, second, "other/retained.xyz", "MISSING");
+        DurableState before = durableState();
+
+        mockMvc.perform(get("/api/exact-duplicate-groups").param("extension", "jPg"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups.length()").value(1))
+                .andExpect(jsonPath("$.groups[0].contentRecordCount").value(3))
+                .andExpect(jsonPath("$.groups[0].redundantContentRecordCount").value(2))
+                .andExpect(jsonPath("$.groups[0].presentOccurrenceCount").value(2))
+                .andExpect(jsonPath("$.groups[0].missingOccurrenceCount").value(2))
+                .andExpect(jsonPath("$.groups[0].sourceCount").value(2))
+                .andExpect(jsonPath("$.groups[0].potentialStorageSavingsBytes").value(100))
+                .andExpect(jsonPath("$.groups[0].filterMatch.matchingOccurrenceCount").value(1))
+                .andExpect(jsonPath("$.groups[0].filterMatch.matchingExtensions[0]").value("JPG"));
+
+        mockMvc.perform(get("/api/exact-duplicate-groups")
+                        .param("extension", "JPG", "XYZ"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups[0].filterMatch.matchingOccurrenceCount").value(2))
+                .andExpect(jsonPath("$.groups[0].filterMatch.matchingExtensions[0]").value("JPG"))
+                .andExpect(jsonPath("$.groups[0].filterMatch.matchingExtensions[1]").value("XYZ"));
+
+        mockMvc.perform(get("/api/exact-duplicate-groups").param("extension", "XYZ"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups.length()").value(1))
+                .andExpect(jsonPath("$.groups[0].filterMatch.matchingOccurrenceCount").value(1))
+                .andExpect(jsonPath("$.groups[0].filterMatch.matchingExtensions[0]").value("XYZ"));
+
+        mockMvc.perform(get("/api/exact-duplicate-groups")
+                        .param("fileCategory", "photo", "VIDEO"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups[0].filterMatch.matchingOccurrenceCount").value(3))
+                .andExpect(jsonPath("$.groups[0].filterMatch.matchingExtensions.length()").value(3));
+
+        mockMvc.perform(get("/api/exact-duplicate-groups")
+                        .param("fileCategory", "PHOTO")
+                        .param("extension", "JPG", "HEIC"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups[0].filterMatch.matchingOccurrenceCount").value(1))
+                .andExpect(jsonPath("$.groups[0].filterMatch.matchingExtensions[0]").value("JPG"));
+
+        mockMvc.perform(get("/api/exact-duplicate-groups")
+                        .param("fileCategory", "PHOTO")
+                        .param("extension", "PDF"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups.length()").value(0));
+        mockMvc.perform(get("/api/exact-duplicate-groups").param("extension", "unknown"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups.length()").value(0));
+        mockMvc.perform(get("/api/exact-duplicate-groups"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups[0].filterMatch").value(nullValue()));
+
+        assertEquals(before, durableState());
+    }
+
+    @Test
+    void appliesOccurrenceFiltersBeforeDigestPagination() throws Exception {
+        Source source = insertSource("Catalog", temporaryDirectory.resolve("unavailable"));
+        String firstDigest = digest(100);
+        String excludedDigest = digest(200);
+        String lastDigest = digest(300);
+        insertGroupWithOccurrence(source, firstDigest, "first.jpg");
+        insertGroupWithOccurrence(source, excludedDigest, "middle.pdf");
+        insertGroupWithOccurrence(source, lastDigest, "last.JPG");
+
+        mockMvc.perform(get("/api/exact-duplicate-groups")
+                        .param("extension", "JPG")
+                        .param("limit", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups.length()").value(1))
+                .andExpect(jsonPath("$.groups[0].digestHex").value(firstDigest))
+                .andExpect(jsonPath("$.nextAfterDigestHex").value(firstDigest));
+
+        mockMvc.perform(get("/api/exact-duplicate-groups")
+                        .param("extension", "JPG")
+                        .param("afterDigestHex", firstDigest)
+                        .param("limit", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups.length()").value(1))
+                .andExpect(jsonPath("$.groups[0].digestHex").value(lastDigest))
+                .andExpect(jsonPath("$.nextAfterDigestHex").doesNotExist());
+    }
+
+    @Test
+    void filteredDetailReturnsTheWholeGroupWithOccurrenceMatchContext() throws Exception {
+        String digest = digest(70);
+        Source firstSource = insertSource("First", temporaryDirectory.resolve("unavailable-first"));
+        Source secondSource = insertSource("Second", temporaryDirectory.resolve("unavailable-second"));
+        ContentRecord first = insertHashedContent(100, digest);
+        ContentRecord second = insertHashedContent(100, digest);
+        insertHashedContent(100, digest);
+        insertOccurrence(firstSource, first, "photo.JPG", "PRESENT");
+        insertOccurrence(secondSource, first, "clip.mov", "MISSING");
+        insertOccurrence(firstSource, second, "unclassified.xyz", "PRESENT");
+        insertOccurrence(secondSource, second, "README", "MISSING");
+
+        mockMvc.perform(get("/api/exact-duplicate-groups/{digest}", digest)
+                        .param("fileCategory", "PHOTO"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.members.length()").value(3))
+                .andExpect(jsonPath("$.occurrences.length()").value(4))
+                .andExpect(jsonPath("$.occurrences[0].extension").value("JPG"))
+                .andExpect(jsonPath("$.occurrences[0].fileCategory").value("PHOTO"))
+                .andExpect(jsonPath("$.occurrences[0].matchesFilter").value(true))
+                .andExpect(jsonPath("$.occurrences[1].extension").value("MOV"))
+                .andExpect(jsonPath("$.occurrences[1].fileCategory").value("VIDEO"))
+                .andExpect(jsonPath("$.occurrences[1].matchesFilter").value(false))
+                .andExpect(jsonPath("$.occurrences[2].extension").value("XYZ"))
+                .andExpect(jsonPath("$.occurrences[2].fileCategory").value(nullValue()))
+                .andExpect(jsonPath("$.occurrences[2].matchesFilter").value(false))
+                .andExpect(jsonPath("$.occurrences[3].extension").value(nullValue()))
+                .andExpect(jsonPath("$.occurrences[3].fileCategory").value(nullValue()))
+                .andExpect(jsonPath("$.occurrences[3].matchesFilter").value(false));
+
+        mockMvc.perform(get("/api/exact-duplicate-groups/{digest}", digest)
+                        .param("extension", "PDF"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.members.length()").value(3))
+                .andExpect(jsonPath("$.occurrences.length()").value(4))
+                .andExpect(jsonPath("$.occurrences[0].matchesFilter").value(false))
+                .andExpect(jsonPath("$.occurrences[3].matchesFilter").value(false));
+
+        mockMvc.perform(get("/api/exact-duplicate-groups/{digest}", digest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.occurrences[0].matchesFilter").value(true))
+                .andExpect(jsonPath("$.occurrences[1].matchesFilter").value(true))
+                .andExpect(jsonPath("$.occurrences[2].matchesFilter").value(true))
+                .andExpect(jsonPath("$.occurrences[3].matchesFilter").value(true));
+    }
+
+    @Test
+    void reportsCatalogWideFilterOptionsAndRejectsInvalidFilters() throws Exception {
+        Source source = insertSource("Catalog", temporaryDirectory.resolve("unavailable"));
+        String mixedDigest = digest(80);
+        ContentRecord mixedFirst = insertHashedContent(10, mixedDigest);
+        ContentRecord mixedSecond = insertHashedContent(10, mixedDigest);
+        insertOccurrence(source, mixedFirst, "first.JPG", "PRESENT");
+        insertOccurrence(source, mixedFirst, "second.jpg", "MISSING");
+        insertOccurrence(source, mixedSecond, "unknown.XYZ", "PRESENT");
+        insertOccurrence(source, mixedSecond, "README", "PRESENT");
+
+        String secondDigest = digest(81);
+        ContentRecord secondFirst = insertHashedContent(10, secondDigest);
+        insertHashedContent(10, secondDigest);
+        insertOccurrence(source, secondFirst, "third.Jpg", "PRESENT");
+
+        ContentRecord singleton = insertHashedContent(10, digest(82));
+        insertOccurrence(source, singleton, "ignored.gif", "PRESENT");
+        DurableState before = durableState();
+
+        mockMvc.perform(get("/api/exact-duplicate-groups/filter-options"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.extensions.length()").value(2))
+                .andExpect(jsonPath("$.extensions[0].extension").value("JPG"))
+                .andExpect(jsonPath("$.extensions[0].fileCategory").value("PHOTO"))
+                .andExpect(jsonPath("$.extensions[0].exactDuplicateGroupCount").value(2))
+                .andExpect(jsonPath("$.extensions[0].retainedOccurrenceCount").value(3))
+                .andExpect(jsonPath("$.extensions[1].extension").value("XYZ"))
+                .andExpect(jsonPath("$.extensions[1].fileCategory").value(nullValue()))
+                .andExpect(jsonPath("$.extensions[1].exactDuplicateGroupCount").value(1))
+                .andExpect(jsonPath("$.extensions[1].retainedOccurrenceCount").value(1));
+
+        mockMvc.perform(get("/api/exact-duplicate-groups").param("fileCategory", "audio"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/exact-duplicate-groups").param("extension", ".jpg"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/exact-duplicate-groups").param("extension", " "))
+                .andExpect(status().isBadRequest());
+        String[] excessiveExtensions = new String[101];
+        for (int index = 0; index < excessiveExtensions.length; index++) {
+            excessiveExtensions[index] = "x" + index;
+        }
+        mockMvc.perform(get("/api/exact-duplicate-groups")
+                        .param("extension", excessiveExtensions))
+                .andExpect(status().isBadRequest());
+
+        assertEquals(before, durableState());
+    }
+
     private void insertGroup(String digest, long sizeBytes, int memberCount) {
         for (int index = 0; index < memberCount; index++) {
             insertHashedContent(sizeBytes, digest);
         }
+    }
+
+    private void insertGroupWithOccurrence(Source source, String digest, String relativePath) {
+        ContentRecord first = insertHashedContent(10, digest);
+        insertHashedContent(10, digest);
+        insertOccurrence(source, first, relativePath, "PRESENT");
     }
 
     private ContentRecord insertHashedContent(long sizeBytes, String digest) {

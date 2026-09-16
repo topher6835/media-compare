@@ -121,6 +121,8 @@ class DiscoveryApiTests {
         FileEntry nestedEntry = requireFile(fixture.source(), "Nested/More/Clip.bin");
         assertNewObservation(topEntry, topFile, fixture.scanRunSource());
         assertNewObservation(nestedEntry, nestedFile, fixture.scanRunSource());
+        assertEquals("txt", topEntry.extensionKey());
+        assertEquals("bin", nestedEntry.extensionKey());
         assertEquals("Nested/More/Clip.bin", nestedEntry.relativePath());
         assertEquals(nestedEntry.relativePath(), nestedEntry.pathKey());
         assertFalse(Path.of(nestedEntry.relativePath()).isAbsolute());
@@ -213,6 +215,7 @@ class DiscoveryApiTests {
 
         FileEntry unchanged = requireFile(fixture.source(), "Case.txt");
         assertEquals("Case.txt", unchanged.relativePath());
+        assertEquals("txt", unchanged.extensionKey());
         assertEquals(4, unchanged.observationRevision());
         assertEquals(unchangedContent.id(), unchanged.currentContentId());
         assertEquals(10, unchanged.firstSeenAtMs());

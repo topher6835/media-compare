@@ -15,10 +15,10 @@ The repository currently contains a working full-stack scaffold:
 - A synchronous command that executes the pending RECONCILIATION stage and completes a ScanRun.
 - A synchronous database-only command that assigns ContentRecords to eligible completed-scan observations.
 - A synchronous command that publishes exact SHA-256 analysis for safe assigned-content candidates.
-- Read-only APIs that derive exact duplicate groups and retained occurrences from trusted SHA-256 artifacts.
+- Read-only APIs that derive exact duplicate groups and retained occurrences from trusted SHA-256 artifacts, with catalog-correct file-category and extension filtering.
 - Frontend `/duplicates` and `/duplicates/:digestHex` routes that browse the derived exact groups and their retained catalog evidence, in addition to the `/` health route.
 
-The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven V1 application tables, structural constraints, foreign keys, and initial indexes. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, `analysis`, and `matching` feature packages. Source registration/read, durable scan-request creation/read, the ScanRun-to-Job execution handoff, DISCOVERY, missing-file RECONCILIATION, initial ContentRecord assignment, exact SHA-256 analysis, and derived exact duplicate reporting are implemented. Background scheduling, broader analysis/matching, AI, and broader product workflows do not exist yet.
+The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven V1 application tables, structural constraints, foreign keys, and initial indexes. Java migration `V2__add_file_entry_extension_key` adds and backfills normalized FileEntry extension metadata plus its lookup index without adding a table. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, `analysis`, and `matching` feature packages. Source registration/read, durable scan-request creation/read, the ScanRun-to-Job execution handoff, DISCOVERY, missing-file RECONCILIATION, initial ContentRecord assignment, exact SHA-256 analysis, and derived exact duplicate reporting/filtering are implemented. Background scheduling, broader analysis/matching, AI, and broader product workflows do not exist yet.
 
 ## Architectural Style
 
@@ -70,7 +70,7 @@ A `Source` is a persistent registered scan root such as a folder, external drive
 
 The initial Source registration behavior preserves the supplied root-path string and writes the same value to `root_path_key`. It uses Java NIO only to check that the path is syntactically valid and absolute for the backend host. Registration does not inspect filesystem availability, require the path to exist or be a directory, resolve symlinks, or canonicalize the path. Duplicate names and root paths are allowed because database ID, not path, establishes Source identity.
 
-A `FileEntry` represents one filesystem occurrence within a Source. It stores a Source-relative path, filesystem metadata, current content association, presence, first/last-seen information, observation revision, and the scan traversal that last observed it. The uniqueness rule is `UNIQUE(source_id, path_key)`.
+A `FileEntry` represents one filesystem occurrence within a Source. It stores a Source-relative path, normalized nullable technical `extension_key`, filesystem metadata, current content association, presence, first/last-seen information, observation revision, and the scan traversal that last observed it. Extension extraction uses the basename suffix after the last dot, lowercases with locale-independent rules, and does not alter portable path identity. The uniqueness rule is `UNIQUE(source_id, path_key)`.
 
 When a FileEntry records `last_seen_scan_run_source_id`, that ScanRunSource must belong to the FileEntry's own Source. V1 keeps the simple foreign key and its `ON DELETE SET NULL` behavior; `CatalogRepository` enforces the cross-table Source match transactionally before insertion rather than adding a composite foreign key or trigger.
 
@@ -86,7 +86,7 @@ Revisiting a Source performs lightweight discovery and reconciliation before exp
 
 The implemented DISCOVERY command is manually and synchronously invoked through `POST /api/scan-runs/{id}/execution/discovery`. Before filesystem work or state mutation, it verifies the ScanRun Source snapshots against every current Source location revision and verifies that the SCAN Job and DISCOVERY stage are pending and eligible. It then starts the ScanRun, Job, stage, and Source traversal state in a short transaction.
 
-Each Source root is traversed recursively with Java NIO `Files.walkFileTree(...)` without opting into link following. Only regular-file entries are observed. Persisted relative paths are derived with NIO relativization, serialize path segments with `/`, preserve observed spelling, and initially serve unchanged as `path_key`. Size and modification epoch-second/nanosecond metadata are captured without millisecond truncation. Discovery creates or refreshes FileEntry occurrences only; it creates no ContentRecord, hash, or analysis row.
+Each Source root is traversed recursively with Java NIO `Files.walkFileTree(...)` without opting into link following. Only regular-file entries are observed. Persisted relative paths are derived with NIO relativization, serialize path segments with `/`, preserve observed spelling, and initially serve unchanged as `path_key`. Size and modification epoch-second/nanosecond metadata are captured without millisecond truncation. Discovery derives `extension_key` from the persisted relative path on insert and re-observation; a path-spelling update therefore keeps the extension synchronized. Discovery creates or refreshes FileEntry occurrences only; it creates no ContentRecord, hash, or analysis row.
 
 File observations and progress are committed in transactions of at most 250 files. No database write transaction spans filesystem traversal. A first traversal advances generation from zero to one. Successful discovery leaves each ScanRunSource `DISCOVERED` with `completed_generation` and `completed_at_ms` still null, completes DISCOVERY, and creates one pending RECONCILIATION stage while the ScanRun and Job remain `RUNNING`.
 
@@ -108,11 +108,13 @@ Digest publication uses a separate transaction-proxied writer. It rechecks FileE
 
 Exact duplicate groups are derived synchronously through `GET /api/exact-duplicate-groups` and `GET /api/exact-duplicate-groups/{digestHex}`. No group or membership table is materialized. A group exists only when at least two distinct ContentRecords have the same completed, provenance-compatible, structurally valid built-in SHA-256 artifact. Singleton hashes and other analyzer definitions are excluded. Completed exact artifacts with missing or malformed specialized results, inconsistent configuration JSON, or same-digest ContentRecords with conflicting sizes are reported as integrity failures rather than silently hidden or repaired.
 
-List queries use ascending digest keyset pagination and digest-led grouping through the existing `(algorithm, digest_hex)` index. ContentRecord cardinality is computed before FileEntry occurrence joins so multiple occurrences cannot inflate membership. Detail reads return distinct ContentRecord members and retained current FileEntry associations, including `MISSING` entries; the schema cannot reconstruct superseded associations that are no longer retained. The potential-storage-savings value is an estimate of logical present-occurrence bytes, not actual recoverable filesystem allocation. Grouping performs no filesystem access, hashing, or durable mutation.
+List queries use ascending digest keyset pagination and digest-led grouping through the existing `(algorithm, digest_hex)` index. Optional repeated category/extension filters select eligible groups through matching retained FileEntry occurrences before cursor comparison and limiting; both `PRESENT` and `MISSING` evidence can match. OR applies within a dimension and AND between dimensions. Once selected, summaries retain complete-group membership, occurrence, Source, size, and savings values; nullable `filterMatch` describes only the matching occurrence count and extensions. ContentRecord cardinality is computed before FileEntry occurrence joins so multiple occurrences cannot inflate membership.
+
+Detail reads always return distinct ContentRecord members and all retained current FileEntry associations, including `MISSING` entries, even when an active filter matches none. Occurrences expose their normalized extension, derived technical `FileCategory`, and match flag. The catalog-wide filter-options endpoint counts extensions across retained occurrences in valid exact groups. `FileCategory` is a small backend classifier (`PHOTO`, `VIDEO`, `DOCUMENT`) derived from extension metadata, not persisted, and is separate from future user Tags/Categories. The schema cannot reconstruct superseded associations that are no longer retained. The potential-storage-savings value is an estimate of logical present-occurrence bytes, not actual recoverable filesystem allocation. Grouping and filtering perform no filesystem access, hashing, or durable mutation.
 
 The React frontend consumes these endpoints through a small typed API module. The list appends keyset pages with duplicate-digest protection and retains loaded rows plus scroll position in browser memory during list/detail navigation. The detail route uses the full digest as identity while displaying a non-authoritative `DUP-` label from its first eight hexadecimal characters. It shows ContentRecord members and deterministically ordered retained occurrences without assigning a keeper. A bounded, session-memory-only trail records duplicate-group visits. None of this frontend state is persisted.
 
-Catalog-correct file-category and extension filtering is deferred. The current list response contains aggregate counts but no occurrence path or extension data, so implementing these filters on loaded pages would give incomplete global results and fetching every detail would create an N+1 design. A later API increment must provide server-side filtering or sufficient group-level match metadata while preserving whole-group context.
+The backend catalog-correct filtering contract is implemented, but the current frontend does not yet expose filter controls or consume filter-match/options data.
 
 Filesystem failure marks every ScanRunSource participating in that started DISCOVERY attempt, the DISCOVERY stage, Job, and ScanRun failed without creating RECONCILIATION or marking any FileEntry missing. This ensures no child of the terminally failed attempt remains `DISCOVERING`. Earlier committed observation batches remain tagged with their incomplete generations; `completed_generation` remains null, so those partial observations do not authorize a missing sweep. Retry and recovery behavior is not implemented.
 
@@ -256,10 +258,11 @@ The implemented exact-duplicate slice is:
 
 ```text
 GET /api/exact-duplicate-groups[/{digestHex}]
+GET /api/exact-duplicate-groups/filter-options
     -> ExactDuplicateController
     -> ExactDuplicateService
     -> completed-artifact integrity checks
-    -> indexed digest grouping + member/occurrence reads
+    -> indexed digest grouping + retained-occurrence filtering + member/occurrence reads
     -> no filesystem access or durable mutation
 ```
 

@@ -10,7 +10,8 @@ public record ExactDuplicateGroupSummaryResponse(
         long presentOccurrenceCount,
         long missingOccurrenceCount,
         long sourceCount,
-        long potentialStorageSavingsBytes) {
+        long potentialStorageSavingsBytes,
+        ExactDuplicateFilterMatchResponse filterMatch) {
 
     public static ExactDuplicateGroupSummaryResponse from(ExactDuplicateGroupSummary summary) {
         return new ExactDuplicateGroupSummaryResponse(
@@ -21,6 +22,7 @@ public record ExactDuplicateGroupSummaryResponse(
                 summary.presentOccurrenceCount(),
                 summary.missingOccurrenceCount(),
                 summary.sourceCount(),
-                summary.potentialStorageSavingsBytes());
+                summary.potentialStorageSavingsBytes(),
+                ExactDuplicateFilterMatchResponse.from(summary.filterMatch()));
     }
 }

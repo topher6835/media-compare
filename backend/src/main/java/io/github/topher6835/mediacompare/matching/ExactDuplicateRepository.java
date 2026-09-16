@@ -1,8 +1,11 @@
 package io.github.topher6835.mediacompare.matching;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.Set;
 
 import io.github.topher6835.mediacompare.analysis.Sha256AnalysisDefinition;
 
@@ -79,16 +82,41 @@ public class ExactDuplicateRepository {
     }
 
     public List<ExactDuplicateGroupCounts> findGroupCounts(
-            String afterDigestHex, int limit) {
-        return jdbcTemplate.query(EXACT_MEMBERS_CTE + """
-                , selected_groups AS (
+            String afterDigestHex, int limit, ExactDuplicateFilter filter) {
+        String matchingGroups = filter.active()
+                ? """
+                        , matching_groups AS (
+                            SELECT eligible_groups.*
+                            FROM eligible_groups
+                            WHERE EXISTS (
+                                SELECT 1
+                                FROM exact_members AS matching_member
+                                JOIN file_entry AS matching_entry
+                                  ON matching_entry.current_content_id = matching_member.content_record_id
+                                WHERE matching_member.digest_hex = eligible_groups.digest_hex
+                                  AND matching_entry.extension_key IN (%s)
+                            )
+                        )
+                        """.formatted(placeholders(filter.effectiveExtensionKeys().size()))
+                : """
+                        , matching_groups AS (
+                            SELECT * FROM eligible_groups
+                        )
+                        """;
+        String sql = EXACT_MEMBERS_CTE + """
+                , eligible_groups AS (
                     SELECT digest_hex,
                            MIN(size_bytes) AS size_bytes,
                            COUNT(DISTINCT content_record_id) AS content_record_count
                     FROM exact_members
-                    WHERE digest_hex > ?
                     GROUP BY digest_hex
                     HAVING COUNT(DISTINCT content_record_id) >= 2
+                )
+                """ + matchingGroups + """
+                , selected_groups AS (
+                    SELECT *
+                    FROM matching_groups
+                    WHERE digest_hex > ?
                     ORDER BY digest_hex
                     LIMIT ?
                 )
@@ -107,8 +135,13 @@ public class ExactDuplicateRepository {
                          selected_groups.size_bytes,
                          selected_groups.content_record_count
                 ORDER BY selected_groups.digest_hex
-                """, (resultSet, rowNumber) -> mapGroupCounts(resultSet),
-                exactDefinitionParameters(afterDigestHex, limit));
+                """;
+
+        List<Object> parameters = new ArrayList<>(List.of(exactDefinitionParameters()));
+        parameters.addAll(sorted(filter.effectiveExtensionKeys()));
+        parameters.add(afterDigestHex);
+        parameters.add(limit);
+        return jdbcTemplate.query(sql, (resultSet, rowNumber) -> mapGroupCounts(resultSet), parameters.toArray());
     }
 
     public Optional<ExactDuplicateGroupCounts> findGroupCounts(String digestHex) {
@@ -152,13 +185,14 @@ public class ExactDuplicateRepository {
                 exactDefinitionParameters(digestHex));
     }
 
-    public List<ExactDuplicateOccurrence> findOccurrences(String digestHex) {
+    public List<ExactDuplicateOccurrenceRow> findOccurrences(String digestHex) {
         return jdbcTemplate.query(EXACT_MEMBERS_CTE + """
                 SELECT file_entry.id AS file_entry_id,
                        file_entry.current_content_id AS content_record_id,
                        file_entry.source_id,
                        source.name AS source_name,
                        file_entry.relative_path,
+                       file_entry.extension_key,
                        file_entry.presence_status
                 FROM exact_members
                 JOIN file_entry ON file_entry.current_content_id = exact_members.content_record_id
@@ -166,14 +200,69 @@ public class ExactDuplicateRepository {
                 WHERE exact_members.digest_hex = ?
                 ORDER BY file_entry.current_content_id, file_entry.source_id,
                          file_entry.relative_path, file_entry.id
-                """, (resultSet, rowNumber) -> new ExactDuplicateOccurrence(
+                """, (resultSet, rowNumber) -> new ExactDuplicateOccurrenceRow(
                         resultSet.getLong("file_entry_id"),
                         resultSet.getLong("content_record_id"),
                         resultSet.getLong("source_id"),
                         resultSet.getString("source_name"),
                         resultSet.getString("relative_path"),
+                        resultSet.getString("extension_key"),
                         resultSet.getString("presence_status")),
                 exactDefinitionParameters(digestHex));
+    }
+
+    public List<ExactDuplicateFilterMatchCount> findFilterMatchCounts(
+            List<String> digestHexes, Set<String> extensionKeys) {
+        if (digestHexes.isEmpty() || extensionKeys.isEmpty()) {
+            return List.of();
+        }
+        String sql = EXACT_MEMBERS_CTE + """
+                SELECT exact_members.digest_hex,
+                       file_entry.extension_key,
+                       COUNT(*) AS occurrence_count
+                FROM exact_members
+                JOIN file_entry ON file_entry.current_content_id = exact_members.content_record_id
+                WHERE exact_members.digest_hex IN (%s)
+                  AND file_entry.extension_key IN (%s)
+                GROUP BY exact_members.digest_hex, file_entry.extension_key
+                ORDER BY exact_members.digest_hex, file_entry.extension_key
+                """.formatted(placeholders(digestHexes.size()), placeholders(extensionKeys.size()));
+
+        List<Object> parameters = new ArrayList<>(List.of(exactDefinitionParameters()));
+        parameters.addAll(digestHexes);
+        parameters.addAll(sorted(extensionKeys));
+        return jdbcTemplate.query(sql, (resultSet, rowNumber) -> new ExactDuplicateFilterMatchCount(
+                resultSet.getString("digest_hex"),
+                resultSet.getString("extension_key"),
+                resultSet.getLong("occurrence_count")), parameters.toArray());
+    }
+
+    public List<ExactDuplicateFilterOption> findFilterOptions() {
+        return jdbcTemplate.query(EXACT_MEMBERS_CTE + """
+                , duplicate_groups AS (
+                    SELECT digest_hex
+                    FROM exact_members
+                    GROUP BY digest_hex
+                    HAVING COUNT(DISTINCT content_record_id) >= 2
+                )
+                SELECT file_entry.extension_key,
+                       COUNT(DISTINCT exact_members.digest_hex) AS exact_duplicate_group_count,
+                       COUNT(*) AS retained_occurrence_count
+                FROM duplicate_groups
+                JOIN exact_members ON exact_members.digest_hex = duplicate_groups.digest_hex
+                JOIN file_entry ON file_entry.current_content_id = exact_members.content_record_id
+                WHERE file_entry.extension_key IS NOT NULL
+                GROUP BY file_entry.extension_key
+                ORDER BY file_entry.extension_key
+                """, (resultSet, rowNumber) -> {
+                    String extensionKey = resultSet.getString("extension_key");
+                    return new ExactDuplicateFilterOption(
+                            extensionKey,
+                            io.github.topher6835.mediacompare.catalog.FileCategory
+                                    .fromExtensionKey(extensionKey).orElse(null),
+                            resultSet.getLong("exact_duplicate_group_count"),
+                            resultSet.getLong("retained_occurrence_count"));
+                }, exactDefinitionParameters());
     }
 
     private static ExactDuplicateGroupCounts mapGroupCounts(java.sql.ResultSet resultSet)
@@ -199,5 +288,13 @@ public class ExactDuplicateRepository {
         parameters[7] = Sha256AnalysisDefinition.ALGORITHM;
         System.arraycopy(additionalParameters, 0, parameters, 8, additionalParameters.length);
         return parameters;
+    }
+
+    private static String placeholders(int count) {
+        return String.join(", ", Collections.nCopies(count, "?"));
+    }
+
+    private static List<String> sorted(Set<String> values) {
+        return values.stream().sorted().toList();
     }
 }

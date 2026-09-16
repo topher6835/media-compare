@@ -1,5 +1,8 @@
 package io.github.topher6835.mediacompare.web;
 
+import java.util.List;
+
+import io.github.topher6835.mediacompare.matching.ExactDuplicateFilter;
 import io.github.topher6835.mediacompare.matching.ExactDuplicateService;
 
 import org.springframework.http.ResponseEntity;
@@ -23,14 +26,25 @@ public class ExactDuplicateController {
     @GetMapping
     public ExactDuplicateGroupPageResponse findGroups(
             @RequestParam(required = false) String afterDigestHex,
-            @RequestParam(required = false) Integer limit) {
-        return ExactDuplicateGroupPageResponse.from(service.findGroups(afterDigestHex, limit));
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) List<String> fileCategory,
+            @RequestParam(required = false) List<String> extension) {
+        ExactDuplicateFilter filter = ExactDuplicateFilter.from(fileCategory, extension);
+        return ExactDuplicateGroupPageResponse.from(service.findGroups(afterDigestHex, limit, filter));
+    }
+
+    @GetMapping("/filter-options")
+    public ExactDuplicateFilterOptionsResponse findFilterOptions() {
+        return ExactDuplicateFilterOptionsResponse.from(service.findFilterOptions());
     }
 
     @GetMapping("/{digestHex}")
     public ResponseEntity<ExactDuplicateGroupDetailResponse> findGroup(
-            @PathVariable String digestHex) {
-        return service.findGroup(digestHex)
+            @PathVariable String digestHex,
+            @RequestParam(required = false) List<String> fileCategory,
+            @RequestParam(required = false) List<String> extension) {
+        ExactDuplicateFilter filter = ExactDuplicateFilter.from(fileCategory, extension);
+        return service.findGroup(digestHex, filter)
                 .map(ExactDuplicateGroupDetailResponse::from)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());

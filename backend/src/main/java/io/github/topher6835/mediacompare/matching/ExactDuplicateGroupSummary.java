@@ -8,5 +8,6 @@ public record ExactDuplicateGroupSummary(
         long presentOccurrenceCount,
         long missingOccurrenceCount,
         long sourceCount,
-        long potentialStorageSavingsBytes) {
+        long potentialStorageSavingsBytes,
+        ExactDuplicateFilterMatch filterMatch) {
 }

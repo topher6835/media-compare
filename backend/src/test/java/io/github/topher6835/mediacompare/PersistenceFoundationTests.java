@@ -17,6 +17,7 @@ import io.github.topher6835.mediacompare.analysis.ContentHash;
 import io.github.topher6835.mediacompare.catalog.CatalogRepository;
 import io.github.topher6835.mediacompare.catalog.ContentRecord;
 import io.github.topher6835.mediacompare.catalog.FileEntry;
+import io.github.topher6835.mediacompare.catalog.FileObservation;
 import io.github.topher6835.mediacompare.catalog.Source;
 import io.github.topher6835.mediacompare.catalog.WorkingSet;
 import io.github.topher6835.mediacompare.catalog.WorkingSetContent;
@@ -146,6 +147,32 @@ class PersistenceFoundationTests {
         FileEntry mismatchedEntry = new FileEntry(null, firstSource.id(), "mismatched.dat", "mismatched.dat", null,
                 "PRESENT", 10, null, null, 0, 1, 1, secondScanSource.id(), 1L);
         assertThrows(DataIntegrityViolationException.class, () -> catalogRepository.insert(mismatchedEntry));
+    }
+
+    @Test
+    void observationMaintainsExtensionAndMissingReconciliationPreservesIt() {
+        Source source = insertSource("Observed");
+        ScanRun scanRun = insertScanRun();
+        ScanRunSource scanSource = insertScanRunSource(scanRun.id(), source.id(), 1, null);
+
+        FileEntry observed = catalogRepository.observeFile(new FileObservation(
+                source.id(), "photos/Image.JPG", "stable-path-key", 10, 100, 25,
+                1, scanSource.id(), 1));
+        assertEquals("jpg", observed.extensionKey());
+
+        assertEquals(1, catalogRepository.markUnseenPresentFilesMissing(
+                source.id(), scanSource.id(), 2));
+        FileEntry missing = catalogRepository.findFileEntryById(observed.id()).orElseThrow();
+        assertEquals("MISSING", missing.presenceStatus());
+        assertEquals("jpg", missing.extensionKey());
+
+        FileEntry reobserved = catalogRepository.observeFile(new FileObservation(
+                source.id(), "photos/Renamed.PDF", "stable-path-key", 10, 100, 25,
+                2, scanSource.id(), 2));
+        assertEquals("PRESENT", reobserved.presenceStatus());
+        assertEquals("pdf", reobserved.extensionKey());
+        assertEquals("pdf", catalogRepository.findFileEntryById(observed.id())
+                .orElseThrow().extensionKey());
     }
 
     @Test

@@ -2,11 +2,11 @@
 
 ## Current State
 
-Media Compare is a fresh v2 repository with a working full-stack scaffold. The repository contains separate `backend/` and `frontend/` projects. The backend can register/read Sources, create/read durable Source-based scan requests, create/read the durable ScanRun-to-Job execution handoff, synchronously execute DISCOVERY followed by safe missing-file RECONCILIATION, assign ContentRecords to eligible completed-scan observations, publish exact SHA-256 analysis, and derive exact duplicate groups through REST. The frontend can browse exact duplicate groups and inspect their ContentRecord members and retained FileEntry occurrences. Broader library/review workflows, media analysis, similarity matching, materialized decisions, and cleanup are not implemented.
+Media Compare is a fresh v2 repository with a working full-stack scaffold. The repository contains separate `backend/` and `frontend/` projects. The backend can register/read Sources, create/read durable Source-based scan requests, create/read the durable ScanRun-to-Job execution handoff, synchronously execute DISCOVERY followed by safe missing-file RECONCILIATION, assign ContentRecords to eligible completed-scan observations, publish exact SHA-256 analysis, and derive and catalog-correctly filter exact duplicate groups through REST. The frontend can browse exact duplicate groups and inspect their ContentRecord members and retained FileEntry occurrences, but does not yet expose the new backend filters. Broader library/review workflows, media analysis, similarity matching, materialized decisions, and cleanup are not implemented.
 
 The backend is a Java 21 and Spring Boot 4.1.1 Maven application. It connects to a local SQLite database, starts Flyway, exposes `GET /api/health`, provides Source endpoints under `/api/sources`, scan-request endpoints under `/api/scan-runs`, execution-handoff endpoints under `/api/scan-runs/{id}/execution`, synchronous DISCOVERY and RECONCILIATION POST endpoints, `POST /api/scan-runs/{id}/content-assignment`, `POST /api/scan-runs/{id}/content-hashing`, and read-only exact duplicate endpoints under `/api/exact-duplicate-groups`. The frontend is a React and TypeScript Vite application with React Router. Its `/` route retains the health check, `/duplicates` browses aggregate group summaries with keyset `Load more`, and `/duplicates/:digestHex` shows a group summary, members, and occurrences. No Source, ScanRun, or execution frontend exists.
 
-The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven application tables with their structural constraints, foreign keys, and initial indexes; no new migration was needed for DISCOVERY, RECONCILIATION, ContentRecord assignment, exact hashing, or derived exact grouping. Immutable Java records and focused Spring JDBC repositories provide persistence under the reviewed feature packages. Exact hashing streams filesystem bytes outside transactions and atomically publishes reusable analysis only after stale-evidence guards pass. The matching slice derives duplicate summaries, members, and retained occurrences from trusted artifacts without materializing groups or mutating state. Scheduling/background execution, broader analysis/matching, AI, and filesystem modification remain unimplemented.
+The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven application tables with their structural constraints, foreign keys, and initial indexes. Java Flyway migration `V2__add_file_entry_extension_key` adds nullable normalized FileEntry extension metadata, bounded backfill, and the `(extension_key, current_content_id)` index. Immutable Java records and focused Spring JDBC repositories provide persistence under the reviewed feature packages. Exact hashing streams filesystem bytes outside transactions and atomically publishes reusable analysis only after stale-evidence guards pass. The matching slice derives and filters duplicate summaries, members, and retained occurrences from trusted artifacts without materializing groups or mutating state. Scheduling/background execution, broader analysis/matching, AI, and filesystem modification remain unimplemented.
 
 ## Documentation
 
@@ -25,9 +25,9 @@ The durable documentation baseline is:
 - The backend compiles and its Spring context test passes on Java 21.
 - Spring Boot starts successfully on port `8080`.
 - SQLite connectivity uses `jdbc:sqlite:data/media-compare.db?foreign_keys=on`.
-- Flyway applies `V1__create_core_schema.sql` from `classpath:db/migration` and creates all eleven V1 application tables.
+- Flyway applies `V1__create_core_schema.sql` and Java migration `V2__add_file_entry_extension_key`, retaining eleven application tables.
 - SQLite foreign-key enforcement is enabled on every physical datasource connection through the JDBC URL's `foreign_keys=on` property.
-- The migration enforces the reviewed uniqueness, numeric/range, timestamp-pair, foreign-key, and deletion rules and creates the six reviewed secondary indexes.
+- The migrations enforce the reviewed uniqueness, numeric/range, timestamp-pair, foreign-key, and deletion rules and create the six V1 secondary indexes plus the V2 FileEntry extension/content index.
 - Immutable Java records represent the V1 rows in the `catalog`, `scan`, `job`, and `analysis` packages.
 - `CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` provide focused Spring JDBC insert/read operations.
 - Persistence tests verify the exact table set, foreign-key behavior on multiple connections, FileEntry/ScanRunSource Source consistency, traversal/completed-generation bounds, key uniqueness and intentional non-uniqueness, numeric/timestamp constraints, deletion behavior, and repository round trips.
@@ -53,7 +53,7 @@ The durable documentation baseline is:
 - Discovery preflight verifies that every selected Source still exists, each location revision matches its ScanRun snapshot, and the SCAN Job/current DISCOVERY stage are pending. Missing ScanRuns/executions return 404; stale Source snapshots and ineligible/already-completed execution return 409 without mutation or traversal.
 - Starting discovery moves the ScanRun and Job to `RUNNING`, starts DISCOVERY, increments Job/stage attempt counts to one, and moves each ScanRunSource to `DISCOVERING` with its first traversal generation set to one.
 - Source roots are walked recursively with Java NIO `Files.walkFileTree(...)` without enabling link following. Only regular files are observed; directories and symbolic-link entries are skipped.
-- Persisted paths are Source-relative, preserve observed case and Unicode spelling, use `/` between NIO path segments, and initially use the same string for `relative_path` and `path_key`. Absolute paths are not stored as FileEntry relative paths.
+- Persisted paths are Source-relative, preserve observed case and Unicode spelling, use `/` between NIO path segments, and initially use the same string for `relative_path` and `path_key`. Absolute paths are not stored as FileEntry relative paths. FileEntries also store a nullable lowercase technical extension derived from the basename without changing path identity; re-observation keeps it synchronized.
 - Discovery records file size and modification epoch seconds/nanoseconds. It does not use millisecond-truncated filesystem time.
 - New FileEntries are `PRESENT`, have revision zero and no ContentRecord. Re-observation refreshes current metadata and traversal identity; size/mtime/presence changes increment the observation revision once and clear stale content association, while unchanged observations preserve revision, first-seen time, and content association.
 - FileEntry observations and Job/stage progress commit in transactions of at most 250 files. Start, completion, and failure state use separate short transaction-proxied bean methods; traversal itself is outside a write transaction.
@@ -66,7 +66,7 @@ The durable documentation baseline is:
 - Reconciliation preflight requires a `RUNNING` ScanRun, a `RUNNING` SCAN Job whose current stage is RECONCILIATION, completed DISCOVERY, pending RECONCILIATION, and only `DISCOVERED` ScanRunSources with positive traversal generations and null completion state. Missing ScanRuns/executions return 404; ineligible state returns 409 before mutation.
 - Reconciliation uses no filesystem or current Source configuration data. It succeeds after Source roots are removed or location revisions change because it consumes durable FileEntry traversal identity.
 - An exact current `(scan_run_source_id, traversal_generation)` pair keeps an entry `PRESENT`. Other currently-present entries for that Source, including rows with null last-seen fields, become `MISSING`; entries belonging to unselected Sources are untouched.
-- Becoming `MISSING` preserves content association, observation revision, path, filesystem metadata, seen timestamps, and last-seen traversal identity. Already-missing entries remain unchanged.
+- Becoming `MISSING` preserves extension metadata, content association, observation revision, path, filesystem metadata, seen timestamps, and last-seen traversal identity. Already-missing entries remain unchanged.
 - Each Source's missing sweep, transition to `COMPLETED`, completed-generation/timestamp publication, and progress update share one transaction. A failure within that boundary rolls all of those changes back together; generic recovery after separately committed Sources remains deferred.
 - RECONCILIATION progress counts completed Sources. Job progress mirrors the current stage and resets from DISCOVERY file units to zero out of the Source count when reconciliation starts.
 - Successful reconciliation completes all ScanRunSources, the RECONCILIATION stage, the Job, and the ScanRun; clears the Job's current stage; preserves the Job attempt count and ScanRun start timestamp; and creates no subsequent stage.
@@ -90,7 +90,10 @@ The durable documentation baseline is:
 - ContentRecord cardinality is calculated separately from occurrence joins. `PRESENT` and `MISSING` counts, distinct retained Sources, zero-occurrence members, and deterministic member/occurrence ordering are supported across Sources without filesystem access.
 - Potential storage savings is the estimated logical value `max(presentOccurrenceCount - 1, 0) * sizeBytes`; missing occurrences do not contribute, and the value is not actual recoverable disk allocation.
 - Exact groups are live derived views, not durable group rows. Reads create no Job/JobStage, do not mutate catalog or analysis state, and do not merge or canonicalize ContentRecords.
-- Exact-duplicate integration tests exercise real SQLite grouping, occurrence aggregation, provenance filtering, corruption handling, pagination/input validation, missing history, unavailable roots, and repeated read-only behavior.
+- Repeated case-insensitive `fileCategory` and `extension` parameters filter eligible groups through retained occurrences before digest pagination. Values use OR within a dimension and AND between dimensions; both `PRESENT` and `MISSING` occurrences can select a group.
+- Filtered summaries preserve complete-group counts and savings. Their nullable `filterMatch` reports only matching retained-occurrence count and extensions. Filtered detail always returns the full group and marks every occurrence with nullable extension/category metadata plus `matchesFilter`; a zero-match detail remains HTTP 200.
+- `GET /api/exact-duplicate-groups/filter-options` returns deterministic non-null extension options with derived nullable technical category, distinct exact-group count, and retained-occurrence count. Technical `PHOTO`, `VIDEO`, and `DOCUMENT` classification is backend-derived and distinct from future user Tags/Categories.
+- Exact-duplicate integration tests exercise real SQLite grouping, occurrence aggregation, provenance/integrity filtering, category/extension selection, whole-group match context, filtered pagination, detail flags, filter options, missing history, unavailable roots, and repeated read-only behavior.
 - The frontend production build succeeds.
 - React Router is wired through `BrowserRouter` and a `/` route.
 - The Vite development server starts on port `5173`.
@@ -103,7 +106,7 @@ The durable documentation baseline is:
 - Loaded list pages and scroll position survive normal list/detail navigation in browser memory. A bounded browser-memory trail records meaningful group visits without consecutive duplicates.
 - Loading, empty, malformed-request, unknown-group, and backend-failure states have user-facing messages without backend details.
 - The exact-duplicate frontend has no mutation controls; it performs no deletion, move, cleanup, merge, keeper selection, or persistent review-state write.
-- Local `main` and `origin/main` started this frontend increment at `a2a26d2` (`Add read-only exact duplicate grouping`) with a clean worktree.
+- Local `main` and `origin/main` started this backend filtering increment at `79925a5` (`Add exact duplicate browsing frontend`) with a clean worktree.
 - Git origin uses `git@github-personal:topher6835/media-compare.git`, with repository-local identity configured for `topher6835`.
 
 ## Known Limitations / Not Yet Implemented
@@ -116,11 +119,11 @@ The durable documentation baseline is:
 - No SSE endpoint or event design exists.
 - No matching candidates, similarity relationships, materialized groups, manual overrides, or filesystem-action history exists.
 - No broader Library/Review UI, review states/flags, persistent categories/tags, AI suggestions, similarity-group UI, or actual filesystem actions exist.
-- File-category and extension filters are deferred because the current list API lacks occurrence/extension match metadata. Filtering loaded pages would be incomplete, and fetching every group detail would be N+1. A later backend/API design must support catalog-wide filtering while retaining whole-group context.
+- Frontend file-category and extension controls are not implemented. The backend contract and filter options are available for a later frontend milestone.
 - Advanced sorting is deferred; the frontend preserves deterministic server digest ordering rather than sorting only loaded pages.
 - Lifecycle/type values, workflow-level repository operations, merge behavior, scheduling, concurrency, cache locations, and FFmpeg/ffprobe discovery remain open as documented.
 - The frontend still has no automated test framework. This increment was validated with lint, a production TypeScript/Vite build, and focused server-render/API fixture checks; durable component tests remain a future testing-infrastructure decision.
 
 ## Next Recommended Step
 
-After reviewing the exact-duplicate frontend diff, define the backend contract for catalog-correct file-category/extension filtering and whole-group match context before adding filters. Cleanup, keeper selection, persistent review decisions, similarity groups, and filesystem modification remain later milestones.
+After reviewing this backend/persistence diff, implement frontend file-category and extension controls against the catalog-correct filter contract. Cleanup, keeper selection, persistent review decisions, similarity groups, and filesystem modification remain later milestones.

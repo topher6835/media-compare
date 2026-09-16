@@ -2,7 +2,7 @@
 
 ## Status and Scope
 
-The reviewed V1 persistence design is implemented by Flyway migration `V1__create_core_schema.sql`. The application now has the eleven V1 tables, their structural constraints and initial indexes, immutable Java record representations, and small Spring JDBC repositories. The existing schema supports the implemented DISCOVERY, RECONCILIATION, ContentRecord-assignment, exact-hashing, and derived exact-duplicate behavior without another migration.
+The reviewed V1 persistence design is implemented by Flyway migration `V1__create_core_schema.sql`. Java Flyway migration `V2__add_file_entry_extension_key` evolves `file_entry` with normalized technical extension metadata and an index; it adds no table. The application has eleven tables, immutable Java record representations, and small Spring JDBC repositories supporting DISCOVERY, RECONCILIATION, ContentRecord assignment, exact hashing, and derived exact-duplicate filtering.
 
 The first migration contains exactly eleven application tables. The fields and constraints below describe the implemented schema.
 
@@ -42,6 +42,7 @@ Implemented fields:
 - `source_id INTEGER NOT NULL`
 - `relative_path TEXT NOT NULL`
 - `path_key TEXT NOT NULL`
+- `extension_key TEXT NULL` (added by V2)
 - `current_content_id INTEGER NULL`
 - `presence_status TEXT NOT NULL`
 - `size_bytes INTEGER NOT NULL CHECK >= 0`
@@ -55,11 +56,13 @@ Implemented fields:
 
 The uniqueness rule is `UNIQUE(source_id, path_key)`. `relative_path` preserves observed case and Unicode spelling through Java NIO. Persisted portable relative paths use `/` between segments. V1 does not globally lowercase paths, Unicode-normalize them, resolve symlinks, or call `toRealPath()` to construct occurrence identity. Where equivalence is uncertain, observations remain separate. Initially `path_key` may match the portable serialized path while remaining a separate field for future lookup policy.
 
+`extension_key` is technical normalized FileEntry metadata, not a user category or tag. V2 snapshots its extraction rules inside the historical migration: use the basename suffix after its last dot and lowercase with `Locale.ROOT`; lone leading dots, trailing dots, and names without a dot store null. Paths and extension text are not Unicode-normalized. Runtime discovery/re-observation uses `FileExtensionNormalizer`; both currently implement the V2 rules. A future change to persisted extension semantics requires a later migration so fresh databases remain consistent with databases that already applied V2. Unknown extensions remain valid. Broad `PHOTO`, `VIDEO`, and `DOCUMENT` values are derived in Java from this key and are not persisted; unclassified extensions have no technical FileCategory.
+
 A FileEntry represents a filesystem occurrence, not immutable content. Its occurrence remains historically useful when the file disappears. `PRESENT` and `MISSING` are the minimum conceptual presence states. `observation_revision` increments when an observation indicates that bytes or content association may have changed; seeing the same unchanged file does not increment it.
 
-Implemented discovery inserts a new observed occurrence as `PRESENT`, with no ContentRecord, observation revision zero, equal first/last-seen timestamps, and the current ScanRunSource/traversal generation. Re-observation always refreshes path spelling, presence, size, modification time, last-seen time, and traversal identity. A size change, modification-time change, or return from a non-`PRESENT` state increments the revision once and clears `current_content_id`; unchanged metadata preserves both revision and content association.
+Implemented discovery inserts a new observed occurrence as `PRESENT`, with normalized extension metadata, no ContentRecord, observation revision zero, equal first/last-seen timestamps, and the current ScanRunSource/traversal generation. Re-observation always refreshes path spelling and its derived extension, presence, size, modification time, last-seen time, and traversal identity. A size change, modification-time change, or return from a non-`PRESENT` state increments the revision once and clears `current_content_id`; unchanged metadata preserves both revision and content association.
 
-Implemented reconciliation marks a currently `PRESENT` occurrence `MISSING` when it belongs to the Source being reconciled and its last-seen ScanRunSource/generation pair does not exactly match the completed traversal. Null last-seen fields count as not observed. This update changes only `presence_status`; it preserves `current_content_id`, observation revision, paths, size, modification time, first/last-seen timestamps, and traversal identity. Already-`MISSING` entries remain unchanged.
+Implemented reconciliation marks a currently `PRESENT` occurrence `MISSING` when it belongs to the Source being reconciled and its last-seen ScanRunSource/generation pair does not exactly match the completed traversal. Null last-seen fields count as not observed. This update changes only `presence_status`; it preserves `extension_key`, `current_content_id`, observation revision, paths, size, modification time, first/last-seen timestamps, and traversal identity. Already-`MISSING` entries remain unchanged.
 
 Implemented ContentRecord assignment selects only `PRESENT`, content-null FileEntries whose last-seen ScanRunSource and generation exactly match a completed ScanRunSource traversal. Candidate reads use ascending FileEntry-ID keyset pages of at most 250 and carry only ID, observation revision, and size. ContentRecord insertion and publication to `current_content_id` share one transaction. The conditional publication requires unchanged presence, null content, observation revision, and size; a stale candidate rolls back the inserted record so no orphan remains. Last-seen traversal identity is intentionally not part of that publication guard, allowing a later unchanged observation of the same occurrence version. Existing content identity survives unchanged rescans, and repeating assignment creates no duplicate record.
 
@@ -223,6 +226,8 @@ This is the specialized exact-hash artifact. The implemented built-in artifact u
 
 The exact duplicate view uses this existing index and the exact built-in AnalysisRecord provenance to derive groups with at least two distinct ContentRecords. It stores no group identity or membership rows. Member counts are calculated independently of FileEntry joins; retained FileEntries then supply present/missing occurrence and Source counts. A ContentRecord without a FileEntry remains a member. Potential storage savings is estimated as `max(present occurrence count - 1, 0) * size_bytes`; missing occurrences contribute no current savings, and this is not a measurement of allocated disk blocks.
 
+Occurrence filters use `file_entry.extension_key` to select complete exact groups. Both `PRESENT` and `MISSING` retained occurrences can select a group; a ContentRecord without an occurrence remains a full member after another occurrence selects that group. Summary counts and savings remain whole-group values, while `filterMatch` counts only matching retained occurrences. Detail responses return the whole group and mark each occurrence against the filter. Filter options aggregate distinct digest-group and retained-occurrence counts by non-null extension across valid exact groups.
+
 ## Filesystem Timestamps
 
 Application lifecycle timestamps use epoch milliseconds stored as SQLite integers. Filesystem modification times preserve available Java `FileTime` precision with an epoch-second value and nanosecond component. The two values are both present or both absent; nanoseconds are constrained to `0..999999999`. Filesystems that provide less precision remain valid.
@@ -248,6 +253,7 @@ Beyond primary keys and uniqueness constraints, the reviewed initial useful inde
 
 - `file_entry(current_content_id, presence_status)`
 - `file_entry(source_id, presence_status, last_seen_traversal_generation)` for Source-led reconciliation
+- `file_entry(extension_key, current_content_id)` for occurrence-led exact-group filtering (added by V2)
 - `working_set_content(content_record_id)`
 - `scan_run_source(source_id, status)`
 - `job(scan_run_id)`
@@ -268,7 +274,7 @@ Immutable records representing all eleven table row shapes and concrete Spring J
 - `job`
 - `analysis`
 
-`CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` provide focused insert, read, and workflow-specific update operations. They use `JdbcTemplate` directly without a generic repository superclass or ORM. `CatalogRepository` includes Source lookup/listing, FileEntry observation, an explicit Source-scoped missing update, bounded assignment/hashing candidate reads, and guarded publication checks. `AnalysisRepository` reads exact provenance keys and persists AnalysisRecord/ContentHash artifacts. `ExactDuplicateRepository` performs read-only integrity, grouped-summary, member, and occurrence queries. Dedicated Spring beans give discovery start/batches/finalization/failure, reconciliation start/finalization, each Source's atomic missing-sweep/completed-generation boundary, each ContentRecord insert/FileEntry publication, and each guarded AnalysisRecord/ContentHash publication a real transaction. Exact grouping uses no transaction spanning its live read view. Filesystem traversal and hashing remain outside database transactions; reconciliation, ContentRecord assignment, and exact grouping perform no filesystem work.
+`CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` provide focused insert, read, and workflow-specific update operations. They use `JdbcTemplate` directly without a generic repository superclass or ORM. `CatalogRepository` includes Source lookup/listing, extension-maintaining FileEntry observation, an explicit Source-scoped missing update, bounded assignment/hashing candidate reads, and guarded publication checks. `AnalysisRepository` reads exact provenance keys and persists AnalysisRecord/ContentHash artifacts. `ExactDuplicateRepository` performs read-only integrity, filtered grouped-summary, match-context, filter-option, member, and occurrence queries. Dedicated Spring beans give discovery start/batches/finalization/failure, reconciliation start/finalization, each Source's atomic missing-sweep/completed-generation boundary, each ContentRecord insert/FileEntry publication, and each guarded AnalysisRecord/ContentHash publication a real transaction. Exact grouping uses no transaction spanning its live read view. Filesystem traversal and hashing remain outside database transactions; reconciliation, ContentRecord assignment, and exact grouping/filtering perform no filesystem work.
 
 ## Explicitly Deferred
 
