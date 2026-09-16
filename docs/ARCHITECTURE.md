@@ -16,7 +16,7 @@ The repository currently contains a working full-stack scaffold:
 - A synchronous database-only command that assigns ContentRecords to eligible completed-scan observations.
 - A synchronous command that publishes exact SHA-256 analysis for safe assigned-content candidates.
 - Read-only APIs that derive exact duplicate groups and retained occurrences from trusted SHA-256 artifacts.
-- A frontend `/` route that requests and displays the health result.
+- Frontend `/duplicates` and `/duplicates/:digestHex` routes that browse the derived exact groups and their retained catalog evidence, in addition to the `/` health route.
 
 The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven V1 application tables, structural constraints, foreign keys, and initial indexes. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, `analysis`, and `matching` feature packages. Source registration/read, durable scan-request creation/read, the ScanRun-to-Job execution handoff, DISCOVERY, missing-file RECONCILIATION, initial ContentRecord assignment, exact SHA-256 analysis, and derived exact duplicate reporting are implemented. Background scheduling, broader analysis/matching, AI, and broader product workflows do not exist yet.
 
@@ -109,6 +109,10 @@ Digest publication uses a separate transaction-proxied writer. It rechecks FileE
 Exact duplicate groups are derived synchronously through `GET /api/exact-duplicate-groups` and `GET /api/exact-duplicate-groups/{digestHex}`. No group or membership table is materialized. A group exists only when at least two distinct ContentRecords have the same completed, provenance-compatible, structurally valid built-in SHA-256 artifact. Singleton hashes and other analyzer definitions are excluded. Completed exact artifacts with missing or malformed specialized results, inconsistent configuration JSON, or same-digest ContentRecords with conflicting sizes are reported as integrity failures rather than silently hidden or repaired.
 
 List queries use ascending digest keyset pagination and digest-led grouping through the existing `(algorithm, digest_hex)` index. ContentRecord cardinality is computed before FileEntry occurrence joins so multiple occurrences cannot inflate membership. Detail reads return distinct ContentRecord members and retained current FileEntry associations, including `MISSING` entries; the schema cannot reconstruct superseded associations that are no longer retained. The potential-storage-savings value is an estimate of logical present-occurrence bytes, not actual recoverable filesystem allocation. Grouping performs no filesystem access, hashing, or durable mutation.
+
+The React frontend consumes these endpoints through a small typed API module. The list appends keyset pages with duplicate-digest protection and retains loaded rows plus scroll position in browser memory during list/detail navigation. The detail route uses the full digest as identity while displaying a non-authoritative `DUP-` label from its first eight hexadecimal characters. It shows ContentRecord members and deterministically ordered retained occurrences without assigning a keeper. A bounded, session-memory-only trail records duplicate-group visits. None of this frontend state is persisted.
+
+Catalog-correct file-category and extension filtering is deferred. The current list response contains aggregate counts but no occurrence path or extension data, so implementing these filters on loaded pages would give incomplete global results and fetching every detail would create an N+1 design. A later API increment must provide server-side filtering or sufficient group-level match metadata while preserving whole-group context.
 
 Filesystem failure marks every ScanRunSource participating in that started DISCOVERY attempt, the DISCOVERY stage, Job, and ScanRun failed without creating RECONCILIATION or marking any FileEntry missing. This ensures no child of the terminally failed attempt remains `DISCOVERING`. Earlier committed observation batches remain tagged with their incomplete generations; `completed_generation` remains null, so those partial observations do not authorize a missing sweep. Retry and recovery behavior is not implemented.
 
@@ -257,6 +261,17 @@ GET /api/exact-duplicate-groups[/{digestHex}]
     -> completed-artifact integrity checks
     -> indexed digest grouping + member/occurrence reads
     -> no filesystem access or durable mutation
+```
+
+The frontend consumes that slice as:
+
+```text
+/duplicates
+    -> typed exact-duplicate API client
+    -> digest-keyset Load more list
+/duplicates/:digestHex
+    -> group summary, ContentRecord members, and retained FileEntry occurrences
+    -> browser-memory list context and recent-visit trail
 ```
 
 These commands and reads run synchronously in their HTTP requests. Scheduler/background execution, simultaneous-call hardening, retry/recovery, materialized equality decisions, and SSE remain deferred.

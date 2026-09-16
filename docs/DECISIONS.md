@@ -159,6 +159,14 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Report explicit member, present/missing occurrence, and Source counts. Estimate potential logical savings as `max(presentOccurrenceCount - 1, 0) * sizeBytes`; this is not actual recoverable filesystem allocation.
 - Keep ContentRecords separate. No merge, redirect, canonicalization, deletion, keeper selection, manual override, or cleanup behavior is implied by group membership.
 
+## Read-Only Exact Duplicate Frontend
+
+- Expose the first duplicate browsing workflow at `/duplicates` and `/duplicates/:digestHex`. Keep the full lowercase SHA-256 digest as route/API identity; derive `DUP-` plus the first eight uppercase digest characters only as a friendly, non-authoritative display label.
+- Consume list keyset pagination through a `Load more` interaction, preserve backend digest order, and de-duplicate appended groups by full digest. Do not present sorting or filtering over only loaded rows as catalog-wide behavior.
+- Retain loaded list pages, list scroll position, and a bounded recent duplicate-group trail in browser memory only. Do not add persistent review state or a frontend state library for this workflow.
+- Keep the workflow read-only. Members have no preferred/keeper designation and the potential savings figure remains explicitly estimated.
+- Defer broad file-category and dynamic extension filtering until the list API can support catalog-correct matching and whole-group context without N+1 detail reads.
+
 ## Development
 
 - Favor readable, conventional, learnable code over clever abstractions.

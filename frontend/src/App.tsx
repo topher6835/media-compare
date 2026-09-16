@@ -1,29 +1,37 @@
-import { useEffect, useState } from 'react'
-import { Route, Routes } from 'react-router-dom'
+import { Link, Route, Routes } from 'react-router-dom'
 
-function Home() {
-  const [status, setStatus] = useState('checking...')
+import { DuplicateDetailPage } from './duplicates/DuplicateDetailPage.tsx'
+import { DuplicatesPage } from './duplicates/DuplicatesPage.tsx'
+import { HomePage } from './HomePage.tsx'
 
-  useEffect(() => {
-    fetch('/api/health')
-      .then((response) => response.text())
-      .then(setStatus)
-      .catch(() => setStatus('error'))
-  }, [])
-
+function AppHeader() {
   return (
-    <>
-      <h1>Media Compare</h1>
-      <p>Backend: {status}</p>
-    </>
+    <header className="app-header">
+      <Link className="brand" to="/">
+        Media Compare
+      </Link>
+      <nav aria-label="Primary navigation">
+        <Link to="/duplicates">Exact Duplicates</Link>
+      </nav>
+    </header>
   )
 }
 
 function App() {
   return (
-    <Routes>
-      <Route path="/" element={<Home />} />
-    </Routes>
+    <div className="app-shell">
+      <AppHeader />
+      <main>
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/duplicates" element={<DuplicatesPage />} />
+          <Route
+            path="/duplicates/:digestHex"
+            element={<DuplicateDetailPage />}
+          />
+        </Routes>
+      </main>
+    </div>
   )
 }
 

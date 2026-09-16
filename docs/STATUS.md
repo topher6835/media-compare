@@ -2,9 +2,9 @@
 
 ## Current State
 
-Media Compare is a fresh v2 repository with a working full-stack scaffold. The repository contains separate `backend/` and `frontend/` projects. The backend can register/read Sources, create/read durable Source-based scan requests, create/read the durable ScanRun-to-Job execution handoff, synchronously execute DISCOVERY followed by safe missing-file RECONCILIATION, assign ContentRecords to eligible completed-scan observations, publish exact SHA-256 analysis, and derive exact duplicate groups through REST. Broader media analysis, similarity matching, materialized decisions, and cleanup are not implemented.
+Media Compare is a fresh v2 repository with a working full-stack scaffold. The repository contains separate `backend/` and `frontend/` projects. The backend can register/read Sources, create/read durable Source-based scan requests, create/read the durable ScanRun-to-Job execution handoff, synchronously execute DISCOVERY followed by safe missing-file RECONCILIATION, assign ContentRecords to eligible completed-scan observations, publish exact SHA-256 analysis, and derive exact duplicate groups through REST. The frontend can browse exact duplicate groups and inspect their ContentRecord members and retained FileEntry occurrences. Broader library/review workflows, media analysis, similarity matching, materialized decisions, and cleanup are not implemented.
 
-The backend is a Java 21 and Spring Boot 4.1.1 Maven application. It connects to a local SQLite database, starts Flyway, exposes `GET /api/health`, provides Source endpoints under `/api/sources`, scan-request endpoints under `/api/scan-runs`, execution-handoff endpoints under `/api/scan-runs/{id}/execution`, synchronous DISCOVERY and RECONCILIATION POST endpoints, `POST /api/scan-runs/{id}/content-assignment`, `POST /api/scan-runs/{id}/content-hashing`, and read-only exact duplicate endpoints under `/api/exact-duplicate-groups`. The frontend is a React and TypeScript Vite application with React Router; its `/` route requests the backend health endpoint through the Vite proxy. No Source, ScanRun, execution, or duplicate-reporting frontend exists.
+The backend is a Java 21 and Spring Boot 4.1.1 Maven application. It connects to a local SQLite database, starts Flyway, exposes `GET /api/health`, provides Source endpoints under `/api/sources`, scan-request endpoints under `/api/scan-runs`, execution-handoff endpoints under `/api/scan-runs/{id}/execution`, synchronous DISCOVERY and RECONCILIATION POST endpoints, `POST /api/scan-runs/{id}/content-assignment`, `POST /api/scan-runs/{id}/content-hashing`, and read-only exact duplicate endpoints under `/api/exact-duplicate-groups`. The frontend is a React and TypeScript Vite application with React Router. Its `/` route retains the health check, `/duplicates` browses aggregate group summaries with keyset `Load more`, and `/duplicates/:digestHex` shows a group summary, members, and occurrences. No Source, ScanRun, or execution frontend exists.
 
 The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven application tables with their structural constraints, foreign keys, and initial indexes; no new migration was needed for DISCOVERY, RECONCILIATION, ContentRecord assignment, exact hashing, or derived exact grouping. Immutable Java records and focused Spring JDBC repositories provide persistence under the reviewed feature packages. Exact hashing streams filesystem bytes outside transactions and atomically publishes reusable analysis only after stale-evidence guards pass. The matching slice derives duplicate summaries, members, and retained occurrences from trusted artifacts without materializing groups or mutating state. Scheduling/background execution, broader analysis/matching, AI, and filesystem modification remain unimplemented.
 
@@ -97,7 +97,13 @@ The durable documentation baseline is:
 - Vite proxies `/api` to `http://localhost:8080`.
 - A request to `/api/health` through Vite reaches the backend and returns `ok`.
 - The frontend renders the health request result.
-- Exact SHA-256 hashing is committed; local `main` and `origin/main` point to `6734a74` (`Add exact SHA-256 content hashing`). The derived exact-duplicate increment is currently uncommitted.
+- `/duplicates` renders scan-friendly group summaries, estimated logical savings, present/missing counts, and appends backend keyset pages without duplicate digest rows.
+- `/duplicates/:digestHex` uses the full digest as route identity and renders the group summary, distinct ContentRecord members, retained ordered occurrences, visibly muted `MISSING` rows, mixed-extension information, and the full digest in a technical section.
+- Friendly `DUP-XXXXXXXX` labels are display-only uppercase digest prefixes. The frontend does not materialize group identity or select a keeper.
+- Loaded list pages and scroll position survive normal list/detail navigation in browser memory. A bounded browser-memory trail records meaningful group visits without consecutive duplicates.
+- Loading, empty, malformed-request, unknown-group, and backend-failure states have user-facing messages without backend details.
+- The exact-duplicate frontend has no mutation controls; it performs no deletion, move, cleanup, merge, keeper selection, or persistent review-state write.
+- Local `main` and `origin/main` started this frontend increment at `a2a26d2` (`Add read-only exact duplicate grouping`) with a clean worktree.
 - Git origin uses `git@github-personal:topher6835/media-compare.git`, with repository-local identity configured for `topher6835`.
 
 ## Known Limitations / Not Yet Implemented
@@ -109,9 +115,12 @@ The durable documentation baseline is:
 - No general durable worker, pause/resume, startup recovery, or live progress delivery exists.
 - No SSE endpoint or event design exists.
 - No matching candidates, similarity relationships, materialized groups, manual overrides, or filesystem-action history exists.
+- No broader Library/Review UI, review states/flags, persistent categories/tags, AI suggestions, similarity-group UI, or actual filesystem actions exist.
+- File-category and extension filters are deferred because the current list API lacks occurrence/extension match metadata. Filtering loaded pages would be incomplete, and fetching every group detail would be N+1. A later backend/API design must support catalog-wide filtering while retaining whole-group context.
+- Advanced sorting is deferred; the frontend preserves deterministic server digest ordering rather than sorting only loaded pages.
 - Lifecycle/type values, workflow-level repository operations, merge behavior, scheduling, concurrency, cache locations, and FFmpeg/ffprobe discovery remain open as documented.
-- The health endpoint and frontend have no automated behavior tests.
+- The frontend still has no automated test framework. This increment was validated with lint, a production TypeScript/Vite build, and focused server-render/API fixture checks; durable component tests remain a future testing-infrastructure decision.
 
 ## Next Recommended Step
 
-After reviewing this derived exact-duplicate API increment, define the next user-facing duplicate browsing/review boundary without introducing automatic merge, cleanup, or filesystem modification. Background scheduling, retry/recovery, SSE, and broader symlink/junction traversal policy remain deferred.
+After reviewing the exact-duplicate frontend diff, define the backend contract for catalog-correct file-category/extension filtering and whole-group match context before adding filters. Cleanup, keeper selection, persistent review decisions, similarity groups, and filesystem modification remain later milestones.
