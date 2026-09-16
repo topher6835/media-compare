@@ -112,6 +112,66 @@ public class CatalogRepository {
                 """, contentRecordId, fileEntryId, expectedObservationRevision, expectedSizeBytes);
     }
 
+    public List<ContentHashCandidate> findContentHashCandidates(
+            long scanRunSourceId, long completedGeneration, long afterFileEntryId, int limit) {
+        return jdbcTemplate.query("""
+                SELECT file_entry.id, file_entry.current_content_id, file_entry.source_id,
+                       file_entry.relative_path, file_entry.observation_revision,
+                       file_entry.size_bytes, file_entry.modified_time_epoch_second,
+                       file_entry.modified_time_nano, scan_run_source.source_location_revision
+                FROM file_entry
+                JOIN scan_run_source
+                  ON scan_run_source.id = ?
+                 AND scan_run_source.source_id = file_entry.source_id
+                WHERE file_entry.presence_status = 'PRESENT'
+                  AND file_entry.current_content_id IS NOT NULL
+                  AND file_entry.last_seen_scan_run_source_id = scan_run_source.id
+                  AND file_entry.last_seen_traversal_generation = ?
+                  AND file_entry.id > ?
+                ORDER BY file_entry.id
+                LIMIT ?
+                """, (resultSet, rowNumber) -> new ContentHashCandidate(
+                        resultSet.getLong("id"),
+                        resultSet.getLong("current_content_id"),
+                        resultSet.getLong("source_id"),
+                        resultSet.getString("relative_path"),
+                        resultSet.getLong("observation_revision"),
+                        resultSet.getLong("size_bytes"),
+                        nullableLong(resultSet, "modified_time_epoch_second"),
+                        nullableInteger(resultSet, "modified_time_nano"),
+                        resultSet.getLong("source_location_revision")),
+                scanRunSourceId, completedGeneration, afterFileEntryId, limit);
+    }
+
+    public int verifyContentHashCandidate(ContentHashCandidate candidate) {
+        return jdbcTemplate.update("""
+                UPDATE file_entry
+                SET current_content_id = current_content_id
+                WHERE id = ?
+                  AND source_id = ?
+                  AND presence_status = 'PRESENT'
+                  AND current_content_id = ?
+                  AND observation_revision = ?
+                  AND size_bytes = ?
+                  AND modified_time_epoch_second IS ?
+                  AND modified_time_nano IS ?
+                  AND EXISTS (
+                      SELECT 1
+                      FROM source
+                      WHERE source.id = ? AND source.location_revision = ?
+                  )
+                """,
+                candidate.fileEntryId(),
+                candidate.sourceId(),
+                candidate.contentRecordId(),
+                candidate.observationRevision(),
+                candidate.sizeBytes(),
+                candidate.modifiedTimeEpochSecond(),
+                candidate.modifiedTimeNano(),
+                candidate.sourceId(),
+                candidate.sourceLocationRevision());
+    }
+
     @Transactional
     public FileEntry insert(FileEntry fileEntry) {
         validateLastSeenSource(fileEntry);

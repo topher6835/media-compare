@@ -129,7 +129,7 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Commit each Source's missing sweep, `COMPLETED` transition, completed generation/timestamp, and Source-based Job/stage progress together. Never publish a completed generation separately from its sweep.
 - Job progress mirrors the current stage. Reset it from DISCOVERY file units to zero out of the Source count when RECONCILIATION starts, without incrementing the Job attempt count again.
 - Successful RECONCILIATION completes every Source, the stage, Job, and ScanRun; clears the Job's current stage; and preserves the ScanRun's original start timestamp.
-- Defer generic persistence-failure recovery, hashing, analysis, background scheduling, and live progress delivery.
+- Keep generic persistence-failure recovery, hashing, analysis, background scheduling, and live progress delivery out of the reconciliation increment.
 
 ## Initial ContentRecord Assignment
 
@@ -137,10 +137,18 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Require a completed ScanRun and SCAN Job, completed DISCOVERY and RECONCILIATION stages, and completed current traversal generation for every ScanRunSource before selecting candidates. Missing ScanRuns or SCAN handoffs return 404; unsafe lifecycle state returns 409 without mutation.
 - Operate only from durable catalog state. Do not access Source roots, inspect current Source configuration, or require current location revisions.
 - Select only `PRESENT`, content-null FileEntries belonging to the ScanRunSource and its exact completed traversal. Read minimal candidate snapshots in ascending-ID keyset pages of at most 250.
-- Create one distinct ContentRecord per eligible occurrence/version. Size, modification metadata, and even identical bytes do not establish shared identity in this phase; hashing, deduplication, and merge behavior remain deferred.
+- Create one distinct ContentRecord per eligible occurrence/version. Size, modification metadata, and even identical bytes do not establish shared identity during assignment; hashing is a later separate command, while deduplication and merge behavior remain deferred.
 - In one per-candidate transaction, insert the ContentRecord and conditionally attach it while presence, null content, observation revision, and size still match. Roll back the insert and count a skip when publication is stale, leaving no orphan ContentRecord. Do not require last-seen traversal identity in the publication guard, so a later unchanged observation remains safe to publish.
 - Preserve existing `current_content_id` across unchanged scans and skip already-assigned entries without creating another record.
 - Do not reopen or mutate the completed SCAN Job and do not create any Job or JobStage for assignment.
+
+## Exact SHA-256 Content Hashing
+
+- Expose synchronous exact hashing through `POST /api/scan-runs/{id}/content-hashing`, returning new-hash, cached, stale-skipped, and filesystem-failed counts. Require the same completed ScanRun/SCAN Job/DISCOVERY/RECONCILIATION/ScanRunSource boundary as ContentRecord assignment without mutating that execution state or creating work rows.
+- Hashing belongs to ContentRecord. Use the exact built-in provenance key `CONTENT_HASH`, `builtin.sha256`, analyzer version `1`, configuration version `1`, and `{}` with its lowercase SHA-256 configuration hash. Reuse only completed exact-key AnalysisRecords with a valid `SHA-256` ContentHash; treat a completed record without a valid specialized artifact as an integrity failure and do not overwrite non-completed exact-key records.
+- Select only `PRESENT`, assigned FileEntries from each completed traversal in ascending-ID keyset pages of at most 250. Reconstruct persisted `/`-separated relative paths component by component, reject symbolic links in the Source root, parent path, or candidate, require exact size and nanosecond mtime before and after streaming, and keep file reads outside database transactions.
+- Require the current Source location revision to match the ScanRunSource snapshot before reading and again at publication. Atomically revalidate FileEntry identity, presence, current ContentRecord, observation revision, size, exact mtime, and Source revision before inserting a completed AnalysisRecord and ContentHash. Do not require unchanged last-seen traversal identity at publication.
+- Count stale/unsafe evidence as skipped and ordinary candidate filesystem failures as failed while continuing later candidates. Hashing does not mark files missing, repair catalog evidence, merge ContentRecords, or create Jobs/JobStages. Separate ContentRecords with identical bytes keep separate artifacts with equal digests.
 
 ## Development
 

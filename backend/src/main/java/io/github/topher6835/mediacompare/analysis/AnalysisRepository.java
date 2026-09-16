@@ -74,6 +74,36 @@ public class AnalysisRepository {
                 id).stream().findFirst();
     }
 
+    public Optional<AnalysisRecord> findAnalysisRecordByCacheKey(
+            long contentRecordId, String analysisType, String analyzerId, String analyzerVersion,
+            long configurationVersion, String configurationHash) {
+        return jdbcTemplate.query("""
+                SELECT * FROM analysis_record
+                WHERE content_record_id = ?
+                  AND analysis_type = ?
+                  AND analyzer_id = ?
+                  AND analyzer_version = ?
+                  AND configuration_version = ?
+                  AND configuration_hash = ?
+                """, (resultSet, rowNumber) -> new AnalysisRecord(
+                        resultSet.getLong("id"),
+                        resultSet.getLong("content_record_id"),
+                        resultSet.getString("analysis_type"),
+                        resultSet.getString("analyzer_id"),
+                        resultSet.getString("analyzer_version"),
+                        resultSet.getLong("configuration_version"),
+                        resultSet.getString("configuration_hash"),
+                        resultSet.getString("configuration_json"),
+                        resultSet.getString("status"),
+                        resultSet.getLong("attempt_count"),
+                        resultSet.getLong("created_at_ms"),
+                        nullableLong(resultSet, "started_at_ms"),
+                        nullableLong(resultSet, "finished_at_ms"),
+                        resultSet.getString("error_message")),
+                contentRecordId, analysisType, analyzerId, analyzerVersion,
+                configurationVersion, configurationHash).stream().findFirst();
+    }
+
     public void insert(ContentHash contentHash) {
         jdbcTemplate.update("""
                 INSERT INTO content_hash (analysis_record_id, algorithm, digest_hex)

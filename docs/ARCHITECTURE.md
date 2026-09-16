@@ -14,9 +14,10 @@ The repository currently contains a working full-stack scaffold:
 - A synchronous command that executes the pending DISCOVERY stage for a ScanRun.
 - A synchronous command that executes the pending RECONCILIATION stage and completes a ScanRun.
 - A synchronous database-only command that assigns ContentRecords to eligible completed-scan observations.
+- A synchronous command that publishes exact SHA-256 analysis for safe assigned-content candidates.
 - A frontend `/` route that requests and displays the health result.
 
-The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven V1 application tables, structural constraints, foreign keys, and initial indexes. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, and `analysis` feature packages. Source registration/read, durable scan-request creation/read, the ScanRun-to-Job execution handoff, DISCOVERY, missing-file RECONCILIATION, and initial ContentRecord assignment are implemented. Hashing, background scheduling, analysis execution, matching, AI, and broader product workflows do not exist yet.
+The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven V1 application tables, structural constraints, foreign keys, and initial indexes. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, and `analysis` feature packages. Source registration/read, durable scan-request creation/read, the ScanRun-to-Job execution handoff, DISCOVERY, missing-file RECONCILIATION, initial ContentRecord assignment, and exact SHA-256 analysis are implemented. Background scheduling, broader analysis, matching, AI, and broader product workflows do not exist yet.
 
 ## Architectural Style
 
@@ -73,7 +74,7 @@ When a FileEntry records `last_seen_scan_run_source_id`, that ScanRunSource must
 
 The path policy is cross-platform and lossless: preserve observed case and Unicode spelling, use `/` between persisted relative path segments, do not globally lowercase or Unicode-normalize, and do not resolve symlinks or call `toRealPath()` to construct occurrence identity. Where filesystem equivalence is uncertain, preserve separate observations.
 
-A `ContentRecord` represents one immutable byte-version independently of location. It has a stable internal ID rather than a hash primary key. Initial assignment creates one distinct record for each eligible unassigned FileEntry occurrence/version; equal size, modification metadata, or bytes do not cause records to be shared. Exact hashing and later merge/deduplication behavior remain deferred. V1 has no canonical redirect or merge table, and transformed copies have separate ContentRecords.
+A `ContentRecord` represents one immutable byte-version independently of location. It has a stable internal ID rather than a hash primary key. Initial assignment creates one distinct record for each eligible unassigned FileEntry occurrence/version; equal size, modification metadata, or bytes do not cause records to be shared. Exact hashes attach to those identities as analysis artifacts. Equal digests do not merge records; later equality grouping and merge/deduplication behavior remain deferred. V1 has no canonical redirect or merge table, and transformed copies have separate ContentRecords.
 
 ## Reconciliation and Execution
 
@@ -96,6 +97,12 @@ Each Source's missing sweep, transition to `COMPLETED`, `completed_generation` p
 The implemented ContentRecord-assignment command is synchronously invoked through `POST /api/scan-runs/{id}/content-assignment`. Preflight requires a fully completed ScanRun, SCAN Job, DISCOVERY stage, RECONCILIATION stage, and completed generation for every ScanRunSource. The command then uses only durable database state: it does not inspect Source configuration, access Source roots, or revalidate location revisions, and it neither reopens the completed SCAN Job nor creates a Job or JobStage.
 
 For each completed ScanRunSource, eligible `PRESENT`, content-null FileEntries must carry that Source row's exact completed traversal identity. Candidates contain only FileEntry ID, observation revision, and size and are read in ascending-ID keyset pages of at most 250. Each candidate receives its own ContentRecord; metadata is not treated as evidence of byte equality. Publication uses a separate transaction-proxied writer that inserts the ContentRecord and conditionally attaches it only while the FileEntry remains `PRESENT`, content-null, at the expected observation revision and size. A stale conditional update rolls back its insert, is counted as skipped, and does not stop later candidates. The publication guard deliberately does not require an unchanged last-seen traversal pair, so a later unchanged observation can retain the same occurrence version. Existing content associations make the operation resumable and repeatable without duplicate records.
+
+The implemented exact-hashing command is synchronously invoked through `POST /api/scan-runs/{id}/content-hashing` and requires the same fully completed scan lifecycle. It selects `PRESENT`, assigned FileEntries from each ScanRunSource's exact completed traversal in ascending-ID keyset pages of at most 250. Candidate snapshots retain ContentRecord identity, path, observation revision, exact size/mtime, and the Source-location revision captured by the scan.
+
+The exact built-in analysis key is `CONTENT_HASH` / `builtin.sha256` / analyzer version `1` / configuration version `1` with `{}` and its lowercase SHA-256 configuration hash. A valid completed exact-key artifact is reused before filesystem access. New work reconstructs persisted `/`-separated paths component by component, rejects unsafe components, rejects symbolic links in the Source root, parent path, or candidate, requires a regular file, checks exact size and nanosecond mtime before and after streaming SHA-256, and never loads the whole file into memory. Source relocation and other stale evidence are skipped; ordinary candidate filesystem failures are counted and do not stop later candidates.
+
+Digest publication uses a separate transaction-proxied writer. It rechecks FileEntry ID, Source, presence, current ContentRecord, observation revision, size, exact mtime, and Source location revision, then atomically inserts the completed AnalysisRecord and its ContentHash. Last-seen traversal identity is deliberately excluded from this final guard because a later unchanged scan does not invalidate the same occurrence version. Hashing does not modify FileEntry, ContentRecord, scan execution state, Job, or JobStage, and equal digests remain separate artifacts on separate ContentRecords.
 
 Filesystem failure marks every ScanRunSource participating in that started DISCOVERY attempt, the DISCOVERY stage, Job, and ScanRun failed without creating RECONCILIATION or marking any FileEntry missing. This ensures no child of the terminally failed attempt remains `DISCOVERING`. Earlier committed observation batches remain tagged with their incomplete generations; `completed_generation` remains null, so those partial observations do not authorize a missing sweep. Retry and recovery behavior is not implemented.
 
@@ -223,7 +230,18 @@ POST /api/scan-runs/{id}/content-assignment
     -> per-candidate atomic ContentRecord insert + guarded FileEntry publication
 ```
 
-All three commands run synchronously in their HTTP requests. Scheduler/background execution, simultaneous-call hardening, retry/recovery, exact hashing, and SSE remain deferred.
+The implemented exact-hashing slice is:
+
+```text
+POST /api/scan-runs/{id}/content-hashing
+    -> ContentHashingController
+    -> ContentHashingService
+    -> completed-lifecycle preflight and bounded candidate reads
+    -> cache reuse or Java NIO SHA-256 streaming outside transactions
+    -> per-candidate atomic guarded AnalysisRecord + ContentHash publication
+```
+
+These commands run synchronously in their HTTP requests. Scheduler/background execution, simultaneous-call hardening, retry/recovery, equality grouping, and SSE remain deferred.
 
 ## SQLite and Cross-Platform Requirements
 
@@ -255,4 +273,4 @@ The following remain open after the V1 review:
 
 The architecture is intended to support folders, multiple unrelated folders, whole drives, persistent indexing, incremental/reconciliation scans, exact duplicate and transformed-copy detection, similar/related media, resumable analysis, manual grouping/classification overrides, optional face analysis, optional local/cloud AI, and later explicit safeguarded filesystem modification.
 
-Only the initial Source registration, scan-request/handoff, regular-file discovery, and safe missing-file reconciliation portions of these capabilities are implemented.
+Source registration, scan-request/handoff, regular-file discovery, safe missing-file reconciliation, provisional ContentRecord assignment, and exact SHA-256 analysis are implemented.

@@ -2,11 +2,11 @@
 
 ## Current State
 
-Media Compare is a fresh v2 repository with a working full-stack scaffold. The repository contains separate `backend/` and `frontend/` projects. The backend can register/read Sources, create/read durable Source-based scan requests, create/read the durable ScanRun-to-Job execution handoff, synchronously execute DISCOVERY followed by safe missing-file RECONCILIATION, and assign ContentRecords to eligible completed-scan observations through REST. Exact hashing, media analysis, comparison, and cleanup are not implemented.
+Media Compare is a fresh v2 repository with a working full-stack scaffold. The repository contains separate `backend/` and `frontend/` projects. The backend can register/read Sources, create/read durable Source-based scan requests, create/read the durable ScanRun-to-Job execution handoff, synchronously execute DISCOVERY followed by safe missing-file RECONCILIATION, assign ContentRecords to eligible completed-scan observations, and publish exact SHA-256 analysis through REST. Broader media analysis, comparison/grouping, and cleanup are not implemented.
 
-The backend is a Java 21 and Spring Boot 4.1.1 Maven application. It connects to a local SQLite database, starts Flyway, exposes `GET /api/health`, provides Source endpoints under `/api/sources`, scan-request endpoints under `/api/scan-runs`, execution-handoff endpoints under `/api/scan-runs/{id}/execution`, synchronous DISCOVERY and RECONCILIATION POST endpoints, and `POST /api/scan-runs/{id}/content-assignment`. The frontend is a React and TypeScript Vite application with React Router; its `/` route requests the backend health endpoint through the Vite proxy. No Source, ScanRun, or execution frontend exists.
+The backend is a Java 21 and Spring Boot 4.1.1 Maven application. It connects to a local SQLite database, starts Flyway, exposes `GET /api/health`, provides Source endpoints under `/api/sources`, scan-request endpoints under `/api/scan-runs`, execution-handoff endpoints under `/api/scan-runs/{id}/execution`, synchronous DISCOVERY and RECONCILIATION POST endpoints, `POST /api/scan-runs/{id}/content-assignment`, and `POST /api/scan-runs/{id}/content-hashing`. The frontend is a React and TypeScript Vite application with React Router; its `/` route requests the backend health endpoint through the Vite proxy. No Source, ScanRun, or execution frontend exists.
 
-The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven application tables with their structural constraints, foreign keys, and initial indexes; no new migration was needed for DISCOVERY, RECONCILIATION, or ContentRecord assignment. Immutable Java records and focused Spring JDBC repositories provide persistence under the reviewed feature packages. `SourceService` owns Source registration/read behavior. `ScanRunService` atomically records scan intent. Scan orchestration creates the execution handoff, coordinates discovery outside long write transactions, and reconciles durable observations without filesystem access. Content assignment then publishes one provisional identity per eligible occurrence/version entirely from durable database state. Scheduling/background execution, hashing, analysis execution, matching, AI, and filesystem modification remain unimplemented.
+The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven application tables with their structural constraints, foreign keys, and initial indexes; no new migration was needed for DISCOVERY, RECONCILIATION, ContentRecord assignment, or exact hashing. Immutable Java records and focused Spring JDBC repositories provide persistence under the reviewed feature packages. Scan orchestration coordinates discovery outside long write transactions and reconciles durable observations without filesystem access. Content assignment publishes one provisional identity per eligible occurrence/version from durable state. Exact hashing streams filesystem bytes outside transactions and atomically publishes reusable analysis only after stale-evidence guards pass. Scheduling/background execution, broader analysis, matching, AI, and filesystem modification remain unimplemented.
 
 ## Documentation
 
@@ -73,18 +73,25 @@ The durable documentation baseline is:
 - Reconciliation creates no ContentRecord, hash, or analysis row. Integration tests cover lifecycle/final state, multi-Source isolation, empty Sources, exact and null traversal identities, field preservation, unavailable roots, stale Source revisions, conflicts, repeat prevention, and transactional rollback.
 - `POST /api/scan-runs/{id}/content-assignment` requires the ScanRun, SCAN Job, DISCOVERY and RECONCILIATION stages, and every ScanRunSource to be at their safe completed boundary. Missing ScanRuns or execution handoffs return 404; incomplete or inconsistent lifecycle state returns 409 before mutation.
 - Assignment is filesystem-independent and ignores current Source configuration/location revisions. It selects only `PRESENT`, content-null FileEntries from each ScanRunSource's exact completed traversal and reads them in ascending-ID keyset pages of at most 250.
-- Each eligible occurrence/version receives its own new ContentRecord with the observed size and a creation timestamp. Separate files receive distinct records even when bytes and metadata match; no hashing, equality inference, deduplication, or merge occurs.
+- Each eligible occurrence/version receives its own new ContentRecord with the observed size and a creation timestamp. Separate files receive distinct records even when bytes and metadata match; assignment itself performs no hashing, equality inference, deduplication, or merge.
 - Each ContentRecord insert and guarded FileEntry attachment share one transaction. Publication requires the entry to remain `PRESENT`, content-null, and at the expected observation revision and size. Stale publication rolls back the new record, increments `skippedCount`, and continues without leaving an orphan; the guard permits a later unchanged traversal identity.
 - Existing content associations survive unchanged rescans. Durable content-null state makes the command resumable and repeatable, normally returning zero assigned and skipped after completion.
 - Assignment leaves the completed ScanRun, SCAN Job, both JobStages, and ScanRunSource rows unchanged and creates no Job, JobStage, AnalysisRecord, or ContentHash.
 - Content-assignment integration tests cover field preservation; identity separation; all eligibility exclusions; deleted roots and changed Source revisions; lifecycle preflight; 251-row paging; all optimistic stale guards and orphan rollback; skipped counting and continuation; repeat behavior; and unchanged cross-run content preservation.
+- `POST /api/scan-runs/{id}/content-hashing` uses the same completed lifecycle preflight and hashes only `PRESENT`, assigned entries from each ScanRunSource's exact completed traversal. Missing ScanRuns/execution handoffs return 404 and unsafe lifecycle state returns 409 without mutation.
+- Hash candidates are read in ascending FileEntry-ID keyset pages of at most 250. Exact-key completed artifacts are reused before Source or filesystem access; cache reuse therefore still works after the backing root is unavailable.
+- Uncached candidates require the ScanRunSource Source-location snapshot to remain current, safe component-by-component path reconstruction without symbolic links in the root, parents, or candidate, a regular file, and exact size/mtime before and after streaming SHA-256. Stale evidence is skipped, ordinary per-file access failures are counted, and later candidates continue.
+- New results use `CONTENT_HASH` / `builtin.sha256` / analyzer version `1` / configuration version `1` / `{}` provenance. The lowercase 64-character digest is stored with algorithm `SHA-256` in a ContentHash row.
+- A dedicated transactional writer revalidates FileEntry identity, Source, presence, ContentRecord, observation revision, size, exact mtime, and Source location revision, then atomically publishes the completed AnalysisRecord and ContentHash. Changed traversal identity alone remains safe. Hashing leaves FileEntry, ContentRecord, ScanRun, ScanRunSource, Job, and JobStage state unchanged and creates no new execution rows.
+- Separate ContentRecords with identical bytes retain separate AnalysisRecord/ContentHash rows with equal digests. No ContentRecord merge or equality grouping occurs.
+- Exact-hashing integration tests cover known digests/provenance, atomic rollback, cache reuse without a root, candidate classification and continuation, symlink rejection, every database publication guard, traversal-identity tolerance, lifecycle errors, real transaction boundaries, and paging across 252 candidates.
 - The frontend production build succeeds.
 - React Router is wired through `BrowserRouter` and a `/` route.
 - The Vite development server starts on port `5173`.
 - Vite proxies `/api` to `http://localhost:8080`.
 - A request to `/api/health` through Vite reaches the backend and returns `ok`.
 - The frontend renders the health request result.
-- DISCOVERY and RECONCILIATION are committed; local `main` and `origin/main` point to `0e79f7c` (`Add missing-file reconciliation execution`). The ContentRecord-assignment increment is currently uncommitted.
+- ContentRecord assignment is committed; local `main` and `origin/main` point to `0c790e7` (`Add safe ContentRecord assignment`). The exact-hashing increment is currently uncommitted.
 - Git origin uses `git@github-personal:topher6835/media-compare.git`, with repository-local identity configured for `topher6835`.
 
 ## Known Limitations / Not Yet Implemented
@@ -92,7 +99,7 @@ The durable documentation baseline is:
 - No Source update, deletion, or relocation/remount recognition workflow exists.
 - No ScanRun list, cancellation, retry/recovery, WorkingSet request, custom options, scheduling, or background execution exists.
 - Simultaneous duplicate execution-request hardening remains deferred with the broader scheduling/concurrency design.
-- No exact hashing, ContentRecord equality reconciliation/merge, media metadata, fingerprints, embeddings, face analysis, or AI integration exists.
+- No ContentRecord equality grouping/reconciliation/merge, media metadata, perceptual fingerprints, embeddings, face analysis, or AI integration exists.
 - No general durable worker, pause/resume, startup recovery, or live progress delivery exists.
 - No SSE endpoint or event design exists.
 - No matching candidates, similarity relationships, groups, manual overrides, or filesystem-action history exists.
@@ -101,4 +108,4 @@ The durable documentation baseline is:
 
 ## Next Recommended Step
 
-Implement exact content hashing as a reusable `AnalysisRecord` plus `ContentHash` analysis keyed by ContentRecord, with stale-publication checks before analysis results become reusable. Background scheduling, retry/recovery, SSE, and final symlink/junction semantics should remain deferred unless explicitly brought into scope.
+Implement exact duplicate/equality grouping from completed ContentHash artifacts without automatically merging or redirecting ContentRecords. Background scheduling, retry/recovery, SSE, and broader symlink/junction traversal policy should remain deferred unless explicitly brought into scope.
