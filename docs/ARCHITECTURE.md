@@ -15,9 +15,10 @@ The repository currently contains a working full-stack scaffold:
 - A synchronous command that executes the pending RECONCILIATION stage and completes a ScanRun.
 - A synchronous database-only command that assigns ContentRecords to eligible completed-scan observations.
 - A synchronous command that publishes exact SHA-256 analysis for safe assigned-content candidates.
+- Read-only APIs that derive exact duplicate groups and retained occurrences from trusted SHA-256 artifacts.
 - A frontend `/` route that requests and displays the health result.
 
-The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven V1 application tables, structural constraints, foreign keys, and initial indexes. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, and `analysis` feature packages. Source registration/read, durable scan-request creation/read, the ScanRun-to-Job execution handoff, DISCOVERY, missing-file RECONCILIATION, initial ContentRecord assignment, and exact SHA-256 analysis are implemented. Background scheduling, broader analysis, matching, AI, and broader product workflows do not exist yet.
+The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven V1 application tables, structural constraints, foreign keys, and initial indexes. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, `analysis`, and `matching` feature packages. Source registration/read, durable scan-request creation/read, the ScanRun-to-Job execution handoff, DISCOVERY, missing-file RECONCILIATION, initial ContentRecord assignment, exact SHA-256 analysis, and derived exact duplicate reporting are implemented. Background scheduling, broader analysis/matching, AI, and broader product workflows do not exist yet.
 
 ## Architectural Style
 
@@ -56,9 +57,10 @@ The initial Java package structure is:
 - `scan` — ScanRun, ScanRunSource, and reconciliation coordination.
 - `job` — generic durable execution and stage state.
 - `analysis` — AnalysisRecord and reusable specialized analysis artifacts.
+- `matching` — read-only exact byte-equality grouping and reporting projections.
 - `web` — thin REST controllers and later HTTP/SSE endpoints.
 
-The persistence foundation uses one concrete Spring JDBC repository per feature package: `CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository`. The boundaries remain simple. `catalog` does not depend on the job runner; `job` remains generic; and `analysis` owns analysis provenance. Scan-specific orchestration that depends on both ScanRun and Job concepts stays in `scan`, not `job`. The web controllers are thin HTTP boundaries over small feature services, while `HealthController` remains unchanged. No generic repository framework, automatic interface/implementation pairs, or enterprise layering was introduced.
+The persistence foundation uses concrete Spring JDBC repositories per feature package: `CatalogRepository`, `ScanRepository`, `JobRepository`, `AnalysisRepository`, and `ExactDuplicateRepository`. The boundaries remain simple. `catalog` does not depend on the job runner; `job` remains generic; and `analysis` owns analysis provenance. Scan-specific orchestration that depends on both ScanRun and Job concepts stays in `scan`, not `job`. The web controllers are thin HTTP boundaries over small feature services, while `HealthController` remains unchanged. No generic repository framework, automatic interface/implementation pairs, or enterprise layering was introduced.
 
 ## Catalog and Identity
 
@@ -104,6 +106,10 @@ The exact built-in analysis key is `CONTENT_HASH` / `builtin.sha256` / analyzer 
 
 Digest publication uses a separate transaction-proxied writer. It rechecks FileEntry ID, Source, presence, current ContentRecord, observation revision, size, exact mtime, and Source location revision, then atomically inserts the completed AnalysisRecord and its ContentHash. Last-seen traversal identity is deliberately excluded from this final guard because a later unchanged scan does not invalidate the same occurrence version. Hashing does not modify FileEntry, ContentRecord, scan execution state, Job, or JobStage, and equal digests remain separate artifacts on separate ContentRecords.
 
+Exact duplicate groups are derived synchronously through `GET /api/exact-duplicate-groups` and `GET /api/exact-duplicate-groups/{digestHex}`. No group or membership table is materialized. A group exists only when at least two distinct ContentRecords have the same completed, provenance-compatible, structurally valid built-in SHA-256 artifact. Singleton hashes and other analyzer definitions are excluded. Completed exact artifacts with missing or malformed specialized results, inconsistent configuration JSON, or same-digest ContentRecords with conflicting sizes are reported as integrity failures rather than silently hidden or repaired.
+
+List queries use ascending digest keyset pagination and digest-led grouping through the existing `(algorithm, digest_hex)` index. ContentRecord cardinality is computed before FileEntry occurrence joins so multiple occurrences cannot inflate membership. Detail reads return distinct ContentRecord members and retained current FileEntry associations, including `MISSING` entries; the schema cannot reconstruct superseded associations that are no longer retained. The potential-storage-savings value is an estimate of logical present-occurrence bytes, not actual recoverable filesystem allocation. Grouping performs no filesystem access, hashing, or durable mutation.
+
 Filesystem failure marks every ScanRunSource participating in that started DISCOVERY attempt, the DISCOVERY stage, Job, and ScanRun failed without creating RECONCILIATION or marking any FileEntry missing. This ensures no child of the terminally failed attempt remains `DISCOVERING`. Earlier committed observation batches remain tagged with their incomplete generations; `completed_generation` remains null, so those partial observations do not authorize a missing sweep. Retry and recovery behavior is not implemented.
 
 `ScanRun` records user intent, selected Sources or WorkingSet, request type, options, and lifecycle. Its options become immutable when execution begins. The first implemented request creation accepts one or more registered Source IDs and atomically writes one ScanRun plus its ScanRunSource rows. It uses request type `INDEX`, initial status `PENDING`, options version `1`, and effective options `{}`. Each child begins `PENDING`, snapshots the Source's current location revision, and has traversal generation `0` with no completion or execution state. Child responses are ordered by Source ID.
@@ -120,7 +126,7 @@ A `WorkingSet` is a persistent logical collection of `ContentRecord` membership 
 
 `AnalysisRecord` captures reusable analysis provenance, lifecycle, analyzer identity/version, configuration version/hash, and effective configuration. A compatible completed artifact can be reused; changes to analysis type, analyzer, model, version, preprocessing, provider, or configuration create a new artifact rather than silently overwriting the prior result. Specialized result structures hold hashes, media metadata, fingerprints, embeddings, face results, video fingerprints, and AI results as those features are designed.
 
-`content_hash` is the specialized exact-hash result. It uses canonical algorithm identifiers and lowercase hexadecimal digests. `(algorithm, digest_hex)` is indexed but not unique because temporary duplicate ContentRecords may exist.
+`content_hash` is the specialized exact-hash result. It uses canonical algorithm identifiers and lowercase hexadecimal digests. `(algorithm, digest_hex)` is indexed but not unique because temporary duplicate ContentRecords may exist. The exact duplicate view groups valid compatible artifacts dynamically by digest rather than assigning a durable group identity.
 
 Filesystem metadata belongs to FileEntry. Media-derived metadata belongs to ContentRecord analysis so moves and renames do not invalidate compatible analysis. Large derived files such as thumbnails, previews, extracted frames, and intermediates belong in a future managed cache rather than the SQLite catalog.
 
@@ -130,14 +136,15 @@ Face analyzer output, detected face instances, and embeddings remain conceptuall
 
 The design targets thousands, tens of thousands, and potentially hundreds of thousands of files. Implementations should stream Java NIO traversal, use bounded database batches and indexed queries, avoid loading complete drive listings into memory, and avoid expensive work for files that do not need it.
 
-Matching uses cheap candidate generation followed by deeper comparison for plausible candidates. Full pairwise comparison is not a V1 strategy. Candidate persistence and matching algorithms remain open, while pending work must eventually support durable resume.
+Exact byte-equality grouping is the first implemented matching behavior and uses indexed digest aggregation rather than pairwise comparison. Broader matching uses cheap candidate generation followed by deeper comparison for plausible candidates. Full pairwise comparison is not a V1 strategy. Candidate persistence and later matching algorithms remain open, while pending work must eventually support durable resume.
 
 ## Broader Conceptual Relationship View
 
 ```text
 Source -> FileEntry -> ContentRecord -> AnalysisRecord -> specialized results
                            |
-                           -> future relationships/groups
+                           -> derived exact duplicate groups
+                           -> future relationships/materialized decisions
 
 WorkingSet -> ContentRecord membership
 
@@ -241,7 +248,18 @@ POST /api/scan-runs/{id}/content-hashing
     -> per-candidate atomic guarded AnalysisRecord + ContentHash publication
 ```
 
-These commands run synchronously in their HTTP requests. Scheduler/background execution, simultaneous-call hardening, retry/recovery, equality grouping, and SSE remain deferred.
+The implemented exact-duplicate slice is:
+
+```text
+GET /api/exact-duplicate-groups[/{digestHex}]
+    -> ExactDuplicateController
+    -> ExactDuplicateService
+    -> completed-artifact integrity checks
+    -> indexed digest grouping + member/occurrence reads
+    -> no filesystem access or durable mutation
+```
+
+These commands and reads run synchronously in their HTTP requests. Scheduler/background execution, simultaneous-call hardening, retry/recovery, materialized equality decisions, and SSE remain deferred.
 
 ## SQLite and Cross-Platform Requirements
 
@@ -263,7 +281,7 @@ The following remain open after the V1 review:
 - Job scheduling, concurrency, cancellation, retries, and startup recovery.
 - Detailed scan scope representation and source-specific progress.
 - Specialized result schemas beyond `content_hash`.
-- Candidate, similarity, relationship, grouping, and manual override schemas.
+- Candidate, similarity, materialized relationship/grouping, and manual override schemas.
 - Face/person schema and AI-provider architecture.
 - Application-managed cache locations and lifecycle.
 - FFmpeg/ffprobe discovery and process management.
@@ -273,4 +291,4 @@ The following remain open after the V1 review:
 
 The architecture is intended to support folders, multiple unrelated folders, whole drives, persistent indexing, incremental/reconciliation scans, exact duplicate and transformed-copy detection, similar/related media, resumable analysis, manual grouping/classification overrides, optional face analysis, optional local/cloud AI, and later explicit safeguarded filesystem modification.
 
-Source registration, scan-request/handoff, regular-file discovery, safe missing-file reconciliation, provisional ContentRecord assignment, and exact SHA-256 analysis are implemented.
+Source registration, scan-request/handoff, regular-file discovery, safe missing-file reconciliation, provisional ContentRecord assignment, exact SHA-256 analysis, and derived exact duplicate reporting are implemented.

@@ -2,7 +2,7 @@
 
 ## Status and Scope
 
-The reviewed V1 persistence design is implemented by Flyway migration `V1__create_core_schema.sql`. The application now has the eleven V1 tables, their structural constraints and initial indexes, immutable Java record representations, and small Spring JDBC repositories. The existing schema supports the implemented DISCOVERY, RECONCILIATION, ContentRecord-assignment, and exact-hashing behavior without another migration.
+The reviewed V1 persistence design is implemented by Flyway migration `V1__create_core_schema.sql`. The application now has the eleven V1 tables, their structural constraints and initial indexes, immutable Java record representations, and small Spring JDBC repositories. The existing schema supports the implemented DISCOVERY, RECONCILIATION, ContentRecord-assignment, exact-hashing, and derived exact-duplicate behavior without another migration.
 
 The first migration contains exactly eleven application tables. The fields and constraints below describe the implemented schema.
 
@@ -32,7 +32,7 @@ Implemented fields:
 - `size_bytes INTEGER NOT NULL CHECK >= 0`
 - `created_at_ms INTEGER NOT NULL`
 
-A ContentRecord permanently represents one byte-version. Its identity is an internal ID rather than an exact hash. An established record is not mutated to represent replacement bytes. Initial assignment creates one distinct record per eligible unassigned FileEntry occurrence/version, even when separate files have identical bytes and metadata. Exact hashing stores analysis artifacts for each record without changing or merging it. Equality grouping and merge behavior remain deferred; V1 has no canonical redirect or merge table.
+A ContentRecord permanently represents one byte-version. Its identity is an internal ID rather than an exact hash. An established record is not mutated to represent replacement bytes. Initial assignment creates one distinct record per eligible unassigned FileEntry occurrence/version, even when separate files have identical bytes and metadata. Exact hashing stores analysis artifacts for each record without changing or merging it. Exact duplicate groups are derived from compatible artifacts and likewise do not rewrite identity. Materialized grouping and merge behavior remain deferred; V1 has no canonical redirect or merge table.
 
 ### `file_entry`
 
@@ -221,6 +221,8 @@ Implemented fields:
 
 This is the specialized exact-hash artifact. The implemented built-in artifact uses algorithm `SHA-256` and a structurally validated lowercase 64-character hexadecimal digest. AnalysisRecord and ContentHash are inserted atomically after database evidence is revalidated. Index `(algorithm, digest_hex)`, but do not make that pair unique: separate ContentRecords with identical bytes retain separate artifacts with equal digests. The hash is never the ContentRecord primary key.
 
+The exact duplicate view uses this existing index and the exact built-in AnalysisRecord provenance to derive groups with at least two distinct ContentRecords. It stores no group identity or membership rows. Member counts are calculated independently of FileEntry joins; retained FileEntries then supply present/missing occurrence and Source counts. A ContentRecord without a FileEntry remains a member. Potential storage savings is estimated as `max(present occurrence count - 1, 0) * size_bytes`; missing occurrences contribute no current savings, and this is not a measurement of allocated disk blocks.
+
 ## Filesystem Timestamps
 
 Application lifecycle timestamps use epoch milliseconds stored as SQLite integers. Filesystem modification times preserve available Java `FileTime` precision with an epoch-second value and nanosecond component. The two values are both present or both absent; nanoseconds are constrained to `0..999999999`. Filesystems that provide less precision remain valid.
@@ -266,7 +268,7 @@ Immutable records representing all eleven table row shapes and concrete Spring J
 - `job`
 - `analysis`
 
-`CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` provide focused insert, read, and workflow-specific update operations. They use `JdbcTemplate` directly without a generic repository superclass or ORM. `CatalogRepository` includes Source lookup/listing, FileEntry observation, an explicit Source-scoped missing update, bounded assignment/hashing candidate reads, and guarded publication checks. `AnalysisRepository` reads exact provenance keys and persists AnalysisRecord/ContentHash artifacts. Dedicated Spring beans give discovery start/batches/finalization/failure, reconciliation start/finalization, each Source's atomic missing-sweep/completed-generation boundary, each ContentRecord insert/FileEntry publication, and each guarded AnalysisRecord/ContentHash publication a real transaction. Filesystem traversal and hashing remain outside database transactions; reconciliation and ContentRecord assignment perform no filesystem work. `catalog` does not depend on the job runner, `job` remains generic, and `analysis` owns reusable analysis and provenance.
+`CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` provide focused insert, read, and workflow-specific update operations. They use `JdbcTemplate` directly without a generic repository superclass or ORM. `CatalogRepository` includes Source lookup/listing, FileEntry observation, an explicit Source-scoped missing update, bounded assignment/hashing candidate reads, and guarded publication checks. `AnalysisRepository` reads exact provenance keys and persists AnalysisRecord/ContentHash artifacts. `ExactDuplicateRepository` performs read-only integrity, grouped-summary, member, and occurrence queries. Dedicated Spring beans give discovery start/batches/finalization/failure, reconciliation start/finalization, each Source's atomic missing-sweep/completed-generation boundary, each ContentRecord insert/FileEntry publication, and each guarded AnalysisRecord/ContentHash publication a real transaction. Exact grouping uses no transaction spanning its live read view. Filesystem traversal and hashing remain outside database transactions; reconciliation, ContentRecord assignment, and exact grouping perform no filesystem work.
 
 ## Explicitly Deferred
 
@@ -277,7 +279,7 @@ V1 does not include:
 - Directory-level traversal checkpoints.
 - Analysis attempt-history or Job stage-instance tables.
 - Perceptual fingerprints, embeddings, vector infrastructure, face/person schemas, or video fingerprints.
-- Matching candidates, similarity relationships, groups, or manual override schemas.
+- Matching candidates, similarity relationships, materialized groups, or manual override schemas.
 - AI-specific result schemas and provider infrastructure.
 - Filesystem-action history.
 - Thumbnail/cache metadata.

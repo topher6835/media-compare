@@ -150,6 +150,15 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Require the current Source location revision to match the ScanRunSource snapshot before reading and again at publication. Atomically revalidate FileEntry identity, presence, current ContentRecord, observation revision, size, exact mtime, and Source revision before inserting a completed AnalysisRecord and ContentHash. Do not require unchanged last-seen traversal identity at publication.
 - Count stale/unsafe evidence as skipped and ordinary candidate filesystem failures as failed while continuing later candidates. Hashing does not mark files missing, repair catalog evidence, merge ContentRecords, or create Jobs/JobStages. Separate ContentRecords with identical bytes keep separate artifacts with equal digests.
 
+## Read-Only Exact Duplicate Grouping
+
+- Derive exact duplicate groups dynamically from the existing ContentRecord -> completed exact AnalysisRecord -> valid ContentHash relationship. Do not add a migration, materialized group identity, or membership table in this increment.
+- Expose global synchronous reads through `GET /api/exact-duplicate-groups` and `GET /api/exact-duplicate-groups/{digestHex}`. Use bounded ascending-digest keyset pagination and the existing `(algorithm, digest_hex)` index; do not use pairwise comparison, filesystem access, rehashing, execution rows, or durable mutation.
+- A group requires at least two distinct ContentRecords with the exact built-in SHA-256 provenance, configuration JSON `{}`, algorithm `SHA-256`, and a lowercase 64-character hexadecimal digest. Ignore other definitions and non-completed work. Treat malformed completed exact artifacts and same-digest size disagreement as explicit integrity failures.
+- Calculate ContentRecord membership before joining retained FileEntries so multiple occurrences cannot inflate member cardinality. Preserve and report `MISSING` occurrences; ContentRecords with no current FileEntry remain members. The current schema does not reconstruct superseded FileEntry/content associations.
+- Report explicit member, present/missing occurrence, and Source counts. Estimate potential logical savings as `max(presentOccurrenceCount - 1, 0) * sizeBytes`; this is not actual recoverable filesystem allocation.
+- Keep ContentRecords separate. No merge, redirect, canonicalization, deletion, keeper selection, manual override, or cleanup behavior is implied by group membership.
+
 ## Development
 
 - Favor readable, conventional, learnable code over clever abstractions.
@@ -176,7 +185,7 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Job scheduling, concurrency, cancellation, retry, and startup recovery.
 - Detailed scan scope representation and source-specific progress.
 - Specialized result schemas beyond `content_hash`.
-- Matching, similarity, relationship, grouping, and manual override schemas.
+- Matching, similarity, materialized relationship/grouping, and manual override schemas.
 - Face/person schema and AI-provider architecture.
 - Application-managed cache locations and lifecycle.
 - FFmpeg/ffprobe discovery and process management.
