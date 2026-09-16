@@ -112,9 +112,11 @@ List queries use ascending digest keyset pagination and digest-led grouping thro
 
 Detail reads always return distinct ContentRecord members and all retained current FileEntry associations, including `MISSING` entries, even when an active filter matches none. Occurrences expose their normalized extension, derived technical `FileCategory`, and match flag. The catalog-wide filter-options endpoint counts extensions across retained occurrences in valid exact groups. `FileCategory` is a small backend classifier (`PHOTO`, `VIDEO`, `DOCUMENT`) derived from extension metadata, not persisted, and is separate from future user Tags/Categories. The schema cannot reconstruct superseded associations that are no longer retained. The potential-storage-savings value is an estimate of logical present-occurrence bytes, not actual recoverable filesystem allocation. Grouping and filtering perform no filesystem access, hashing, or durable mutation.
 
-The React frontend consumes these endpoints through a small typed API module. The list appends keyset pages with duplicate-digest protection and retains loaded rows plus scroll position in browser memory during list/detail navigation. The detail route uses the full digest as identity while displaying a non-authoritative `DUP-` label from its first eight hexadecimal characters. It shows ContentRecord members and deterministically ordered retained occurrences without assigning a keeper. A bounded, session-memory-only trail records duplicate-group visits. None of this frontend state is persisted.
+The React frontend consumes these endpoints through a small typed API module. `/duplicates` exposes multi-select Photos, Videos, and Documents controls plus extensions loaded independently from the filter-options endpoint. Active filters are canonical repeated URL parameters; unsupported categories are removed while selected extensions absent from current options remain visible and requested. Category choices use OR, extension choices use OR, and the two dimensions combine with AND according to the backend contract.
 
-The backend catalog-correct filtering contract is implemented, but the current frontend does not yet expose filter controls or consume filter-match/options data.
+The list appends keyset pages with duplicate-digest protection and retains loaded rows plus scroll position in browser memory only when the current URL has the same order-insensitive canonical filter key. Filter changes mount a fresh result state, reset cursor/scroll/errors, and start at the first page. Filtered cards use `filterMatch` to describe matching and additional retained occurrences while leaving whole-group values unchanged. Filter-option failure does not block list or category use.
+
+The detail route preserves URL filters, uses the full digest as identity while displaying a non-authoritative `DUP-` label from its first eight hexadecimal characters, and requests the complete group with match context. It highlights matching occurrences, keeps every nonmatching occurrence visible, and derives whole-group extension display from backend occurrence extensions. A bounded, session-memory-only trail records duplicate-group visits and preserves current filters. None of this frontend state is persisted.
 
 Filesystem failure marks every ScanRunSource participating in that started DISCOVERY attempt, the DISCOVERY stage, Job, and ScanRun failed without creating RECONCILIATION or marking any FileEntry missing. This ensures no child of the terminally failed attempt remains `DISCOVERING`. Earlier committed observation batches remain tagged with their incomplete generations; `completed_generation` remains null, so those partial observations do not authorize a missing sweep. Retry and recovery behavior is not implemented.
 
@@ -271,10 +273,12 @@ The frontend consumes that slice as:
 ```text
 /duplicates
     -> typed exact-duplicate API client
-    -> digest-keyset Load more list
+    -> URL-backed File Type and Extension controls
+    -> filter-keyed digest-keyset Load more list with retained-occurrence match context
 /duplicates/:digestHex
-    -> group summary, ContentRecord members, and retained FileEntry occurrences
-    -> browser-memory list context and recent-visit trail
+    -> complete group summary, ContentRecord members, and retained FileEntry occurrences
+    -> per-occurrence filter match context
+    -> filter-keyed browser-memory list context and recent-visit trail
 ```
 
 These commands and reads run synchronously in their HTTP requests. Scheduler/background execution, simultaneous-call hardening, retry/recovery, materialized equality decisions, and SSE remain deferred.

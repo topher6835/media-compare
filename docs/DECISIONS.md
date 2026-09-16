@@ -171,9 +171,10 @@ The initial persistence implementation uses immutable Java records for row-shape
 
 - Expose the first duplicate browsing workflow at `/duplicates` and `/duplicates/:digestHex`. Keep the full lowercase SHA-256 digest as route/API identity; derive `DUP-` plus the first eight uppercase digest characters only as a friendly, non-authoritative display label.
 - Consume list keyset pagination through a `Load more` interaction, preserve backend digest order, and de-duplicate appended groups by full digest. Do not present sorting or filtering over only loaded rows as catalog-wide behavior.
-- Retain loaded list pages, list scroll position, and a bounded recent duplicate-group trail in browser memory only. Do not add persistent review state or a frontend state library for this workflow.
+- Store exact-duplicate filters in repeated URL `fileCategory` and `extension` parameters. Support multi-select Photos, Videos, Documents, and backend-provided extensions; keep selected stale extensions visible, and do not create Audio, Other, user Tag, or user Category semantics.
+- Retain loaded list pages and scroll position in browser memory only for the same order-insensitive canonical filter key. Keep a bounded recent duplicate-group trail in browser memory and preserve current filters on detail and trail navigation. Do not add persistent review state or a frontend state library for this workflow.
+- Use backend `filterMatch` and occurrence `matchesFilter` values to explain retained-occurrence matches. Preserve all whole-group summary values and keep every detail occurrence visible, including nonmatches.
 - Keep the workflow read-only. Members have no preferred/keeper designation and the potential savings figure remains explicitly estimated.
-- Defer frontend file-category and extension controls. The backend now provides catalog-correct selection, whole-group match context, per-occurrence match flags, and filter options without N+1 detail reads.
 
 ## Development
 

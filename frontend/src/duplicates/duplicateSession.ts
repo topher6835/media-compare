@@ -9,6 +9,7 @@ interface DuplicateTrailEntry {
 }
 
 interface DuplicateListMemory {
+  filterKey: string
   groups: ExactDuplicateGroupSummary[]
   nextAfterDigestHex: string | null
   hasLoaded: boolean
@@ -16,6 +17,7 @@ interface DuplicateListMemory {
 }
 
 const listMemory: DuplicateListMemory = {
+  filterKey: '',
   groups: [],
   nextAfterDigestHex: null,
   hasLoaded: false,
@@ -25,7 +27,16 @@ const listMemory: DuplicateListMemory = {
 const recentDuplicateVisits: DuplicateTrailEntry[] = []
 const MAX_TRAIL_ENTRIES = 8
 
-export function getDuplicateListMemory(): DuplicateListMemory {
+export function getDuplicateListMemory(filterKey: string): DuplicateListMemory {
+  if (listMemory.filterKey !== filterKey) {
+    return {
+      filterKey,
+      groups: [],
+      nextAfterDigestHex: null,
+      hasLoaded: false,
+      scrollY: 0,
+    }
+  }
   return {
     ...listMemory,
     groups: [...listMemory.groups],
@@ -33,12 +44,13 @@ export function getDuplicateListMemory(): DuplicateListMemory {
 }
 
 export function rememberDuplicatePage(
+  filterKey: string,
   page: ExactDuplicateGroupPage,
   append: boolean,
 ): ExactDuplicateGroupSummary[] {
   const groupsByDigest = new Map<string, ExactDuplicateGroupSummary>()
 
-  if (append) {
+  if (append && listMemory.filterKey === filterKey) {
     for (const group of listMemory.groups) {
       groupsByDigest.set(group.digestHex, group)
     }
@@ -47,14 +59,20 @@ export function rememberDuplicatePage(
     groupsByDigest.set(group.digestHex, group)
   }
 
+  listMemory.filterKey = filterKey
   listMemory.groups = [...groupsByDigest.values()]
   listMemory.nextAfterDigestHex = page.nextAfterDigestHex
   listMemory.hasLoaded = true
   return [...listMemory.groups]
 }
 
-export function rememberDuplicateListScroll(scrollY: number): void {
-  listMemory.scrollY = scrollY
+export function rememberDuplicateListScroll(
+  filterKey: string,
+  scrollY: number,
+): void {
+  if (listMemory.filterKey === filterKey) {
+    listMemory.scrollY = scrollY
+  }
 }
 
 export function recordDuplicateVisit(entry: DuplicateTrailEntry): void {

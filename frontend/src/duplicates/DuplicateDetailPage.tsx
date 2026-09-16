@@ -1,15 +1,23 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Link,
   useLocation,
   useNavigate,
   useParams,
+  useSearchParams,
 } from 'react-router-dom'
 
 import {
   ApiError,
+  exactDuplicateFilterKey,
+  exactDuplicateFilterParameters,
+  exactDuplicateFilterSearch,
   getExactDuplicateGroup,
+  hasExactDuplicateFilters,
+  parseExactDuplicateFilters,
+  type ExactDuplicateFilters,
   type ExactDuplicateGroupDetail,
+  type TechnicalFileCategory,
 } from '../api/exactDuplicates.ts'
 import {
   duplicateReference,
@@ -37,7 +45,7 @@ function failureContent(failure: DetailFailure) {
   if (failure === 'bad-request') {
     return {
       heading: 'Invalid duplicate reference',
-      message: 'This URL does not contain a valid full SHA-256 digest.',
+      message: 'This URL does not contain a valid duplicate request.',
     }
   }
   if (failure === 'not-found') {
@@ -53,12 +61,38 @@ function failureContent(failure: DetailFailure) {
   }
 }
 
-interface DuplicateGroupDetailProps {
-  detail: ExactDuplicateGroupDetail
+function categoryLabel(category: TechnicalFileCategory): string {
+  if (category === 'PHOTO') return 'Photos'
+  if (category === 'VIDEO') return 'Videos'
+  return 'Documents'
 }
 
-export function DuplicateGroupDetail({ detail }: DuplicateGroupDetailProps) {
+function filterDescription(filters: ExactDuplicateFilters): string {
+  const parts: string[] = []
+  if (filters.fileCategories.length > 0) {
+    parts.push(filters.fileCategories.map(categoryLabel).join(' + '))
+  }
+  if (filters.extensions.length > 0) {
+    parts.push(filters.extensions.join(', '))
+  }
+  return parts.join(' · ')
+}
+
+interface DuplicateGroupDetailProps {
+  detail: ExactDuplicateGroupDetail
+  filters: ExactDuplicateFilters
+}
+
+export function DuplicateGroupDetail({
+  detail,
+  filters,
+}: DuplicateGroupDetailProps) {
   const extensions = occurrenceExtensions(detail.occurrences)
+  const filtersActive = hasExactDuplicateFilters(filters)
+  const matchingCount = detail.occurrences.filter(
+    (occurrence) => occurrence.matchesFilter,
+  ).length
+  const additionalCount = detail.occurrences.length - matchingCount
 
   return (
     <>
@@ -74,6 +108,19 @@ export function DuplicateGroupDetail({ detail }: DuplicateGroupDetailProps) {
           </div>
         )}
       </div>
+
+      {filtersActive && (
+        <div className="detail-filter-context">
+          <strong>Filtered by {filterDescription(filters)}</strong>
+          <span>
+            {pluralize(matchingCount, 'retained occurrence')}{' '}
+            {matchingCount === 1 ? 'matches' : 'match'} this filter
+            {additionalCount > 0 &&
+              `; ${pluralize(additionalCount, 'additional retained occurrence')} ${additionalCount === 1 ? 'remains' : 'remain'} in the exact group`}
+            .
+          </span>
+        </div>
+      )}
 
       <dl className="detail-summary">
         <div>
@@ -133,7 +180,11 @@ export function DuplicateGroupDetail({ detail }: DuplicateGroupDetailProps) {
         <div className="section-heading-row">
           <div>
             <h2 id="occurrences-heading">Retained occurrences</h2>
-            <p>Present and missing retained FileEntry occurrences, in catalog order.</p>
+            <p>
+              Present and missing retained FileEntry occurrences, in catalog
+              order. Filters highlight matches without removing exact-group
+              context.
+            </p>
           </div>
           <span>{pluralize(detail.occurrences.length, 'occurrence')}</span>
         </div>
@@ -143,9 +194,14 @@ export function DuplicateGroupDetail({ detail }: DuplicateGroupDetailProps) {
           <div className="occurrence-list">
             {detail.occurrences.map((occurrence) => {
               const isMissing = occurrence.presenceStatus === 'MISSING'
+              const matchClass = filtersActive
+                ? occurrence.matchesFilter
+                  ? ' is-filter-match'
+                  : ' is-filter-nonmatch'
+                : ''
               return (
                 <article
-                  className={`occurrence-row${isMissing ? ' is-missing' : ''}`}
+                  className={`occurrence-row${isMissing ? ' is-missing' : ''}${matchClass}`}
                   key={occurrence.fileEntryId}
                 >
                   <div className="occurrence-main">
@@ -156,6 +212,9 @@ export function DuplicateGroupDetail({ detail }: DuplicateGroupDetailProps) {
                       >
                         {occurrence.presenceStatus}
                       </span>
+                      {filtersActive && occurrence.matchesFilter && (
+                        <span className="status-badge filter-match">FILTER MATCH</span>
+                      )}
                     </div>
                     <p className="file-path" title={occurrence.relativePath}>
                       {occurrence.relativePath}
@@ -172,6 +231,18 @@ export function DuplicateGroupDetail({ detail }: DuplicateGroupDetailProps) {
                     <div>
                       <dt>ContentRecord</dt>
                       <dd>#{occurrence.contentRecordId}</dd>
+                    </div>
+                    <div>
+                      <dt>Extension</dt>
+                      <dd>{occurrence.extension ?? 'None'}</dd>
+                    </div>
+                    <div>
+                      <dt>File type</dt>
+                      <dd>
+                        {occurrence.fileCategory
+                          ? categoryLabel(occurrence.fileCategory).replace(/s$/, '')
+                          : 'Unclassified'}
+                      </dd>
                     </div>
                   </dl>
                 </article>
@@ -200,29 +271,50 @@ export function DuplicateDetailPage() {
   const { digestHex = '' } = useParams()
   const navigate = useNavigate()
   const location = useLocation()
+  const [searchParameters, setSearchParameters] = useSearchParams()
+  const rawSearch = searchParameters.toString()
+  const parsedFilters = useMemo(
+    () => parseExactDuplicateFilters(new URLSearchParams(rawSearch)),
+    [rawSearch],
+  )
+  const filterKey = exactDuplicateFilterKey(parsedFilters)
+  const filters = useMemo(
+    () => parseExactDuplicateFilters(new URLSearchParams(filterKey)),
+    [filterKey],
+  )
+  const filterSearch = exactDuplicateFilterSearch(filters)
+  const requestKey = `${digestHex}?${filterKey}`
   const [result, setResult] = useState<{
-    digestHex: string
+    requestKey: string
     detail: ExactDuplicateGroupDetail | null
     failure: DetailFailure | null
-  }>({ digestHex: '', detail: null, failure: null })
+  }>({ requestKey: '', detail: null, failure: null })
+
+  useEffect(() => {
+    if (rawSearch !== filterKey) {
+      setSearchParameters(exactDuplicateFilterParameters(filters), {
+        replace: true,
+      })
+    }
+  }, [filterKey, filters, rawSearch, setSearchParameters])
 
   useEffect(() => {
     let cancelled = false
     window.scrollTo(0, 0)
 
-    getExactDuplicateGroup(digestHex)
-      .then((result) => {
+    getExactDuplicateGroup(digestHex, filters)
+      .then((detail) => {
         if (cancelled) return
         recordDuplicateVisit({
-          digestHex: result.digestHex,
-          reference: duplicateReference(result.digestHex),
+          digestHex: detail.digestHex,
+          reference: duplicateReference(detail.digestHex),
         })
-        setResult({ digestHex, detail: result, failure: null })
+        setResult({ requestKey, detail, failure: null })
       })
       .catch((error: unknown) => {
         if (!cancelled) {
           setResult({
-            digestHex,
+            requestKey,
             detail: null,
             failure: detailFailure(error),
           })
@@ -232,10 +324,10 @@ export function DuplicateDetailPage() {
     return () => {
       cancelled = true
     }
-  }, [digestHex])
+  }, [digestHex, filters, requestKey])
 
-  const detail = result.digestHex === digestHex ? result.detail : null
-  const failure = result.digestHex === digestHex ? result.failure : null
+  const detail = result.requestKey === requestKey ? result.detail : null
+  const failure = result.requestKey === requestKey ? result.failure : null
   const isLoading = !detail && !failure
   const trail = detail ? getDuplicateTrail() : []
   const cameFromList = Boolean(
@@ -246,7 +338,7 @@ export function DuplicateDetailPage() {
     if (cameFromList) {
       navigate(-1)
     } else {
-      navigate('/duplicates')
+      navigate(`/duplicates${filterSearch}`)
     }
   }
 
@@ -271,14 +363,16 @@ export function DuplicateDetailPage() {
               Try again
             </button>
           ) : (
-            <Link className="primary-link" to="/duplicates">
+            <Link className="primary-link" to={`/duplicates${filterSearch}`}>
               Browse exact duplicates
             </Link>
           )}
         </div>
       )}
 
-      {!isLoading && detail && <DuplicateGroupDetail detail={detail} />}
+      {!isLoading && detail && (
+        <DuplicateGroupDetail detail={detail} filters={filters} />
+      )}
 
       {trail.length > 1 && (
         <nav className="visit-trail" aria-label="Recent duplicate group visits">
@@ -289,7 +383,9 @@ export function DuplicateDetailPage() {
                 {entry.digestHex === digestHex ? (
                   <span aria-current="page">{entry.reference}</span>
                 ) : (
-                  <Link to={`/duplicates/${entry.digestHex}`}>{entry.reference}</Link>
+                  <Link to={`/duplicates/${entry.digestHex}${filterSearch}`}>
+                    {entry.reference}
+                  </Link>
                 )}
               </li>
             ))}

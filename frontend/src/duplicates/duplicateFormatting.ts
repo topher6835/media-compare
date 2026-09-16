@@ -24,15 +24,6 @@ export function filenameFromPath(relativePath: string): string {
   return relativePath.split('/').at(-1) ?? relativePath
 }
 
-function extensionFromPath(relativePath: string): string | null {
-  const filename = filenameFromPath(relativePath)
-  const lastDot = filename.lastIndexOf('.')
-  if (lastDot <= 0 || lastDot === filename.length - 1) {
-    return null
-  }
-  return filename.slice(lastDot + 1).toUpperCase()
-}
-
 export function occurrenceExtensions(
   occurrences: ExactDuplicateOccurrence[],
 ): string[] {
@@ -40,9 +31,8 @@ export function occurrenceExtensions(
   let hasNoExtension = false
 
   for (const occurrence of occurrences) {
-    const extension = extensionFromPath(occurrence.relativePath)
-    if (extension) {
-      extensions.add(extension)
+    if (occurrence.extension) {
+      extensions.add(occurrence.extension)
     } else {
       hasNoExtension = true
     }

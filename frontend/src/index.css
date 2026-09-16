@@ -53,6 +53,7 @@ a {
 
 button:focus-visible,
 a:focus-visible,
+input:focus-visible,
 summary:focus-visible {
   outline: 3px solid rgb(36 95 146 / 28%);
   outline-offset: 2px;
@@ -229,6 +230,229 @@ main {
   font-size: 0.85rem;
 }
 
+.duplicate-result-count {
+  margin: 0 2px 10px;
+  text-align: right;
+}
+
+.duplicate-filters {
+  margin-bottom: 24px;
+  padding: 17px 18px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.filter-heading-row,
+.filter-controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.filter-heading-row h2 {
+  font-size: 0.92rem;
+}
+
+.filter-heading-row p {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+.clear-filter-button {
+  min-height: auto;
+  padding: 5px 8px;
+  border: 0;
+  color: var(--accent);
+  background: transparent;
+  font-size: 0.76rem;
+}
+
+.clear-filter-button:hover {
+  color: var(--accent-dark);
+  background: transparent;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.filter-controls-row {
+  align-items: flex-start;
+  justify-content: flex-start;
+  margin-top: 13px;
+}
+
+.category-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.category-filter button {
+  min-height: 34px;
+  padding: 6px 12px;
+  border-color: var(--border-strong);
+  color: var(--text);
+  background: var(--surface);
+  font-size: 0.78rem;
+}
+
+.category-filter button:hover {
+  border-color: var(--accent);
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+}
+
+.category-filter button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.extension-filter {
+  position: relative;
+  min-width: 190px;
+}
+
+.extension-filter > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--surface);
+  font-size: 0.78rem;
+  font-weight: 650;
+  cursor: pointer;
+  list-style: none;
+}
+
+.extension-filter > summary::-webkit-details-marker {
+  display: none;
+}
+
+.extension-filter > summary::after {
+  color: var(--text-muted);
+  content: "▾";
+}
+
+.extension-filter[open] > summary::after {
+  content: "▴";
+}
+
+.extension-filter > summary span {
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  text-align: center;
+}
+
+.extension-options {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 6px);
+  left: 0;
+  width: min(330px, calc(100vw - 48px));
+  max-height: 310px;
+  overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgb(16 24 40 / 14%);
+}
+
+.extension-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.extension-option:last-child {
+  border-bottom: 0;
+}
+
+.extension-option:hover {
+  background: var(--surface-subtle);
+}
+
+.extension-option input {
+  flex: none;
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+
+.extension-option > span {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.extension-option strong {
+  color: var(--text-strong);
+  font-size: 0.8rem;
+}
+
+.extension-option small {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  text-align: right;
+}
+
+.extension-option.is-stale {
+  background: var(--missing-bg);
+}
+
+.filter-options-status {
+  padding: 13px;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.filter-options-status button {
+  min-height: 30px;
+  margin-top: 9px;
+  padding: 4px 9px;
+  font-size: 0.72rem;
+}
+
+.active-extension-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.active-extension-filters button {
+  min-height: 28px;
+  padding: 3px 9px;
+  border-color: var(--border-strong);
+  border-radius: 999px;
+  color: var(--text);
+  background: var(--surface-subtle);
+  font-size: 0.72rem;
+}
+
+.active-extension-filters button:hover {
+  border-color: var(--accent);
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+}
+
 .duplicate-list {
   display: grid;
   gap: 14px;
@@ -286,6 +510,13 @@ main {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface-subtle);
+}
+
+.filter-match-context {
+  margin: 0 22px 12px;
+  color: var(--accent-dark);
+  font-size: 0.76rem;
+  font-weight: 650;
 }
 
 .summary-stats.has-missing {
@@ -432,6 +663,24 @@ dd {
   align-items: center;
 }
 
+.detail-filter-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 18px;
+  margin-top: 20px;
+  padding: 12px 14px;
+  border: 1px solid #c9ddeb;
+  border-radius: 8px;
+  color: var(--text-muted);
+  background: var(--accent-soft);
+  font-size: 0.8rem;
+}
+
+.detail-filter-context strong {
+  color: var(--accent-dark);
+}
+
 .extension-summary {
   display: flex;
   flex-direction: column;
@@ -539,6 +788,19 @@ dd {
   opacity: 0.72;
 }
 
+.occurrence-row.is-filter-match {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.occurrence-row.is-filter-nonmatch {
+  background: var(--surface-subtle);
+}
+
+.occurrence-row.is-filter-nonmatch .occurrence-main,
+.occurrence-row.is-filter-nonmatch .occurrence-meta {
+  opacity: 0.7;
+}
+
 .occurrence-main {
   min-width: 0;
 }
@@ -576,6 +838,11 @@ dd {
   background: var(--missing-bg);
 }
 
+.status-badge.filter-match {
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+}
+
 .file-path {
   overflow-wrap: anywhere;
   margin-top: 5px;
@@ -587,8 +854,8 @@ dd {
 
 .occurrence-meta {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 20px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 20px;
 }
 
 .occurrence-meta dd {
@@ -693,6 +960,21 @@ dd {
   .savings,
   .extension-summary {
     align-items: flex-start;
+  }
+
+  .filter-heading-row,
+  .filter-controls-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .extension-filter {
+    width: 100%;
+  }
+
+  .extension-options {
+    width: min(100%, 390px);
   }
 
   .summary-stats {
