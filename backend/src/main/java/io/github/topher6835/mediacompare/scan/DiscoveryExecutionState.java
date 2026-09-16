@@ -13,7 +13,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class DiscoveryExecutionState {
 
     private static final String PENDING_STATUS = "PENDING";
-    private static final String RECONCILIATION_STAGE_TYPE = "RECONCILIATION";
 
     private final ScanRepository scanRepository;
     private final JobRepository jobRepository;
@@ -27,8 +26,9 @@ public class DiscoveryExecutionState {
     public void start(long scanRunId, Job job, JobStage discoveryStage, List<DiscoverySource> sources,
             long startedAtMs) {
         requireOne(scanRepository.startScanRun(scanRunId, startedAtMs), "start ScanRun");
-        requireOne(jobRepository.startJob(job.id(), startedAtMs), "start Job");
-        requireOne(jobRepository.startStage(discoveryStage.id(), startedAtMs), "start DISCOVERY stage");
+        requireOne(jobRepository.startJob(job.id(), job.executionVersion(), startedAtMs), "start Job");
+        requireOne(jobRepository.startDiscoveryStage(
+                discoveryStage.id(), job.executionVersion(), startedAtMs), "start DISCOVERY stage");
         for (DiscoverySource source : sources) {
             requireOne(scanRepository.startSourceDiscovery(
                     source.scanRunSource().id(), source.traversalGeneration(), startedAtMs),
@@ -43,12 +43,13 @@ public class DiscoveryExecutionState {
             requireOne(scanRepository.completeSourceDiscovery(source.scanRunSource().id()),
                     "complete Source discovery");
         }
-        requireOne(jobRepository.completeDiscoveryStage(discoveryStage.id(), finalCount, completedAtMs),
+        requireOne(jobRepository.completeDiscoveryStage(
+                discoveryStage.id(), job.executionVersion(), finalCount, completedAtMs),
                 "complete DISCOVERY stage");
         jobRepository.insert(new JobStage(
                 null,
                 job.id(),
-                RECONCILIATION_STAGE_TYPE,
+                ScanExecutionDefinition.RECONCILIATION,
                 null,
                 PENDING_STATUS,
                 0,
@@ -58,7 +59,8 @@ public class DiscoveryExecutionState {
                 null,
                 null,
                 null));
-        requireOne(jobRepository.advanceJobToReconciliation(job.id(), finalCount),
+        requireOne(jobRepository.advanceJobToReconciliation(
+                job.id(), job.executionVersion(), finalCount),
                 "advance Job to RECONCILIATION");
     }
 
@@ -70,9 +72,16 @@ public class DiscoveryExecutionState {
                     source.scanRunSource().id(), failedAtMs, errorMessage),
                     "fail Source discovery after Source " + affectedSource.source().id() + " failed");
         }
-        requireOne(jobRepository.failDiscoveryStage(discoveryStage.id(), failedAtMs, errorMessage),
+        requireOne(jobRepository.failDiscoveryStage(
+                discoveryStage.id(), job.executionVersion(), failedAtMs, errorMessage),
                 "fail DISCOVERY stage");
-        requireOne(jobRepository.failJob(job.id(), failedAtMs, errorMessage), "fail Job");
+        if (job.executionVersion() == ScanExecutionDefinition.VERSION_2) {
+            requireOne(jobRepository.failVersion2Job(
+                    job.id(), ScanExecutionDefinition.DISCOVERY, failedAtMs, errorMessage), "fail Job");
+        } else {
+            requireOne(jobRepository.failDiscoveryJob(
+                    job.id(), job.executionVersion(), failedAtMs, errorMessage), "fail Job");
+        }
         requireOne(scanRepository.failScanRun(scanRunId, failedAtMs, errorMessage), "fail ScanRun");
     }
 

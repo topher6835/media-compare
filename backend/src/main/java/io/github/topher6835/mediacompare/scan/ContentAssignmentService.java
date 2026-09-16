@@ -18,10 +18,7 @@ public class ContentAssignmentService {
 
     static final int PAGE_SIZE = 250;
 
-    private static final String SCAN_JOB_TYPE = "SCAN";
     private static final String COMPLETED_STATUS = "COMPLETED";
-    private static final String DISCOVERY_STAGE_TYPE = "DISCOVERY";
-    private static final String RECONCILIATION_STAGE_TYPE = "RECONCILIATION";
 
     private final ScanRepository scanRepository;
     private final JobRepository jobRepository;
@@ -37,7 +34,11 @@ public class ContentAssignmentService {
     }
 
     public ContentAssignmentResult assign(long scanRunId) {
-        List<ScanRunSource> sources = preflight(scanRunId);
+        List<ScanRunSource> sources = preflightVersion1(scanRunId);
+        return assignSources(scanRunId, sources);
+    }
+
+    ContentAssignmentResult assignSources(long scanRunId, List<ScanRunSource> sources) {
         long assignedCount = 0;
         long skippedCount = 0;
 
@@ -65,23 +66,34 @@ public class ContentAssignmentService {
         return new ContentAssignmentResult(scanRunId, assignedCount, skippedCount);
     }
 
-    private List<ScanRunSource> preflight(long scanRunId) {
+    List<ScanRunSource> requireCompletedSources(long scanRunId) {
+        scanRepository.findScanRunById(scanRunId)
+                .orElseThrow(() -> new NoSuchElementException("ScanRun " + scanRunId + " does not exist"));
+        List<ScanRunSource> sources = scanRepository.findScanRunSourcesByScanRunId(scanRunId);
+        requireCompletedSourceEvidence(sources);
+        return List.copyOf(sources);
+    }
+
+    private List<ScanRunSource> preflightVersion1(long scanRunId) {
         ScanRun scanRun = scanRepository.findScanRunById(scanRunId)
                 .orElseThrow(() -> new NoSuchElementException("ScanRun " + scanRunId + " does not exist"));
         List<ScanRunSource> sources = scanRepository.findScanRunSourcesByScanRunId(scanRunId);
-        Job job = jobRepository.findJobByScanRunIdAndType(scanRunId, SCAN_JOB_TYPE)
+        Job job = jobRepository.findJobByScanRunIdAndTypeAndExecutionVersion(
+                scanRunId, ScanExecutionDefinition.JOB_TYPE, ScanExecutionDefinition.VERSION_1)
                 .orElseThrow(() -> new NoSuchElementException(
                         "Execution handoff for ScanRun " + scanRunId + " does not exist"));
-        JobStage discoveryStage = jobRepository.findJobStageByJobIdAndType(job.id(), DISCOVERY_STAGE_TYPE)
+        JobStage discoveryStage = jobRepository.findJobStageByJobIdAndType(
+                job.id(), ScanExecutionDefinition.DISCOVERY)
                 .orElseThrow(() -> new ContentAssignmentConflictException("DISCOVERY stage does not exist"));
         JobStage reconciliationStage = jobRepository.findJobStageByJobIdAndType(
-                job.id(), RECONCILIATION_STAGE_TYPE)
+                job.id(), ScanExecutionDefinition.RECONCILIATION)
                 .orElseThrow(() -> new ContentAssignmentConflictException("RECONCILIATION stage does not exist"));
 
         if (!COMPLETED_STATUS.equals(scanRun.status())
                 || scanRun.startedAtMs() == null
                 || scanRun.finishedAtMs() == null
-                || !SCAN_JOB_TYPE.equals(job.jobType())
+                || !ScanExecutionDefinition.JOB_TYPE.equals(job.jobType())
+                || job.executionVersion() != ScanExecutionDefinition.VERSION_1
                 || !COMPLETED_STATUS.equals(job.status())
                 || job.currentStageType() != null
                 || job.finishedAtMs() == null
@@ -91,6 +103,11 @@ public class ContentAssignmentService {
                     "ScanRun is not eligible for ContentRecord assignment");
         }
 
+        requireCompletedSourceEvidence(sources);
+        return List.copyOf(sources);
+    }
+
+    private static void requireCompletedSourceEvidence(List<ScanRunSource> sources) {
         for (ScanRunSource source : sources) {
             if (!COMPLETED_STATUS.equals(source.status())
                     || source.traversalGeneration() <= 0
@@ -102,6 +119,5 @@ public class ContentAssignmentService {
             }
         }
 
-        return List.copyOf(sources);
     }
 }

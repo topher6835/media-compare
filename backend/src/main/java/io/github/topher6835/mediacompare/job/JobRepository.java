@@ -57,13 +57,12 @@ public class JobRepository {
                 .findFirst();
     }
 
-    public Optional<Job> findJobByScanRunIdAndType(long scanRunId, String jobType) {
+    public Optional<Job> findJobByScanRunIdAndTypeAndExecutionVersion(
+            long scanRunId, String jobType, long executionVersion) {
         return jdbcTemplate.query("""
                 SELECT * FROM job
-                WHERE scan_run_id = ? AND job_type = ?
-                ORDER BY id
-                LIMIT 1
-                """, JobRepository::mapJob, scanRunId, jobType)
+                WHERE scan_run_id = ? AND job_type = ? AND execution_version = ?
+                """, JobRepository::mapJob, scanRunId, jobType, executionVersion)
                 .stream()
                 .findFirst();
     }
@@ -117,120 +116,252 @@ public class JobRepository {
                 """, JobRepository::mapJobStage, jobId, stageType).stream().findFirst();
     }
 
-    public int startJob(long jobId, long startedAtMs) {
+    public int startJob(long jobId, long executionVersion, long startedAtMs) {
         return jdbcTemplate.update("""
                 UPDATE job
                 SET status = 'RUNNING', attempt_count = attempt_count + 1, started_at_ms = ?,
                     finished_at_ms = NULL, error_message = NULL
-                WHERE id = ? AND job_type = 'SCAN' AND status = 'PENDING'
+                WHERE id = ? AND job_type = 'SCAN' AND execution_version = ? AND status = 'PENDING'
                   AND current_stage_type = 'DISCOVERY'
-                """, startedAtMs, jobId);
+                """, startedAtMs, jobId, executionVersion);
     }
 
-    public int startStage(long jobStageId, long startedAtMs) {
+    public int startDiscoveryStage(long jobStageId, long executionVersion, long startedAtMs) {
         return jdbcTemplate.update("""
                 UPDATE job_stage
                 SET status = 'RUNNING', progress_completed = 0, progress_total = NULL,
                     attempt_count = attempt_count + 1, started_at_ms = ?, finished_at_ms = NULL,
                     error_message = NULL
                 WHERE id = ? AND stage_type = 'DISCOVERY' AND status = 'PENDING'
-                """, startedAtMs, jobStageId);
+                  AND EXISTS (
+                      SELECT 1 FROM job
+                      WHERE job.id = job_stage.job_id AND job.execution_version = ?
+                  )
+                """, startedAtMs, jobStageId, executionVersion);
     }
 
-    public int updateDiscoveryProgress(long jobId, long jobStageId, long progressCompleted) {
+    public int updateDiscoveryProgress(long jobId, long jobStageId, long executionVersion,
+            long progressCompleted) {
         int stageRows = jdbcTemplate.update("""
                 UPDATE job_stage SET progress_completed = ?
                 WHERE id = ? AND stage_type = 'DISCOVERY' AND status = 'RUNNING'
-                """, progressCompleted, jobStageId);
+                  AND EXISTS (
+                      SELECT 1 FROM job
+                      WHERE job.id = job_stage.job_id AND job.execution_version = ?
+                  )
+                """, progressCompleted, jobStageId, executionVersion);
         int jobRows = jdbcTemplate.update("""
                 UPDATE job SET progress_completed = ?
-                WHERE id = ? AND status = 'RUNNING' AND current_stage_type = 'DISCOVERY'
-                """, progressCompleted, jobId);
+                WHERE id = ? AND execution_version = ? AND status = 'RUNNING'
+                  AND current_stage_type = 'DISCOVERY'
+                """, progressCompleted, jobId, executionVersion);
         return stageRows + jobRows;
     }
 
-    public int completeDiscoveryStage(long jobStageId, long finalCount, long finishedAtMs) {
+    public int completeDiscoveryStage(long jobStageId, long executionVersion, long finalCount,
+            long finishedAtMs) {
         return jdbcTemplate.update("""
                 UPDATE job_stage
                 SET status = 'COMPLETED', progress_completed = ?, progress_total = ?,
                     finished_at_ms = ?, error_message = NULL
                 WHERE id = ? AND stage_type = 'DISCOVERY' AND status = 'RUNNING'
-                """, finalCount, finalCount, finishedAtMs, jobStageId);
+                  AND EXISTS (
+                      SELECT 1 FROM job
+                      WHERE job.id = job_stage.job_id AND job.execution_version = ?
+                  )
+                """, finalCount, finalCount, finishedAtMs, jobStageId, executionVersion);
     }
 
-    public int advanceJobToReconciliation(long jobId, long finalCount) {
+    public int advanceJobToReconciliation(long jobId, long executionVersion, long finalCount) {
         return jdbcTemplate.update("""
                 UPDATE job
                 SET current_stage_type = 'RECONCILIATION', progress_completed = ?, progress_total = ?,
                     finished_at_ms = NULL, error_message = NULL
-                WHERE id = ? AND status = 'RUNNING' AND current_stage_type = 'DISCOVERY'
-                """, finalCount, finalCount, jobId);
+                WHERE id = ? AND execution_version = ? AND status = 'RUNNING'
+                  AND current_stage_type = 'DISCOVERY'
+                """, finalCount, finalCount, jobId, executionVersion);
     }
 
-    public int failDiscoveryStage(long jobStageId, long failedAtMs, String errorMessage) {
+    public int failDiscoveryStage(long jobStageId, long executionVersion, long failedAtMs,
+            String errorMessage) {
         return jdbcTemplate.update("""
                 UPDATE job_stage
                 SET status = 'FAILED', finished_at_ms = ?, error_message = ?
                 WHERE id = ? AND stage_type = 'DISCOVERY' AND status = 'RUNNING'
-                """, failedAtMs, errorMessage, jobStageId);
+                  AND EXISTS (
+                      SELECT 1 FROM job
+                      WHERE job.id = job_stage.job_id AND job.execution_version = ?
+                  )
+                """, failedAtMs, errorMessage, jobStageId, executionVersion);
     }
 
-    public int failJob(long jobId, long failedAtMs, String errorMessage) {
+    public int failDiscoveryJob(long jobId, long executionVersion, long failedAtMs, String errorMessage) {
         return jdbcTemplate.update("""
                 UPDATE job
                 SET status = 'FAILED', finished_at_ms = ?, error_message = ?
-                WHERE id = ? AND status = 'RUNNING' AND current_stage_type = 'DISCOVERY'
-                """, failedAtMs, errorMessage, jobId);
+                WHERE id = ? AND execution_version = ? AND status = 'RUNNING'
+                  AND current_stage_type = 'DISCOVERY'
+                """, failedAtMs, errorMessage, jobId, executionVersion);
     }
 
-    public int startReconciliation(long jobId, long jobStageId, long sourceCount, long startedAtMs) {
+    public int startReconciliation(long jobId, long jobStageId, long executionVersion,
+            long sourceCount, long startedAtMs) {
         int stageRows = jdbcTemplate.update("""
                 UPDATE job_stage
                 SET status = 'RUNNING', progress_completed = 0, progress_total = ?,
                     attempt_count = attempt_count + 1, started_at_ms = ?, finished_at_ms = NULL,
                     error_message = NULL
                 WHERE id = ? AND stage_type = 'RECONCILIATION' AND status = 'PENDING'
-                """, sourceCount, startedAtMs, jobStageId);
+                  AND EXISTS (
+                      SELECT 1 FROM job
+                      WHERE job.id = job_stage.job_id AND job.execution_version = ?
+                  )
+                """, sourceCount, startedAtMs, jobStageId, executionVersion);
         int jobRows = jdbcTemplate.update("""
                 UPDATE job
                 SET progress_completed = 0, progress_total = ?, finished_at_ms = NULL,
                     error_message = NULL
-                WHERE id = ? AND job_type = 'SCAN' AND status = 'RUNNING'
+                WHERE id = ? AND job_type = 'SCAN' AND execution_version = ? AND status = 'RUNNING'
                   AND current_stage_type = 'RECONCILIATION'
-                """, sourceCount, jobId);
+                """, sourceCount, jobId, executionVersion);
         return stageRows + jobRows;
     }
 
-    public int updateReconciliationProgress(long jobId, long jobStageId, long progressCompleted) {
+    public int updateReconciliationProgress(long jobId, long jobStageId, long executionVersion,
+            long progressCompleted) {
         int stageRows = jdbcTemplate.update("""
                 UPDATE job_stage SET progress_completed = ?
                 WHERE id = ? AND stage_type = 'RECONCILIATION' AND status = 'RUNNING'
-                """, progressCompleted, jobStageId);
+                  AND EXISTS (
+                      SELECT 1 FROM job
+                      WHERE job.id = job_stage.job_id AND job.execution_version = ?
+                  )
+                """, progressCompleted, jobStageId, executionVersion);
         int jobRows = jdbcTemplate.update("""
                 UPDATE job SET progress_completed = ?
-                WHERE id = ? AND status = 'RUNNING' AND current_stage_type = 'RECONCILIATION'
-                """, progressCompleted, jobId);
+                WHERE id = ? AND execution_version = ? AND status = 'RUNNING'
+                  AND current_stage_type = 'RECONCILIATION'
+                """, progressCompleted, jobId, executionVersion);
         return stageRows + jobRows;
     }
 
-    public int completeReconciliationStage(long jobStageId, long sourceCount, long finishedAtMs) {
+    public int completeReconciliationStage(long jobStageId, long executionVersion,
+            long sourceCount, long finishedAtMs) {
         return jdbcTemplate.update("""
                 UPDATE job_stage
                 SET status = 'COMPLETED', progress_completed = ?, progress_total = ?,
                     finished_at_ms = ?, error_message = NULL
                 WHERE id = ? AND stage_type = 'RECONCILIATION' AND status = 'RUNNING'
-                """, sourceCount, sourceCount, finishedAtMs, jobStageId);
+                  AND EXISTS (
+                      SELECT 1 FROM job
+                      WHERE job.id = job_stage.job_id AND job.execution_version = ?
+                  )
+                """, sourceCount, sourceCount, finishedAtMs, jobStageId, executionVersion);
     }
 
-    public int completeJob(long jobId, long sourceCount, long finishedAtMs) {
+    public int completeVersion1Job(long jobId, long sourceCount, long finishedAtMs) {
         return jdbcTemplate.update("""
                 UPDATE job
                 SET status = 'COMPLETED', current_stage_type = NULL,
                     progress_completed = ?, progress_total = ?, finished_at_ms = ?,
                     error_message = NULL
-                WHERE id = ? AND job_type = 'SCAN' AND status = 'RUNNING'
+                WHERE id = ? AND job_type = 'SCAN' AND execution_version = 1 AND status = 'RUNNING'
                   AND current_stage_type = 'RECONCILIATION'
                 """, sourceCount, sourceCount, finishedAtMs, jobId);
+    }
+
+    public int claimVersion2Stage(long jobId, long jobStageId, String stageType, long startedAtMs) {
+        return jdbcTemplate.update("""
+                UPDATE job_stage
+                SET status = 'RUNNING', progress_completed = 0, progress_total = NULL,
+                    attempt_count = attempt_count + 1, started_at_ms = ?, finished_at_ms = NULL,
+                    error_message = NULL
+                WHERE id = ? AND stage_type = ? AND status = 'PENDING'
+                  AND EXISTS (
+                      SELECT 1 FROM job
+                      WHERE job.id = job_stage.job_id
+                        AND job.id = ?
+                        AND job.job_type = 'SCAN'
+                        AND job.execution_version = 2
+                        AND job.status = 'RUNNING'
+                        AND job.current_stage_type = ?
+                  )
+                """, startedAtMs, jobStageId, stageType, jobId, stageType);
+    }
+
+    public int resetVersion2JobProgress(long jobId, String stageType) {
+        return jdbcTemplate.update("""
+                UPDATE job
+                SET progress_completed = 0, progress_total = NULL,
+                    finished_at_ms = NULL, error_message = NULL
+                WHERE id = ? AND job_type = 'SCAN' AND execution_version = 2
+                  AND status = 'RUNNING' AND current_stage_type = ?
+                """, jobId, stageType);
+    }
+
+    public int completeVersion2Stage(long jobId, long jobStageId, String stageType,
+            String resultJson, long progressCompleted, long finishedAtMs) {
+        return jdbcTemplate.update("""
+                UPDATE job_stage
+                SET result_json = ?, status = 'COMPLETED', progress_completed = ?, progress_total = ?,
+                    finished_at_ms = ?, error_message = NULL
+                WHERE id = ? AND job_id = ? AND stage_type = ? AND status = 'RUNNING'
+                  AND EXISTS (
+                      SELECT 1 FROM job
+                      WHERE job.id = job_stage.job_id
+                        AND job.job_type = 'SCAN'
+                        AND job.execution_version = 2
+                        AND job.status = 'RUNNING'
+                        AND job.current_stage_type = ?
+                  )
+                """, resultJson, progressCompleted, progressCompleted, finishedAtMs,
+                jobStageId, jobId, stageType, stageType);
+    }
+
+    public int advanceVersion2Job(long jobId, String currentStageType, String nextStageType,
+            long progressCompleted) {
+        return jdbcTemplate.update("""
+                UPDATE job
+                SET current_stage_type = ?, progress_completed = ?, progress_total = ?,
+                    finished_at_ms = NULL, error_message = NULL
+                WHERE id = ? AND job_type = 'SCAN' AND execution_version = 2
+                  AND status = 'RUNNING' AND current_stage_type = ?
+                """, nextStageType, progressCompleted, progressCompleted, jobId, currentStageType);
+    }
+
+    public int completeVersion2Job(long jobId, long progressCompleted, long finishedAtMs) {
+        return jdbcTemplate.update("""
+                UPDATE job
+                SET status = 'COMPLETED', current_stage_type = NULL,
+                    progress_completed = ?, progress_total = ?, finished_at_ms = ?, error_message = NULL
+                WHERE id = ? AND job_type = 'SCAN' AND execution_version = 2
+                  AND status = 'RUNNING' AND current_stage_type = 'CONTENT_HASHING'
+                """, progressCompleted, progressCompleted, finishedAtMs, jobId);
+    }
+
+    public int failVersion2Stage(long jobId, long jobStageId, String stageType,
+            long failedAtMs, String errorMessage) {
+        return jdbcTemplate.update("""
+                UPDATE job_stage
+                SET status = 'FAILED', finished_at_ms = ?, error_message = ?
+                WHERE id = ? AND job_id = ? AND stage_type = ? AND status = 'RUNNING'
+                  AND EXISTS (
+                      SELECT 1 FROM job
+                      WHERE job.id = job_stage.job_id
+                        AND job.execution_version = 2
+                        AND job.status = 'RUNNING'
+                        AND job.current_stage_type = ?
+                  )
+                """, failedAtMs, errorMessage, jobStageId, jobId, stageType, stageType);
+    }
+
+    public int failVersion2Job(long jobId, String stageType, long failedAtMs, String errorMessage) {
+        return jdbcTemplate.update("""
+                UPDATE job
+                SET status = 'FAILED', current_stage_type = NULL, finished_at_ms = ?, error_message = ?
+                WHERE id = ? AND job_type = 'SCAN' AND execution_version = 2
+                  AND status = 'RUNNING' AND current_stage_type = ?
+                """, failedAtMs, errorMessage, jobId, stageType);
     }
 
     private static long generatedId(GeneratedKeyHolder keyHolder) {

@@ -2,11 +2,11 @@
 
 ## Current State
 
-Media Compare is a fresh v2 repository with a working full-stack scaffold. The repository contains separate `backend/` and `frontend/` projects. The backend can register/read Sources, create/read durable Source-based scan requests, create/read the durable ScanRun-to-Job execution handoff, synchronously execute DISCOVERY followed by safe missing-file RECONCILIATION, assign ContentRecords to eligible completed-scan observations, publish exact SHA-256 analysis, and derive and catalog-correctly filter exact duplicate groups through REST. The frontend can register and browse Sources, launch that existing pipeline through exact hashing, follow its stage and supplied counts, then browse/filter exact duplicate groups and inspect complete group/member/occurrence context. Broader library/review workflows, media analysis, similarity matching, materialized decisions, and cleanup are not implemented.
+Media Compare is a fresh v2 repository with a working full-stack scaffold. The backend supports the existing public version-1 indexing workflow and an internal synchronous version-2 lifecycle in which one durable SCAN Job owns DISCOVERY, RECONCILIATION, CONTENT_ASSIGNMENT, and CONTENT_HASHING. It also derives and catalog-correctly filters exact duplicate groups through REST. The frontend can register and browse Sources, launch the existing version-1 pipeline through exact hashing, follow its stage and supplied counts, then browse/filter exact duplicate groups and inspect complete group/member/occurrence context. Broader library/review workflows, media analysis, similarity matching, materialized decisions, and cleanup are not implemented.
 
 The backend is a Java 21 and Spring Boot 4.1.1 Maven application. It connects to a local SQLite database, starts Flyway, exposes `GET /api/health`, provides Source endpoints under `/api/sources`, scan-request endpoints under `/api/scan-runs`, execution-handoff endpoints under `/api/scan-runs/{id}/execution`, synchronous DISCOVERY and RECONCILIATION POST endpoints, `POST /api/scan-runs/{id}/content-assignment`, `POST /api/scan-runs/{id}/content-hashing`, and read-only exact duplicate endpoints under `/api/exact-duplicate-groups`. The frontend is a React and TypeScript Vite application with React Router. Its `/` route retains the health check and directs users to Sources or Exact Duplicates; `/sources` registers/lists Sources and orchestrates indexing; `/duplicates` browses and filters aggregate summaries; and `/duplicates/:digestHex` shows complete group, member, occurrence, and filter-match context.
 
-The reviewed persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven application tables with their structural constraints, foreign keys, and initial indexes. Java Flyway migration `V2__add_file_entry_extension_key` adds nullable normalized FileEntry extension metadata, bounded backfill, and its lookup index. SQL migration `V3__add_durable_indexing_foundation.sql` retains eleven tables and adds future start-idempotency, execution-version, bounded stage-result, and version-2 SCAN admission primitives. Immutable Java records and focused Spring JDBC repositories map the new fields. Current execution remains version 1 and browser-orchestrated; background execution, polling, startup recovery, and version-2 execution remain unimplemented.
+The reviewed persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven application tables with their structural constraints, foreign keys, and initial indexes. Java Flyway migration `V2__add_file_entry_extension_key` adds nullable normalized FileEntry extension metadata, bounded backfill, and its lookup index. SQL migration `V3__add_durable_indexing_foundation.sql` retains eleven tables and adds future start-idempotency plus execution-version, bounded stage-result, and version-2 SCAN admission primitives now used by the internal lifecycle. Immutable Java records and focused Spring JDBC repositories map the fields. Background execution, polling/read recovery, startup interruption handling, public v2 endpoints, and frontend cutover remain unimplemented.
 
 ## Documentation
 
@@ -30,6 +30,13 @@ The durable documentation baseline is:
 - The migrations enforce the reviewed uniqueness, numeric/range, timestamp-pair, foreign-key, and deletion rules, plus unique non-null request keys, one version-2 SCAN Job per ScanRun, and one globally active version-2 SCAN Job.
 - Immutable Java records represent the rows in the `catalog`, `scan`, `job`, and `analysis` packages, including `requestKey`, `executionVersion`, and `resultJson`.
 - `CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` provide focused Spring JDBC insert/read operations.
+- Lifecycle Job reads and mutations select an explicit execution version. Existing public services select version 1; internal v2 services select version 2, so historical rows may coexist without oldest-row ambiguity.
+- Internal version-2 creation atomically inserts one pending SCAN Job and DISCOVERY stage for a pending INDEX ScanRun. Database constraints remain authoritative for duplicate-per-ScanRun and global-active admission races, and constraint failures become clear service conflicts. Version-1 Jobs do not occupy the active v2 slot; terminal v2 Jobs release it.
+- The v2 sequence is `DISCOVERY → RECONCILIATION → CONTENT_ASSIGNMENT → CONTENT_HASHING → COMPLETED` on one Job. ScanRun starts with discovery, remains `RUNNING` while each later stage advances, and completes only with hashing. ScanRunSource rows become `COMPLETED` after reconciliation because they describe traversal/reconciliation, not analysis.
+- Every v2 stage uses conditional affected-row claims. Repeated, completed, wrong-stage, and terminal invocations cannot reopen the stage or perform its work again. Stage claim and finalization methods are short transactions; directory traversal and hash streaming remain outside database transactions.
+- V2 assignment persists the exact typed result shape `{"version":1,"assignedCount":n,"skippedCount":n}`. V2 hashing persists `{"version":1,"hashedCount":n,"cachedCount":n,"skippedCount":n,"failedCount":n}`. Exact-shape codecs reject malformed or incompatible stored state. Only final assignment/hash summaries are durable; their live intermediate progress is deferred.
+- Hash candidate skips or failures produce a completed hashing stage, Job, and ScanRun with issue counts. A whole-operation/integrity failure instead atomically fails the current stage, Job, and ScanRun with a safe message, clears the Job current stage, and does not create or run a later stage.
+- `Version2ScanExecutionService.run(...)` synchronously invokes the four existing stage algorithms for service-level use and returns final durable state without a transaction spanning the pipeline. It is not exposed as a public controller.
 - Persistence and migration tests verify the exact table set, V2-to-V3 upgrade defaults and relationships, V3 partial-index admission behavior, foreign keys, structural constraints, and repository round trips for the new fields.
 - `GET /api/health` returns plain text `ok` with HTTP 200.
 - `POST /api/sources` validates and registers a Source, returns HTTP 201 with a resource `Location`, and exposes public Source fields without `rootPathKey`.
@@ -116,14 +123,14 @@ The durable documentation baseline is:
 - Loaded list pages and scroll position survive normal list/detail navigation only for the same order-insensitive canonical filter key. Filter changes start from the first page at the top. A bounded browser-memory trail records meaningful group visits without consecutive duplicates and preserves current filters on its links.
 - Loading, empty, malformed-request, unknown-group, and backend-failure states have user-facing messages without backend details.
 - The exact-duplicate frontend has no mutation controls; it performs no deletion, move, cleanup, merge, keeper selection, or persistent review-state write.
-- Local `HEAD`, `main`, and `origin/main` started this V3 foundation increment at `e7ec0a1` (`Add Source indexing workflow`) with a clean worktree.
+- Local `HEAD`, `main`, and `origin/main` started this lifecycle increment at `ef941b2` (`Add durable indexing persistence foundation`) with a clean worktree.
 - Git origin uses `git@github-personal:topher6835/media-compare.git`, with repository-local identity configured for `topher6835`.
 
 ## Known Limitations / Not Yet Implemented
 
 - No Source update, deletion, or relocation/remount recognition workflow exists.
 - No ScanRun list, cancellation, retry/recovery, WorkingSet request, custom options, scheduling, or background execution exists.
-- Simultaneous duplicate version-1 execution-request hardening remains deferred; V3's database admission indexes apply only to future version-2 SCAN Jobs.
+- Simultaneous duplicate version-1 execution-request hardening remains deferred; database admission indexes deliberately apply only to version-2 SCAN Jobs.
 - No materialized equality-group identity, ContentRecord reconciliation/merge, media metadata, perceptual fingerprints, embeddings, face analysis, or AI integration exists.
 - No general durable worker, pause/resume, startup recovery, or live progress delivery exists.
 - No SSE endpoint or event design exists.
@@ -131,9 +138,9 @@ The durable documentation baseline is:
 - No matching candidates, similarity relationships, materialized groups, manual overrides, or filesystem-action history exists.
 - No broader Library/Review UI, review states/flags, persistent categories/tags, AI suggestions, similarity-group UI, or actual filesystem actions exist.
 - Advanced sorting is deferred; the frontend preserves deterministic server digest ordering rather than sorting only loaded pages.
-- Lifecycle/type values, workflow-level repository operations, merge behavior, scheduling, concurrency, cache locations, and FFmpeg/ffprobe discovery remain open as documented.
+- Retry/resume semantics, request-key use, public version-2 read/start APIs, scheduling concurrency beyond the one-active constraint, merge behavior, cache locations, and FFmpeg/ffprobe discovery remain open as documented.
 - The frontend still has no automated test framework. This increment was validated with lint, a production TypeScript/Vite build, and focused server-render/API fixture checks; durable component tests remain a future testing-infrastructure decision.
 
 ## Next Recommended Step
 
-After reviewing the V3 persistence/domain foundation, implement the backend-owned version-2 indexing lifecycle as a separate milestone. Background execution, polling/read recovery, startup interruption handling, and frontend cutover are not part of the current implementation.
+After reviewing this synchronous internal lifecycle, add the approved background executor and startup interruption finalization as a separate milestone. Public start/read polling and frontend cutover should remain separately reviewable; no current UI should use v2 until those contracts exist.

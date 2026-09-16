@@ -12,65 +12,86 @@ import org.springframework.stereotype.Service;
 @Service
 public class ReconciliationService {
 
-    private static final String SCAN_JOB_TYPE = "SCAN";
     private static final String RUNNING_STATUS = "RUNNING";
     private static final String COMPLETED_STATUS = "COMPLETED";
     private static final String PENDING_STATUS = "PENDING";
     private static final String DISCOVERED_STATUS = "DISCOVERED";
-    private static final String DISCOVERY_STAGE_TYPE = "DISCOVERY";
-    private static final String RECONCILIATION_STAGE_TYPE = "RECONCILIATION";
 
     private final ScanRepository scanRepository;
     private final JobRepository jobRepository;
     private final ReconciliationWriter reconciliationWriter;
     private final ReconciliationExecutionState executionState;
+    private final Version2ExecutionState version2ExecutionState;
 
     public ReconciliationService(ScanRepository scanRepository, JobRepository jobRepository,
-            ReconciliationWriter reconciliationWriter, ReconciliationExecutionState executionState) {
+            ReconciliationWriter reconciliationWriter, ReconciliationExecutionState executionState,
+            Version2ExecutionState version2ExecutionState) {
         this.scanRepository = scanRepository;
         this.jobRepository = jobRepository;
         this.reconciliationWriter = reconciliationWriter;
         this.executionState = executionState;
+        this.version2ExecutionState = version2ExecutionState;
     }
 
     public ScanExecutionDetails execute(long scanRunId) {
-        ReconciliationPlan plan = preflight(scanRunId);
+        return execute(scanRunId, ScanExecutionDefinition.VERSION_1);
+    }
+
+    public ScanExecutionDetails executeVersion2(long scanRunId) {
+        return execute(scanRunId, ScanExecutionDefinition.VERSION_2);
+    }
+
+    private ScanExecutionDetails execute(long scanRunId, long executionVersion) {
+        ReconciliationPlan plan = preflight(scanRunId, executionVersion);
         long sourceCount = plan.sources().size();
         executionState.start(plan.job(), plan.reconciliationStage(), sourceCount,
                 System.currentTimeMillis());
 
-        long progressCompleted = 0;
-        for (ScanRunSource source : plan.sources()) {
-            progressCompleted++;
-            reconciliationWriter.reconcile(
-                    plan.job().id(), plan.reconciliationStage().id(), source,
-                    progressCompleted, System.currentTimeMillis());
-        }
+        try {
+            long progressCompleted = 0;
+            for (ScanRunSource source : plan.sources()) {
+                progressCompleted++;
+                reconciliationWriter.reconcile(
+                        plan.job().id(), plan.reconciliationStage().id(), executionVersion,
+                        source, progressCompleted, System.currentTimeMillis());
+            }
 
-        executionState.complete(scanRunId, plan.job(), plan.reconciliationStage(), sourceCount,
-                System.currentTimeMillis());
+            executionState.complete(scanRunId, plan.job(), plan.reconciliationStage(), sourceCount,
+                    System.currentTimeMillis());
+        } catch (RuntimeException exception) {
+            if (executionVersion != ScanExecutionDefinition.VERSION_2) {
+                throw exception;
+            }
+            String errorMessage = "Reconciliation failed";
+            version2ExecutionState.failCurrentStage(
+                    scanRunId, plan.job(), plan.reconciliationStage(), System.currentTimeMillis(), errorMessage);
+            throw new Version2ExecutionFailedException(errorMessage, exception);
+        }
         Job completedJob = jobRepository.findJobById(plan.job().id()).orElseThrow();
         return new ScanExecutionDetails(completedJob,
                 jobRepository.findJobStagesByJobId(completedJob.id()));
     }
 
-    private ReconciliationPlan preflight(long scanRunId) {
+    private ReconciliationPlan preflight(long scanRunId, long executionVersion) {
         ScanRun scanRun = scanRepository.findScanRunById(scanRunId)
                 .orElseThrow(() -> new NoSuchElementException("ScanRun " + scanRunId + " does not exist"));
         List<ScanRunSource> sources = scanRepository.findScanRunSourcesByScanRunId(scanRunId);
-        Job job = jobRepository.findJobByScanRunIdAndType(scanRunId, SCAN_JOB_TYPE)
+        Job job = jobRepository.findJobByScanRunIdAndTypeAndExecutionVersion(
+                scanRunId, ScanExecutionDefinition.JOB_TYPE, executionVersion)
                 .orElseThrow(() -> new NoSuchElementException(
                         "Execution handoff for ScanRun " + scanRunId + " does not exist"));
-        JobStage discoveryStage = jobRepository.findJobStageByJobIdAndType(job.id(), DISCOVERY_STAGE_TYPE)
+        JobStage discoveryStage = jobRepository.findJobStageByJobIdAndType(
+                job.id(), ScanExecutionDefinition.DISCOVERY)
                 .orElseThrow(() -> new ReconciliationConflictException("DISCOVERY stage does not exist"));
         JobStage reconciliationStage = jobRepository.findJobStageByJobIdAndType(
-                job.id(), RECONCILIATION_STAGE_TYPE)
+                job.id(), ScanExecutionDefinition.RECONCILIATION)
                 .orElseThrow(() -> new ReconciliationConflictException("RECONCILIATION stage does not exist"));
 
         if (!RUNNING_STATUS.equals(scanRun.status())
-                || !SCAN_JOB_TYPE.equals(job.jobType())
+                || !ScanExecutionDefinition.JOB_TYPE.equals(job.jobType())
+                || job.executionVersion() != executionVersion
                 || !RUNNING_STATUS.equals(job.status())
-                || !RECONCILIATION_STAGE_TYPE.equals(job.currentStageType())
+                || !ScanExecutionDefinition.RECONCILIATION.equals(job.currentStageType())
                 || !COMPLETED_STATUS.equals(discoveryStage.status())
                 || !PENDING_STATUS.equals(reconciliationStage.status())) {
             throw new ReconciliationConflictException("Execution is not eligible to start RECONCILIATION");

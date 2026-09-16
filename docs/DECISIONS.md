@@ -195,6 +195,14 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Stop on the first failed stage, retain known ScanRun/Job identifiers, and do not automatically retry. A new attempt creates a new ScanRun because retry/recovery semantics are not implemented.
 - After hashing returns, present analysis as complete and link to the existing exact duplicate workflow without implying that duplicate groups exist. If hashing reports skipped or failed candidates, present a completed-with-issues warning (not a failed run) while retaining the link for successfully hashed content.
 
+## Internal Version-2 Full Indexing Lifecycle
+
+- Keep the existing public/browser workflow explicitly on execution version 1 while adding an internal synchronous version-2 path; all lifecycle reads and mutations select the intended version.
+- Let one version-2 SCAN Job own `DISCOVERY → RECONCILIATION → CONTENT_ASSIGNMENT → CONTENT_HASHING → COMPLETED`. Reconciliation completes ScanRunSource traversal evidence but leaves the Job and ScanRun running.
+- Use V3's partial unique indexes as the race-safe admission authority: one v2 SCAN Job per ScanRun and one globally active v2 SCAN Job. Conditional stage updates provide single-claim semantics without Java locking.
+- Persist only typed version-1 assignment and hashing result summaries for now. Candidate hash skips/failures complete the lifecycle with issue counts; whole-stage failures atomically fail the current stage, Job, and ScanRun with a safe message.
+- Reuse the existing traversal, reconciliation, assignment, and hashing algorithms and their short writer transactions. The internal coordinator is synchronous and holds no pipeline-wide transaction. Background execution, polling/read recovery, startup interruption handling, public APIs, and frontend cutover remain later work.
+
 ## Development
 
 - Favor readable, conventional, learnable code over clever abstractions.

@@ -21,7 +21,7 @@ public class ReconciliationExecutionState {
     @Transactional
     public void start(Job job, JobStage reconciliationStage, long sourceCount, long startedAtMs) {
         requireRows(jobRepository.startReconciliation(
-                job.id(), reconciliationStage.id(), sourceCount, startedAtMs), 2,
+                job.id(), reconciliationStage.id(), job.executionVersion(), sourceCount, startedAtMs), 2,
                 "start RECONCILIATION");
     }
 
@@ -29,12 +29,33 @@ public class ReconciliationExecutionState {
     public void complete(long scanRunId, Job job, JobStage reconciliationStage,
             long sourceCount, long completedAtMs) {
         requireOne(jobRepository.completeReconciliationStage(
-                reconciliationStage.id(), sourceCount, completedAtMs),
+                reconciliationStage.id(), job.executionVersion(), sourceCount, completedAtMs),
                 "complete RECONCILIATION stage");
-        requireOne(jobRepository.completeJob(job.id(), sourceCount, completedAtMs),
-                "complete Job");
-        requireOne(scanRepository.completeScanRun(scanRunId, completedAtMs),
-                "complete ScanRun");
+        if (job.executionVersion() == ScanExecutionDefinition.VERSION_1) {
+            requireOne(jobRepository.completeVersion1Job(job.id(), sourceCount, completedAtMs),
+                    "complete Job");
+            requireOne(scanRepository.completeScanRun(scanRunId, completedAtMs),
+                    "complete ScanRun");
+            return;
+        }
+
+        jobRepository.insert(new JobStage(
+                null,
+                job.id(),
+                ScanExecutionDefinition.CONTENT_ASSIGNMENT,
+                null,
+                "PENDING",
+                0,
+                null,
+                0,
+                completedAtMs,
+                null,
+                null,
+                null));
+        requireOne(jobRepository.advanceVersion2Job(
+                job.id(), ScanExecutionDefinition.RECONCILIATION,
+                ScanExecutionDefinition.CONTENT_ASSIGNMENT, sourceCount),
+                "advance Job to CONTENT_ASSIGNMENT");
     }
 
     private static void requireOne(int rows, String action) {

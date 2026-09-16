@@ -23,13 +23,20 @@ public class ReconciliationWriter {
     @Transactional
     public void reconcile(long jobId, long reconciliationStageId, ScanRunSource source,
             long progressCompleted, long completedAtMs) {
+        reconcile(jobId, reconciliationStageId, ScanExecutionDefinition.VERSION_1,
+                source, progressCompleted, completedAtMs);
+    }
+
+    @Transactional
+    public void reconcile(long jobId, long reconciliationStageId, long executionVersion,
+            ScanRunSource source, long progressCompleted, long completedAtMs) {
         catalogRepository.markUnseenPresentFilesMissing(
                 source.sourceId(), source.id(), source.traversalGeneration());
         requireOne(scanRepository.completeSourceReconciliation(
                 source.id(), source.traversalGeneration(), completedAtMs),
                 "complete Source reconciliation");
         requireRows(jobRepository.updateReconciliationProgress(
-                jobId, reconciliationStageId, progressCompleted), 2,
+                jobId, reconciliationStageId, executionVersion, progressCompleted), 2,
                 "update reconciliation progress");
     }
 

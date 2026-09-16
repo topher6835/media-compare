@@ -25,13 +25,20 @@ public class DiscoveryBatchWriter {
     @Transactional
     public void write(long jobId, long discoveryStageId, List<FileObservation> observations,
             long progressCompleted) {
+        write(jobId, discoveryStageId, ScanExecutionDefinition.VERSION_1, observations, progressCompleted);
+    }
+
+    @Transactional
+    public void write(long jobId, long discoveryStageId, long executionVersion,
+            List<FileObservation> observations, long progressCompleted) {
         if (observations.isEmpty() || observations.size() > MAX_BATCH_SIZE) {
             throw new IllegalArgumentException("Discovery batches must contain between 1 and "
                     + MAX_BATCH_SIZE + " observations");
         }
 
         observations.forEach(catalogRepository::observeFile);
-        requireRows(jobRepository.updateDiscoveryProgress(jobId, discoveryStageId, progressCompleted), 2,
+        requireRows(jobRepository.updateDiscoveryProgress(
+                jobId, discoveryStageId, executionVersion, progressCompleted), 2,
                 "update discovery progress");
     }
 

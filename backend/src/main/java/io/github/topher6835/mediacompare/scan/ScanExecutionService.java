@@ -23,9 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ScanExecutionService {
 
-    private static final String SCAN_JOB_TYPE = "SCAN";
     private static final String PENDING_STATUS = "PENDING";
-    private static final String DISCOVERY_STAGE_TYPE = "DISCOVERY";
 
     private final ScanRepository scanRepository;
     private final JobRepository jobRepository;
@@ -48,7 +46,8 @@ public class ScanExecutionService {
     @Transactional
     public ScanExecutionDetails create(long scanRunId) {
         requireScanRun(scanRunId);
-        if (jobRepository.findJobByScanRunIdAndType(scanRunId, SCAN_JOB_TYPE).isPresent()) {
+        if (jobRepository.findJobByScanRunIdAndTypeAndExecutionVersion(
+                scanRunId, ScanExecutionDefinition.JOB_TYPE, ScanExecutionDefinition.VERSION_1).isPresent()) {
             throw new ScanExecutionAlreadyExistsException(scanRunId);
         }
 
@@ -56,10 +55,10 @@ public class ScanExecutionService {
         Job job = jobRepository.insert(new Job(
                 null,
                 scanRunId,
-                SCAN_JOB_TYPE,
-                1,
+                ScanExecutionDefinition.JOB_TYPE,
+                ScanExecutionDefinition.VERSION_1,
                 PENDING_STATUS,
-                DISCOVERY_STAGE_TYPE,
+                ScanExecutionDefinition.DISCOVERY,
                 0,
                 null,
                 0,
@@ -71,7 +70,7 @@ public class ScanExecutionService {
         JobStage discoveryStage = jobRepository.insert(new JobStage(
                 null,
                 job.id(),
-                DISCOVERY_STAGE_TYPE,
+                ScanExecutionDefinition.DISCOVERY,
                 null,
                 PENDING_STATUS,
                 0,
@@ -90,33 +89,62 @@ public class ScanExecutionService {
             return Optional.empty();
         }
 
-        return jobRepository.findJobByScanRunIdAndType(scanRunId, SCAN_JOB_TYPE)
+        return findByScanRunIdAndVersion(scanRunId, ScanExecutionDefinition.VERSION_1);
+    }
+
+    public Optional<ScanExecutionDetails> findByScanRunIdAndVersion(long scanRunId, long executionVersion) {
+        if (scanRepository.findScanRunById(scanRunId).isEmpty()) {
+            return Optional.empty();
+        }
+
+        return jobRepository.findJobByScanRunIdAndTypeAndExecutionVersion(
+                scanRunId, ScanExecutionDefinition.JOB_TYPE, executionVersion)
                 .map(job -> new ScanExecutionDetails(job, jobRepository.findJobStagesByJobId(job.id())));
     }
 
     public ScanExecutionDetails executeDiscovery(long scanRunId) {
-        DiscoveryPlan plan = preflight(scanRunId);
+        return executeDiscovery(scanRunId, ScanExecutionDefinition.VERSION_1);
+    }
+
+    public ScanExecutionDetails executeVersion2Discovery(long scanRunId) {
+        return executeDiscovery(scanRunId, ScanExecutionDefinition.VERSION_2);
+    }
+
+    private ScanExecutionDetails executeDiscovery(long scanRunId, long executionVersion) {
+        DiscoveryPlan plan = preflight(scanRunId, executionVersion);
         executionState.start(scanRunId, plan.job(), plan.discoveryStage(), plan.sources(),
                 System.currentTimeMillis());
 
         long discoveredCount = 0;
-        for (DiscoverySource source : plan.sources()) {
-            try {
+        DiscoverySource activeSource = plan.sources().getFirst();
+        try {
+            for (DiscoverySource source : plan.sources()) {
+                activeSource = source;
                 discoveredCount = walkSource(plan.job(), plan.discoveryStage(), source, discoveredCount);
-            } catch (IOException | InvalidPathException | SecurityException exception) {
-                String errorMessage = discoveryError(source.source(), exception);
-                executionState.fail(scanRunId, plan.job(), plan.discoveryStage(), plan.sources(), source,
-                        System.currentTimeMillis(), errorMessage);
-                throw new DiscoveryExecutionFailedException(errorMessage, exception);
             }
+            executionState.complete(plan.job(), plan.discoveryStage(), plan.sources(), discoveredCount,
+                    System.currentTimeMillis());
+        } catch (IOException | InvalidPathException | SecurityException exception) {
+            String errorMessage = executionVersion == ScanExecutionDefinition.VERSION_2
+                    ? safeDiscoveryError(activeSource.source())
+                    : discoveryError(activeSource.source(), exception);
+            executionState.fail(scanRunId, plan.job(), plan.discoveryStage(), plan.sources(), activeSource,
+                    System.currentTimeMillis(), errorMessage);
+            throw new DiscoveryExecutionFailedException(errorMessage, exception);
+        } catch (RuntimeException exception) {
+            if (executionVersion != ScanExecutionDefinition.VERSION_2) {
+                throw exception;
+            }
+            String errorMessage = safeDiscoveryError(activeSource.source());
+            executionState.fail(scanRunId, plan.job(), plan.discoveryStage(), plan.sources(), activeSource,
+                    System.currentTimeMillis(), errorMessage);
+            throw new Version2ExecutionFailedException(errorMessage, exception);
         }
 
-        executionState.complete(plan.job(), plan.discoveryStage(), plan.sources(), discoveredCount,
-                System.currentTimeMillis());
-        return findByScanRunId(scanRunId).orElseThrow();
+        return findByScanRunIdAndVersion(scanRunId, executionVersion).orElseThrow();
     }
 
-    private DiscoveryPlan preflight(long scanRunId) {
+    private DiscoveryPlan preflight(long scanRunId, long executionVersion) {
         ScanRun scanRun = scanRepository.findScanRunById(scanRunId)
                 .orElseThrow(() -> new NoSuchElementException("ScanRun " + scanRunId + " does not exist"));
         List<ScanRunSource> scanRunSources = scanRepository.findScanRunSourcesByScanRunId(scanRunId);
@@ -143,17 +171,20 @@ public class ScanExecutionService {
             sources.add(new DiscoverySource(source, scanRunSource, scanRunSource.traversalGeneration() + 1));
         }
 
-        Job job = jobRepository.findJobByScanRunIdAndType(scanRunId, SCAN_JOB_TYPE)
+        Job job = jobRepository.findJobByScanRunIdAndTypeAndExecutionVersion(
+                scanRunId, ScanExecutionDefinition.JOB_TYPE, executionVersion)
                 .orElseThrow(() -> new NoSuchElementException(
                         "Execution handoff for ScanRun " + scanRunId + " does not exist"));
         if (!PENDING_STATUS.equals(scanRun.status())
-                || !SCAN_JOB_TYPE.equals(job.jobType())
+                || !ScanExecutionDefinition.JOB_TYPE.equals(job.jobType())
+                || job.executionVersion() != executionVersion
                 || !PENDING_STATUS.equals(job.status())
-                || !DISCOVERY_STAGE_TYPE.equals(job.currentStageType())) {
+                || !ScanExecutionDefinition.DISCOVERY.equals(job.currentStageType())) {
             throw new DiscoveryConflictException("Execution is not eligible to start DISCOVERY");
         }
 
-        JobStage discoveryStage = jobRepository.findJobStageByJobIdAndType(job.id(), DISCOVERY_STAGE_TYPE)
+        JobStage discoveryStage = jobRepository.findJobStageByJobIdAndType(
+                job.id(), ScanExecutionDefinition.DISCOVERY)
                 .orElseThrow(() -> new DiscoveryConflictException("DISCOVERY stage does not exist"));
         if (!PENDING_STATUS.equals(discoveryStage.status())) {
             throw new DiscoveryConflictException("DISCOVERY has already started or completed");
@@ -191,7 +222,8 @@ public class ScanExecutionService {
 
     private long flushBatch(Job job, JobStage discoveryStage, List<FileObservation> batch, long previousCount) {
         long progressCompleted = previousCount + batch.size();
-        batchWriter.write(job.id(), discoveryStage.id(), List.copyOf(batch), progressCompleted);
+        batchWriter.write(job.id(), discoveryStage.id(), job.executionVersion(),
+                List.copyOf(batch), progressCompleted);
         batch.clear();
         return progressCompleted;
     }
@@ -202,6 +234,10 @@ public class ScanExecutionService {
             detail = exception.getClass().getSimpleName();
         }
         return "Discovery failed for Source " + source.id() + ": " + detail;
+    }
+
+    private static String safeDiscoveryError(Source source) {
+        return "Discovery failed for Source " + source.id();
     }
 
     private void requireScanRun(long scanRunId) {
