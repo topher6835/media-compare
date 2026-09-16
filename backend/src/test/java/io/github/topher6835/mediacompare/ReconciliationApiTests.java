@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -145,6 +146,7 @@ class ReconciliationApiTests {
         JobStage pendingReconciliation = jobRepository.findJobStageByJobIdAndType(
                 initialJob.id(), "RECONCILIATION").orElseThrow();
         assertEquals("PENDING", pendingReconciliation.status());
+        assertNull(pendingReconciliation.resultJson());
         assertEquals(0, pendingReconciliation.attemptCount());
         assertNull(pendingReconciliation.startedAtMs());
         assertNull(pendingReconciliation.finishedAtMs());
@@ -194,6 +196,7 @@ class ReconciliationApiTests {
         }
 
         Job completedJob = jobRepository.findJobById(initialJob.id()).orElseThrow();
+        assertEquals(1, completedJob.executionVersion());
         assertEquals("COMPLETED", completedJob.status());
         assertNull(completedJob.currentStageType());
         assertEquals(2, completedJob.progressCompleted());
@@ -205,6 +208,7 @@ class ReconciliationApiTests {
 
         List<JobStage> stages = jobRepository.findJobStagesByJobId(initialJob.id());
         assertEquals(2, stages.size());
+        assertTrue(stages.stream().allMatch(stage -> stage.resultJson() == null));
         JobStage reconciliation = stages.get(1);
         assertEquals("COMPLETED", reconciliation.status());
         assertEquals(1, reconciliation.attemptCount());

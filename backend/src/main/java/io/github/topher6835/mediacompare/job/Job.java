@@ -4,6 +4,7 @@ public record Job(
         Long id,
         Long scanRunId,
         String jobType,
+        long executionVersion,
         String status,
         String currentStageType,
         long progressCompleted,

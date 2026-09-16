@@ -26,30 +26,32 @@ public class ScanRepository {
         jdbcTemplate.update(connection -> {
             PreparedStatement statement = connection.prepareStatement("""
                     INSERT INTO scan_run (
-                        request_type, status, working_set_id, options_version, options_json,
+                        request_key, request_type, status, working_set_id, options_version, options_json,
                         created_at_ms, started_at_ms, finished_at_ms, error_message
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, Statement.RETURN_GENERATED_KEYS);
-            statement.setString(1, scanRun.requestType());
-            statement.setString(2, scanRun.status());
-            setNullableLong(statement, 3, scanRun.workingSetId());
-            statement.setLong(4, scanRun.optionsVersion());
-            statement.setString(5, scanRun.optionsJson());
-            statement.setLong(6, scanRun.createdAtMs());
-            setNullableLong(statement, 7, scanRun.startedAtMs());
-            setNullableLong(statement, 8, scanRun.finishedAtMs());
-            statement.setString(9, scanRun.errorMessage());
+            statement.setString(1, scanRun.requestKey());
+            statement.setString(2, scanRun.requestType());
+            statement.setString(3, scanRun.status());
+            setNullableLong(statement, 4, scanRun.workingSetId());
+            statement.setLong(5, scanRun.optionsVersion());
+            statement.setString(6, scanRun.optionsJson());
+            statement.setLong(7, scanRun.createdAtMs());
+            setNullableLong(statement, 8, scanRun.startedAtMs());
+            setNullableLong(statement, 9, scanRun.finishedAtMs());
+            statement.setString(10, scanRun.errorMessage());
             return statement;
         }, keyHolder);
 
-        return new ScanRun(generatedId(keyHolder), scanRun.requestType(), scanRun.status(), scanRun.workingSetId(),
-                scanRun.optionsVersion(), scanRun.optionsJson(), scanRun.createdAtMs(), scanRun.startedAtMs(),
-                scanRun.finishedAtMs(), scanRun.errorMessage());
+        return new ScanRun(generatedId(keyHolder), scanRun.requestKey(), scanRun.requestType(), scanRun.status(),
+                scanRun.workingSetId(), scanRun.optionsVersion(), scanRun.optionsJson(), scanRun.createdAtMs(),
+                scanRun.startedAtMs(), scanRun.finishedAtMs(), scanRun.errorMessage());
     }
 
     public Optional<ScanRun> findScanRunById(long id) {
         return jdbcTemplate.query("SELECT * FROM scan_run WHERE id = ?", (resultSet, rowNumber) -> new ScanRun(
                 resultSet.getLong("id"),
+                resultSet.getString("request_key"),
                 resultSet.getString("request_type"),
                 resultSet.getString("status"),
                 nullableLong(resultSet, "working_set_id"),

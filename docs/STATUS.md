@@ -6,7 +6,7 @@ Media Compare is a fresh v2 repository with a working full-stack scaffold. The r
 
 The backend is a Java 21 and Spring Boot 4.1.1 Maven application. It connects to a local SQLite database, starts Flyway, exposes `GET /api/health`, provides Source endpoints under `/api/sources`, scan-request endpoints under `/api/scan-runs`, execution-handoff endpoints under `/api/scan-runs/{id}/execution`, synchronous DISCOVERY and RECONCILIATION POST endpoints, `POST /api/scan-runs/{id}/content-assignment`, `POST /api/scan-runs/{id}/content-hashing`, and read-only exact duplicate endpoints under `/api/exact-duplicate-groups`. The frontend is a React and TypeScript Vite application with React Router. Its `/` route retains the health check and directs users to Sources or Exact Duplicates; `/sources` registers/lists Sources and orchestrates indexing; `/duplicates` browses and filters aggregate summaries; and `/duplicates/:digestHex` shows complete group, member, occurrence, and filter-match context.
 
-The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven application tables with their structural constraints, foreign keys, and initial indexes. Java Flyway migration `V2__add_file_entry_extension_key` adds nullable normalized FileEntry extension metadata, bounded backfill, and the `(extension_key, current_content_id)` index. Immutable Java records and focused Spring JDBC repositories provide persistence under the reviewed feature packages. Exact hashing streams filesystem bytes outside transactions and atomically publishes reusable analysis only after stale-evidence guards pass. The matching slice derives and filters duplicate summaries, members, and retained occurrences from trusted artifacts without materializing groups or mutating state. Scheduling/background execution, broader analysis/matching, AI, and filesystem modification remain unimplemented.
+The reviewed persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven application tables with their structural constraints, foreign keys, and initial indexes. Java Flyway migration `V2__add_file_entry_extension_key` adds nullable normalized FileEntry extension metadata, bounded backfill, and its lookup index. SQL migration `V3__add_durable_indexing_foundation.sql` retains eleven tables and adds future start-idempotency, execution-version, bounded stage-result, and version-2 SCAN admission primitives. Immutable Java records and focused Spring JDBC repositories map the new fields. Current execution remains version 1 and browser-orchestrated; background execution, polling, startup recovery, and version-2 execution remain unimplemented.
 
 ## Documentation
 
@@ -25,12 +25,12 @@ The durable documentation baseline is:
 - The backend compiles and its Spring context test passes on Java 21.
 - Spring Boot starts successfully on port `8080`.
 - SQLite connectivity uses `jdbc:sqlite:data/media-compare.db?foreign_keys=on`.
-- Flyway applies `V1__create_core_schema.sql` and Java migration `V2__add_file_entry_extension_key`, retaining eleven application tables.
+- Flyway applies V1, Java migration V2, and SQL migration `V3__add_durable_indexing_foundation.sql`, retaining eleven application tables.
 - SQLite foreign-key enforcement is enabled on every physical datasource connection through the JDBC URL's `foreign_keys=on` property.
-- The migrations enforce the reviewed uniqueness, numeric/range, timestamp-pair, foreign-key, and deletion rules and create the six V1 secondary indexes plus the V2 FileEntry extension/content index.
-- Immutable Java records represent the V1 rows in the `catalog`, `scan`, `job`, and `analysis` packages.
+- The migrations enforce the reviewed uniqueness, numeric/range, timestamp-pair, foreign-key, and deletion rules, plus unique non-null request keys, one version-2 SCAN Job per ScanRun, and one globally active version-2 SCAN Job.
+- Immutable Java records represent the rows in the `catalog`, `scan`, `job`, and `analysis` packages, including `requestKey`, `executionVersion`, and `resultJson`.
 - `CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` provide focused Spring JDBC insert/read operations.
-- Persistence tests verify the exact table set, foreign-key behavior on multiple connections, FileEntry/ScanRunSource Source consistency, traversal/completed-generation bounds, key uniqueness and intentional non-uniqueness, numeric/timestamp constraints, deletion behavior, and repository round trips.
+- Persistence and migration tests verify the exact table set, V2-to-V3 upgrade defaults and relationships, V3 partial-index admission behavior, foreign keys, structural constraints, and repository round trips for the new fields.
 - `GET /api/health` returns plain text `ok` with HTTP 200.
 - `POST /api/sources` validates and registers a Source, returns HTTP 201 with a resource `Location`, and exposes public Source fields without `rootPathKey`.
 - Source registration preserves the configured root-path string, initially mirrors it to internal `root_path_key`, assigns database identity and revision zero, and initializes equal creation/update timestamps.
@@ -116,14 +116,14 @@ The durable documentation baseline is:
 - Loaded list pages and scroll position survive normal list/detail navigation only for the same order-insensitive canonical filter key. Filter changes start from the first page at the top. A bounded browser-memory trail records meaningful group visits without consecutive duplicates and preserves current filters on its links.
 - Loading, empty, malformed-request, unknown-group, and backend-failure states have user-facing messages without backend details.
 - The exact-duplicate frontend has no mutation controls; it performs no deletion, move, cleanup, merge, keeper selection, or persistent review-state write.
-- Local `HEAD`, `main`, and `origin/main` started this Source-management increment at `1201305` (`Add exact duplicate frontend filters`) with a clean worktree.
+- Local `HEAD`, `main`, and `origin/main` started this V3 foundation increment at `e7ec0a1` (`Add Source indexing workflow`) with a clean worktree.
 - Git origin uses `git@github-personal:topher6835/media-compare.git`, with repository-local identity configured for `topher6835`.
 
 ## Known Limitations / Not Yet Implemented
 
 - No Source update, deletion, or relocation/remount recognition workflow exists.
 - No ScanRun list, cancellation, retry/recovery, WorkingSet request, custom options, scheduling, or background execution exists.
-- Simultaneous duplicate execution-request hardening remains deferred with the broader scheduling/concurrency design.
+- Simultaneous duplicate version-1 execution-request hardening remains deferred; V3's database admission indexes apply only to future version-2 SCAN Jobs.
 - No materialized equality-group identity, ContentRecord reconciliation/merge, media metadata, perceptual fingerprints, embeddings, face analysis, or AI integration exists.
 - No general durable worker, pause/resume, startup recovery, or live progress delivery exists.
 - No SSE endpoint or event design exists.
@@ -136,4 +136,4 @@ The durable documentation baseline is:
 
 ## Next Recommended Step
 
-After reviewing this Source-management and indexing diff, select the next focused workflow milestone. Background execution/SSE, refresh-safe recovery, cleanup, keeper selection, persistent review decisions, similarity groups, and filesystem modification remain later milestones.
+After reviewing the V3 persistence/domain foundation, implement the backend-owned version-2 indexing lifecycle as a separate milestone. Background execution, polling/read recovery, startup interruption handling, and frontend cutover are not part of the current implementation.

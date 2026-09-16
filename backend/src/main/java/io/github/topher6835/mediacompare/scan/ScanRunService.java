@@ -42,6 +42,7 @@ public class ScanRunService {
         long createdAtMs = System.currentTimeMillis();
         ScanRun scanRun = scanRepository.insert(new ScanRun(
                 null,
+                null,
                 INDEX_REQUEST_TYPE,
                 PENDING_STATUS,
                 null,

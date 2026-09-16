@@ -2,7 +2,7 @@
 
 ## Status and Scope
 
-The reviewed V1 persistence design is implemented by Flyway migration `V1__create_core_schema.sql`. Java Flyway migration `V2__add_file_entry_extension_key` evolves `file_entry` with normalized technical extension metadata and an index; it adds no table. The application has eleven tables, immutable Java record representations, and small Spring JDBC repositories supporting DISCOVERY, RECONCILIATION, ContentRecord assignment, exact hashing, and derived exact-duplicate filtering.
+The reviewed V1 persistence design is implemented by Flyway migration `V1__create_core_schema.sql`. Java Flyway migration `V2__add_file_entry_extension_key` evolves `file_entry` with normalized technical extension metadata and an index. SQL migration `V3__add_durable_indexing_foundation.sql` adds fields and partial unique indexes for future durable full-pipeline indexing. Neither migration adds a table: the application retains eleven tables, immutable Java record representations, and small Spring JDBC repositories supporting the current version-1 workflow.
 
 The first migration contains exactly eleven application tables. The fields and constraints below describe the implemented schema.
 
@@ -96,6 +96,7 @@ The primary key is `(working_set_id, content_record_id)`. Membership remains Con
 Implemented fields:
 
 - `id INTEGER PRIMARY KEY`
+- `request_key TEXT NULL` (added by V3)
 - `request_type TEXT NOT NULL`
 - `status TEXT NOT NULL`
 - `working_set_id INTEGER NULL`
@@ -106,7 +107,7 @@ Implemented fields:
 - `finished_at_ms INTEGER NULL`
 - `error_message TEXT NULL`
 
-ScanRun records user intent. The initial scan-request API creates Source-based requests with `request_type = INDEX`, `status = PENDING`, `working_set_id = NULL`, `options_version = 1`, `options_json = {}`, and null execution timestamps/error. Options become immutable once execution begins. Additional lifecycle and request-type values remain implementation details.
+ScanRun records user intent. V3 reserves `request_key` for future durable idempotency of the one-click analysis-start request. Non-null keys are unique through a partial index, while historical rows and current creation paths keep it null and multiple nulls remain valid. The initial scan-request API creates Source-based requests with `request_type = INDEX`, `status = PENDING`, `working_set_id = NULL`, `options_version = 1`, `options_json = {}`, and null execution timestamps/error. Options become immutable once execution begins. Additional lifecycle and request-type values remain implementation details.
 
 ### `scan_run_source`
 
@@ -138,6 +139,7 @@ Implemented fields:
 - `id INTEGER PRIMARY KEY`
 - `scan_run_id INTEGER NULL`
 - `job_type TEXT NOT NULL`
+- `execution_version INTEGER NOT NULL DEFAULT 1 CHECK > 0` (added by V3)
 - `status TEXT NOT NULL`
 - `current_stage_type TEXT NULL`
 - `progress_completed INTEGER NOT NULL DEFAULT 0 CHECK >= 0`
@@ -148,9 +150,9 @@ Implemented fields:
 - `finished_at_ms INTEGER NULL`
 - `error_message TEXT NULL`
 
-Job is the durable execution authority. ScanRun remains the user-request and operation-summary record. The initial execution handoff creates a Job with `scan_run_id` set to the selected ScanRun, `job_type = SCAN`, `status = PENDING`, `current_stage_type = DISCOVERY`, zero completed progress, null total progress, zero attempts, a populated creation timestamp, and null execution timestamps/error. The handoff does not mutate the ScanRun or its ScanRunSource rows.
+Job is the durable execution authority. ScanRun remains the user-request and operation-summary record. `execution_version = 1` identifies historical and current reconciliation-ending SCAN execution; version 2 is reserved for the future backend-owned pipeline through exact hashing. The initial execution handoff explicitly creates version 1 with `scan_run_id` set to the selected ScanRun, `job_type = SCAN`, `status = PENDING`, `current_stage_type = DISCOVERY`, zero completed progress, null total progress, zero attempts, a populated creation timestamp, and null execution timestamps/error. The handoff does not mutate the ScanRun or its ScanRunSource rows.
 
-The execution API currently permits one sequentially created `SCAN` Job per ScanRun. `ScanExecutionService` enforces that API behavior; no `UNIQUE(scan_run_id)` constraint was added because Job remains generic. Simultaneous duplicate-request hardening, detailed scheduling, and recovery are deferred.
+The execution API currently permits one sequentially created version-1 `SCAN` Job per ScanRun. `ScanExecutionService` enforces that API behavior; no schema-wide `UNIQUE(scan_run_id)` constraint was added because Job remains generic. V3 separately enforces at most one version-2 `SCAN` Job per ScanRun and at most one globally active version-2 `SCAN` Job whose status is `PENDING` or `RUNNING`. Terminal version-2 Jobs, version-1 Jobs, and unrelated Job types do not occupy that global slot. Version-2 creation, scheduling, and recovery remain deferred.
 
 When DISCOVERY starts, the Job becomes `RUNNING`, increments its attempt count, records its start time, and reports persisted regular-file observations as progress while total remains null. Successful discovery sets completed and total progress to the final observation count, keeps the Job `RUNNING`, and changes its current stage to `RECONCILIATION`. Starting RECONCILIATION keeps the same Job attempt and start timestamp but resets progress to zero out of the number of Sources, establishing that Job progress mirrors its current stage. Successful reconciliation completes the Job, clears `current_stage_type`, preserves completed Source-based progress, and records its finish time. Filesystem failure during DISCOVERY instead marks the Job `FAILED` with finish/error state.
 
@@ -161,6 +163,7 @@ Implemented fields:
 - `id INTEGER PRIMARY KEY`
 - `job_id INTEGER NOT NULL`
 - `stage_type TEXT NOT NULL`
+- `result_json TEXT NULL` (added by V3)
 - `status TEXT NOT NULL`
 - `progress_completed INTEGER NOT NULL DEFAULT 0 CHECK >= 0`
 - `progress_total INTEGER NULL CHECK >= 0 when present`
@@ -170,7 +173,7 @@ Implemented fields:
 - `finished_at_ms INTEGER NULL`
 - `error_message TEXT NULL`
 
-The uniqueness rule is `UNIQUE(job_id, stage_type)`. A V1 stage row is an aggregate durable checkpoint for one stage type within a Job. Retry and resume update that row. Stage-instance and attempt-history tables are deferred.
+The uniqueness rule is `UNIQUE(job_id, stage_type)`. A stage row is an aggregate durable checkpoint for one stage type within a Job. V3 reserves nullable `result_json` for narrowly typed, versioned, bounded summaries, initially intended for assignment and hashing outcome counts; it is not arbitrary metadata, and current workflows leave it null. Retry and resume update the aggregate row. Stage-instance and attempt-history tables are deferred.
 
 The initial handoff creates exactly one `DISCOVERY` stage with `status = PENDING`, zero completed progress, null total progress, zero attempts, the same creation timestamp as its Job, and null execution timestamps/error. Job and stage creation occur in one service transaction. Stage reads use stable ascending database-ID order; a deliberate multi-stage ordering model remains deferred.
 
@@ -259,6 +262,12 @@ Beyond primary keys and uniqueness constraints, the reviewed initial useful inde
 - `job(scan_run_id)`
 - `content_hash(algorithm, digest_hex)`
 
+V3 additionally creates these partial unique indexes:
+
+- `scan_run(request_key) WHERE request_key IS NOT NULL`
+- `job(scan_run_id) WHERE job_type = 'SCAN' AND execution_version = 2`
+- `job(execution_version) WHERE job_type = 'SCAN' AND execution_version = 2 AND status IN ('PENDING', 'RUNNING')`
+
 Do not add indexes for hypothetical queries before measuring actual access patterns.
 
 ## Lifecycle and Type Validation
@@ -267,7 +276,7 @@ Evolving status and type values are not locked into rigid SQLite `CHECK (... IN 
 
 ## Java Persistence Foundation
 
-Immutable records representing all eleven table row shapes and concrete Spring JDBC repositories are organized under the persistence-related feature packages:
+Immutable records representing all eleven table row shapes, including the V3 `requestKey`, `executionVersion`, and `resultJson` fields, and concrete Spring JDBC repositories are organized under the persistence-related feature packages:
 
 - `catalog`
 - `scan`

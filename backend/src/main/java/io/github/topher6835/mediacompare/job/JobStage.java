@@ -4,6 +4,7 @@ public record JobStage(
         Long id,
         long jobId,
         String stageType,
+        String resultJson,
         String status,
         long progressCompleted,
         Long progressTotal,

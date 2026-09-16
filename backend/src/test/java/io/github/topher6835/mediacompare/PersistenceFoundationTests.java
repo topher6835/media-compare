@@ -212,9 +212,10 @@ class PersistenceFoundationTests {
 
     @Test
     void jobHasOnlyOneAggregateStagePerType() {
-        Job job = jobRepository.insert(new Job(null, null, "SCAN", "PENDING", null, 0, null, 0, 1, null, null,
-                null));
-        JobStage stage = new JobStage(null, job.id(), "DISCOVERY", "PENDING", 0, null, 0, 1, null, null, null);
+        Job job = jobRepository.insert(new Job(null, null, "SCAN", 1, "PENDING", null, 0, null, 0, 1, null,
+                null, null));
+        JobStage stage = new JobStage(null, job.id(), "DISCOVERY", null, "PENDING", 0, null, 0, 1, null, null,
+                null);
 
         jobRepository.insert(stage);
 
@@ -265,6 +266,11 @@ class PersistenceFoundationTests {
                 INSERT INTO job (job_type, status, progress_completed, progress_total, attempt_count, created_at_ms)
                 VALUES ('SCAN', 'PENDING', 0, -1, 0, 1)
                 """));
+        assertThrows(DataAccessException.class, () -> jdbcTemplate.update("""
+                INSERT INTO job (
+                    job_type, execution_version, status, progress_completed, attempt_count, created_at_ms
+                ) VALUES ('SCAN', 0, 'PENDING', 0, 0, 1)
+                """));
         assertThrows(DataAccessException.class, () -> insertFileEntryDirectly(source.id(), 10L, 1_000_000_000));
         assertThrows(DataAccessException.class, () -> insertFileEntryDirectly(source.id(), 10L, null));
     }
@@ -284,8 +290,8 @@ class PersistenceFoundationTests {
         assertEquals(membership,
                 catalogRepository.findWorkingSetContent(workingSet.id(), contentRecord.id()).orElseThrow());
 
-        ScanRun scanRun = scanRepository.insert(new ScanRun(null, "INDEX", "PENDING", workingSet.id(), 1, "{}", 5,
-                null, null, null));
+        ScanRun scanRun = scanRepository.insert(new ScanRun(null, "request-key", "INDEX", "PENDING",
+                workingSet.id(), 1, "{}", 5, null, null, null));
         assertEquals(scanRun, scanRepository.findScanRunById(scanRun.id()).orElseThrow());
         ScanRunSource scanRunSource = scanRepository.insert(new ScanRunSource(null, scanRun.id(), source.id(),
                 "PENDING", source.locationRevision(), 1, null, null, null, null));
@@ -295,11 +301,11 @@ class PersistenceFoundationTests {
                 "Media/Clip.mov", contentRecord.id(), "PRESENT", 42, 100L, 123, 0, 6, 6, scanRunSource.id(), 1L));
         assertEquals(fileEntry, catalogRepository.findFileEntryById(fileEntry.id()).orElseThrow());
 
-        Job job = jobRepository.insert(new Job(null, scanRun.id(), "SCAN", "PENDING", "DISCOVERY", 0, 10L, 0, 7,
-                null, null, null));
+        Job job = jobRepository.insert(new Job(null, scanRun.id(), "SCAN", 2, "PENDING", "DISCOVERY", 0, 10L, 0,
+                7, null, null, null));
         assertEquals(job, jobRepository.findJobById(job.id()).orElseThrow());
-        JobStage jobStage = jobRepository.insert(new JobStage(null, job.id(), "DISCOVERY", "PENDING", 0, 10L, 0,
-                8, null, null, null));
+        JobStage jobStage = jobRepository.insert(new JobStage(null, job.id(), "DISCOVERY",
+                "{\"resultVersion\":1}", "PENDING", 0, 10L, 0, 8, null, null, null));
         assertEquals(jobStage, jobRepository.findJobStageById(jobStage.id()).orElseThrow());
 
         AnalysisRecord analysisRecord = analysisRepository.insert(analysisRecord(contentRecord.id(), "config", "{}"));
@@ -337,7 +343,7 @@ class PersistenceFoundationTests {
     }
 
     private ScanRun insertScanRun() {
-        return scanRepository.insert(new ScanRun(null, "INDEX", "PENDING", null, 1, "{}", 1,
+        return scanRepository.insert(new ScanRun(null, null, "INDEX", "PENDING", null, 1, "{}", 1,
                 null, null, null));
     }
 

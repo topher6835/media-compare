@@ -105,6 +105,15 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Enforce at most one sequential `SCAN` handoff per ScanRun in the service/repository boundary and return HTTP 409 for duplicate POST. Do not add `UNIQUE(scan_run_id)`; concurrent duplicate hardening remains deferred.
 - Read JobStages in stable ascending database-ID order until a deliberate multi-stage ordering model exists.
 
+## Durable Full-Pipeline Persistence Foundation
+
+- Flyway V3 retains the eleven application tables and adds nullable `scan_run.request_key`, positive `job.execution_version` defaulting to 1, and nullable `job_stage.result_json`.
+- Reserve non-null request keys for future durable start idempotency. Historical and current ScanRuns keep null keys; a partial unique index permits multiple nulls but rejects duplicate non-null keys.
+- Version 1 means the historical/current reconciliation-ending SCAN execution. Reserve version 2 for the future backend-owned DISCOVERY → RECONCILIATION → CONTENT_ASSIGNMENT → CONTENT_HASHING pipeline; current execution creation remains version 1.
+- Reserve `result_json` for bounded, typed, versioned stage summaries, initially assignment and hashing outcome counts. Current stages leave it null; do not treat it as generic arbitrary metadata.
+- Enforce at most one version-2 SCAN Job per ScanRun and one globally active (`PENDING` or `RUNNING`) version-2 SCAN Job with SQLite partial unique indexes. Version-1 Jobs, unrelated Job types, and terminal version-2 Jobs remain outside the global admission constraint.
+- Do not expose these internal persistence fields through current public responses. Background execution, polling, startup interruption handling, and all version-2 creation/execution behavior remain later milestones.
+
 ## Initial DISCOVERY Execution
 
 - Expose explicit DISCOVERY execution through `POST /api/scan-runs/{id}/execution/discovery`; run it synchronously in the request for this increment.

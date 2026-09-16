@@ -91,6 +91,7 @@ class ScanExecutionApiTests {
                 .andExpect(jsonPath("$.jobId").isNumber())
                 .andExpect(jsonPath("$.scanRunId").value(originalScanRun.id()))
                 .andExpect(jsonPath("$.jobType").value("SCAN"))
+                .andExpect(jsonPath("$.executionVersion").doesNotExist())
                 .andExpect(jsonPath("$.status").value("PENDING"))
                 .andExpect(jsonPath("$.currentStageType").value("DISCOVERY"))
                 .andExpect(jsonPath("$.progressCompleted").value(0))
@@ -102,6 +103,7 @@ class ScanExecutionApiTests {
                 .andExpect(jsonPath("$.errorMessage").doesNotExist())
                 .andExpect(jsonPath("$.stages.length()").value(1))
                 .andExpect(jsonPath("$.stages[0].stageType").value("DISCOVERY"))
+                .andExpect(jsonPath("$.stages[0].resultJson").doesNotExist())
                 .andExpect(jsonPath("$.stages[0].status").value("PENDING"))
                 .andExpect(jsonPath("$.stages[0].progressCompleted").value(0))
                 .andExpect(jsonPath("$.stages[0].progressTotal").isEmpty())
@@ -118,6 +120,7 @@ class ScanExecutionApiTests {
         Job job = jobRepository.findJobById(response.jobId()).orElseThrow();
         assertEquals(originalScanRun.id(), job.scanRunId());
         assertEquals("SCAN", job.jobType());
+        assertEquals(1, job.executionVersion());
         assertEquals("PENDING", job.status());
         assertEquals("DISCOVERY", job.currentStageType());
         assertEquals(0, job.progressCompleted());
@@ -133,6 +136,7 @@ class ScanExecutionApiTests {
         JobStage stage = stages.getFirst();
         assertEquals(job.id().longValue(), stage.jobId());
         assertEquals("DISCOVERY", stage.stageType());
+        assertNull(stage.resultJson());
         assertEquals("PENDING", stage.status());
         assertEquals(0, stage.progressCompleted());
         assertNull(stage.progressTotal());

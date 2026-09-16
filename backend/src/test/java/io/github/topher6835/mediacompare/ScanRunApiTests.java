@@ -79,6 +79,7 @@ class ScanRunApiTests {
                 .andExpect(jsonPath("$.requestType").value("INDEX"))
                 .andExpect(jsonPath("$.status").value("PENDING"))
                 .andExpect(jsonPath("$.createdAtMs").isNumber())
+                .andExpect(jsonPath("$.requestKey").doesNotExist())
                 .andExpect(jsonPath("$.optionsVersion").doesNotExist())
                 .andExpect(jsonPath("$.optionsJson").doesNotExist())
                 .andExpect(jsonPath("$.sources.length()").value(1))
@@ -99,6 +100,7 @@ class ScanRunApiTests {
         assertEquals(1, persistedRun.optionsVersion());
         assertEquals("{}", persistedRun.optionsJson());
         assertTrue(persistedRun.createdAtMs() > 0);
+        assertNull(persistedRun.requestKey());
         assertNull(persistedRun.workingSetId());
         assertNull(persistedRun.startedAtMs());
         assertNull(persistedRun.finishedAtMs());

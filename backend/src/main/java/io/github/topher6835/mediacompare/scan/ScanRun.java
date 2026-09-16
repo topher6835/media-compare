@@ -2,6 +2,7 @@ package io.github.topher6835.mediacompare.scan;
 
 public record ScanRun(
         Long id,
+        String requestKey,
         String requestType,
         String status,
         Long workingSetId,

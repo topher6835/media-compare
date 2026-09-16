@@ -18,7 +18,7 @@ The repository currently contains a working full-stack scaffold:
 - Read-only APIs that derive exact duplicate groups and retained occurrences from trusted SHA-256 artifacts, with catalog-correct file-category and extension filtering.
 - Frontend `/sources`, `/duplicates`, and `/duplicates/:digestHex` routes for Source registration/indexing and derived exact-group browsing, in addition to the `/` health route.
 
-The reviewed V1 persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven V1 application tables, structural constraints, foreign keys, and initial indexes. Java migration `V2__add_file_entry_extension_key` adds and backfills normalized FileEntry extension metadata plus its lookup index without adding a table. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, `analysis`, and `matching` feature packages. Source registration/read, durable scan-request creation/read, the ScanRun-to-Job execution handoff, DISCOVERY, missing-file RECONCILIATION, initial ContentRecord assignment, exact SHA-256 analysis, and derived exact duplicate reporting/filtering are implemented. Background scheduling, broader analysis/matching, AI, and broader product workflows do not exist yet.
+The reviewed persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven application tables, structural constraints, foreign keys, and initial indexes. Java migration `V2__add_file_entry_extension_key` adds and backfills normalized FileEntry extension metadata plus its lookup index without adding a table. SQL migration `V3__add_durable_indexing_foundation.sql` retains those eleven tables while adding a future request idempotency key, an execution version, nullable stage-result storage, and database admission constraints scoped to future version-2 SCAN Jobs. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, `analysis`, and `matching` feature packages. Source registration/read, durable scan-request creation/read, the ScanRun-to-Job execution handoff, DISCOVERY, missing-file RECONCILIATION, initial ContentRecord assignment, exact SHA-256 analysis, and derived exact duplicate reporting/filtering are implemented. Current execution remains version 1 and browser-orchestrated; background execution, polling, startup recovery, and version-2 execution do not exist yet.
 
 ## Architectural Style
 
@@ -31,7 +31,7 @@ Media Compare will begin as a modular monolith:
 
 Responsibilities remain meaningfully separated inside the applications without creating elaborate layered architecture. The initial responsibility areas are catalog/indexing, scanning/reconciliation, analysis, matching, jobs/progress, organization/manual decisions, filesystem operations, media tooling, and AI integrations.
 
-## Implemented V1 Persistence Boundaries
+## Implemented Persistence Boundaries
 
 The first concrete persistence schema contains exactly these eleven tables:
 
@@ -130,7 +130,9 @@ Filesystem failure marks every ScanRunSource participating in that started DISCO
 
 The current API permits at most one sequentially created `SCAN` execution handoff per ScanRun and returns HTTP 409 for a duplicate POST. This rule is enforced by `ScanExecutionService`; the generic Job schema does not impose `UNIQUE(scan_run_id)`. Simultaneous-request hardening remains part of later scheduling/concurrency design. `JobStage` remains an aggregate checkpoint for one stage type within a Job, with `UNIQUE(job_id, stage_type)`; retries and resume update that row. Additional lifecycle values and execution behavior remain implementation details.
 
-Pause/resume is database-driven and must survive full application shutdown. Work is processed in small batches, with completed analysis reused and incomplete work found from durable state. Detailed scheduling, cancellation, startup recovery, and stage-instance history remain open.
+V3 reserves `scan_run.request_key` for future durable start-request idempotency, distinguishes current/historical version-1 Jobs from future full-pipeline version-2 Jobs with `job.execution_version`, and reserves nullable `job_stage.result_json` for bounded, typed, versioned assignment and hashing summaries. Partial unique indexes allow at most one version-2 SCAN Job per ScanRun and at most one globally active (`PENDING` or `RUNNING`) version-2 SCAN Job. They do not constrain version-1 Jobs or unrelated Job types. Current creation paths write null request/result fields and version 1; none of these fields is exposed through the existing public responses.
+
+Execution state is durable across application shutdown. The approved future version-2 lifecycle will mark interrupted active executions failed on startup rather than transparently resuming them. Current execution is synchronous and browser-orchestrated; background scheduling, polling, interruption handling, cancellation, and stage-instance history remain unimplemented.
 
 ## Working Sets and Analysis
 

@@ -49,6 +49,7 @@ public class DiscoveryExecutionState {
                 null,
                 job.id(),
                 RECONCILIATION_STAGE_TYPE,
+                null,
                 PENDING_STATUS,
                 0,
                 null,

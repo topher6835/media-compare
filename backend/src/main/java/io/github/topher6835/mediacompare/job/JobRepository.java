@@ -26,28 +26,29 @@ public class JobRepository {
         jdbcTemplate.update(connection -> {
             PreparedStatement statement = connection.prepareStatement("""
                     INSERT INTO job (
-                        scan_run_id, job_type, status, current_stage_type, progress_completed,
+                        scan_run_id, job_type, execution_version, status, current_stage_type, progress_completed,
                         progress_total, attempt_count, created_at_ms, started_at_ms, finished_at_ms,
                         error_message
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, Statement.RETURN_GENERATED_KEYS);
             setNullableLong(statement, 1, job.scanRunId());
             statement.setString(2, job.jobType());
-            statement.setString(3, job.status());
-            statement.setString(4, job.currentStageType());
-            statement.setLong(5, job.progressCompleted());
-            setNullableLong(statement, 6, job.progressTotal());
-            statement.setLong(7, job.attemptCount());
-            statement.setLong(8, job.createdAtMs());
-            setNullableLong(statement, 9, job.startedAtMs());
-            setNullableLong(statement, 10, job.finishedAtMs());
-            statement.setString(11, job.errorMessage());
+            statement.setLong(3, job.executionVersion());
+            statement.setString(4, job.status());
+            statement.setString(5, job.currentStageType());
+            statement.setLong(6, job.progressCompleted());
+            setNullableLong(statement, 7, job.progressTotal());
+            statement.setLong(8, job.attemptCount());
+            statement.setLong(9, job.createdAtMs());
+            setNullableLong(statement, 10, job.startedAtMs());
+            setNullableLong(statement, 11, job.finishedAtMs());
+            statement.setString(12, job.errorMessage());
             return statement;
         }, keyHolder);
 
-        return new Job(generatedId(keyHolder), job.scanRunId(), job.jobType(), job.status(), job.currentStageType(),
-                job.progressCompleted(), job.progressTotal(), job.attemptCount(), job.createdAtMs(), job.startedAtMs(),
-                job.finishedAtMs(), job.errorMessage());
+        return new Job(generatedId(keyHolder), job.scanRunId(), job.jobType(), job.executionVersion(), job.status(),
+                job.currentStageType(), job.progressCompleted(), job.progressTotal(), job.attemptCount(),
+                job.createdAtMs(), job.startedAtMs(), job.finishedAtMs(), job.errorMessage());
     }
 
     public Optional<Job> findJobById(long id) {
@@ -72,26 +73,27 @@ public class JobRepository {
         jdbcTemplate.update(connection -> {
             PreparedStatement statement = connection.prepareStatement("""
                     INSERT INTO job_stage (
-                        job_id, stage_type, status, progress_completed, progress_total, attempt_count,
+                        job_id, stage_type, result_json, status, progress_completed, progress_total, attempt_count,
                         created_at_ms, started_at_ms, finished_at_ms, error_message
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, Statement.RETURN_GENERATED_KEYS);
             statement.setLong(1, jobStage.jobId());
             statement.setString(2, jobStage.stageType());
-            statement.setString(3, jobStage.status());
-            statement.setLong(4, jobStage.progressCompleted());
-            setNullableLong(statement, 5, jobStage.progressTotal());
-            statement.setLong(6, jobStage.attemptCount());
-            statement.setLong(7, jobStage.createdAtMs());
-            setNullableLong(statement, 8, jobStage.startedAtMs());
-            setNullableLong(statement, 9, jobStage.finishedAtMs());
-            statement.setString(10, jobStage.errorMessage());
+            statement.setString(3, jobStage.resultJson());
+            statement.setString(4, jobStage.status());
+            statement.setLong(5, jobStage.progressCompleted());
+            setNullableLong(statement, 6, jobStage.progressTotal());
+            statement.setLong(7, jobStage.attemptCount());
+            statement.setLong(8, jobStage.createdAtMs());
+            setNullableLong(statement, 9, jobStage.startedAtMs());
+            setNullableLong(statement, 10, jobStage.finishedAtMs());
+            statement.setString(11, jobStage.errorMessage());
             return statement;
         }, keyHolder);
 
-        return new JobStage(generatedId(keyHolder), jobStage.jobId(), jobStage.stageType(), jobStage.status(),
-                jobStage.progressCompleted(), jobStage.progressTotal(), jobStage.attemptCount(), jobStage.createdAtMs(),
-                jobStage.startedAtMs(), jobStage.finishedAtMs(), jobStage.errorMessage());
+        return new JobStage(generatedId(keyHolder), jobStage.jobId(), jobStage.stageType(), jobStage.resultJson(),
+                jobStage.status(), jobStage.progressCompleted(), jobStage.progressTotal(), jobStage.attemptCount(),
+                jobStage.createdAtMs(), jobStage.startedAtMs(), jobStage.finishedAtMs(), jobStage.errorMessage());
     }
 
     public Optional<JobStage> findJobStageById(long id) {
@@ -240,6 +242,7 @@ public class JobRepository {
                 resultSet.getLong("id"),
                 nullableLong(resultSet, "scan_run_id"),
                 resultSet.getString("job_type"),
+                resultSet.getLong("execution_version"),
                 resultSet.getString("status"),
                 resultSet.getString("current_stage_type"),
                 resultSet.getLong("progress_completed"),
@@ -256,6 +259,7 @@ public class JobRepository {
                 resultSet.getLong("id"),
                 resultSet.getLong("job_id"),
                 resultSet.getString("stage_type"),
+                resultSet.getString("result_json"),
                 resultSet.getString("status"),
                 resultSet.getLong("progress_completed"),
                 nullableLong(resultSet, "progress_total"),
