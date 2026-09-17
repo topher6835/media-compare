@@ -37,7 +37,7 @@ This file records decisions already made. It distinguishes the reviewed V1 imple
 - Keep filesystem metadata on FileEntry and media-derived metadata in ContentRecord analysis, so moves and renames do not invalidate compatible analysis.
 - Enumerate new media-metadata work by ContentRecord and page its current present FileEntry occurrences separately in ascending ID order. Use any still-valid occurrence, require filesystem validation before and after extraction, and transactionally revalidate the Source/FileEntry/ContentRecord snapshot before publication. Stale evidence produces no analysis result and does not poison later occurrences.
 - Keep generic media-metadata cache/publication mechanics analyzer-agnostic. Extractor-specific code must supply analyzer/version/configuration identity; equal SHA-256 digests do not create cross-ContentRecord metadata reuse.
-- Use Java ImageIO as the first image-only metadata extractor. Sniff bytes with an ImageInputStream/ImageReader and read encoded dimensions without decoding the whole image; accept only canonical JPEG, PNG, GIF, BMP, and runtime-provided TIFF. No reader/unsupported format is a completed `UNSUPPORTED` artifact, while ImageIO reader/decoder failures remain explicit and unpersisted until metadata-job failure lifecycle exists.
+- Use Java ImageIO as the first image-only metadata extractor. Sniff bytes with an ImageInputStream/ImageReader and read encoded dimensions without decoding the whole image; accept only canonical JPEG, PNG, GIF, BMP, and runtime-provided TIFF. No reader/unsupported format is a completed `UNSUPPORTED` artifact; current ImageIO reader/decoder failures become retryable per-content `FAILED` artifacts through the metadata Job, while stale evidence creates no artifact.
 - Keep face analyzer output, detected faces, and embeddings separate from later human person or group classification.
 - Keep AI optional and provider-independent; local and cloud providers may coexist under the same provenance/versioning model.
 - Keep large derived files in a future application-managed cache rather than as large SQLite BLOBs; SQLite holds the catalog and compact/queryable artifacts.
@@ -225,6 +225,16 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Add durable detail GET and a compact Source-status GET. Snapshot reads are transactional, read-only, and no-store. Source status uses two queries, orders Sources by ID, includes no-history Sources, and selects latest by ScanRun creation time plus ID. No new index/migration is justified for this increment.
 - Parse final summaries with existing codecs; do not expose raw JSON or internal schema versions. Malformed durable state yields a safe 500 with IDs logged. Derive `completedWithIssues` only from completed hashing skipped/failed counts; never persist another Job status or invent live progress.
 - The frontend consumes this contract as described above. SSE, cancellation, automatic retry/resume, and multi-Source UI remain deferred.
+
+## Durable Image-Metadata Job
+
+- Use a catalog-global `MEDIA_METADATA` Job at execution version 1 with null ScanRun identity and one `IMAGE_METADATA` stage. Keep the internal start boundary unexposed and do not trigger it automatically after SCAN yet.
+- Admit at most one active metadata Job by holding a process-local lock across a short SQLite write-reserved transaction. Keep this admission independent of the partial-index-enforced version-2 SCAN slot; exclusive catalog ownership makes the in-process serialization complete and another migration unnecessary.
+- Run ImageIO work on a dedicated core/max-one executor with one queue slot, abort rejection, and bounded ownership-safe shutdown. Process ContentRecords in ID-keyset pages of 100 and retain separately bounded occurrence paging; do not hold a transaction across extraction.
+- Reuse the unique compatible AnalysisRecord for retry. `COMPLETED` remains reusable, `PENDING`/`RUNNING` remains owned, and `FAILED` is eligible for a later Job. Every retry increments attempt count; success stores typed result and clears error, while repeated failure retains null result and a bounded safe error.
+- Publish per-content failure only after filesystem post-validation and the same transactional catalog-evidence guard as success. Stale evidence produces no artifact. Individual extraction failures increment the completed stage's issue count and do not fail the Job; unexpected infrastructure failures fail the stage and Job.
+- On startup, fail abandoned active metadata Jobs and convert only exact `builtin.imageio` nonterminal analysis rows to retryable `FAILED`. Re-enumerate candidates on the next Job and preserve completed artifacts. Persist only the bounded version-1 stage summary counts; cursor resume and per-file result lists remain deferred.
+- Keep the public metadata API, automatic post-SCAN scheduling, video/ffprobe extraction, and frontend metadata display deferred.
 
 ## Development
 

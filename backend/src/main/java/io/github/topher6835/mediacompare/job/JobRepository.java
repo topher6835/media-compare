@@ -57,6 +57,11 @@ public class JobRepository {
                 .findFirst();
     }
 
+    /** Reserve SQLite's writer before active-Job admission reads. Must run in a short transaction. */
+    public void reserveAdmissionWrite() {
+        jdbcTemplate.update("UPDATE job SET id = id WHERE 0");
+    }
+
     public Optional<Job> findJobByScanRunIdAndTypeAndExecutionVersion(
             long scanRunId, String jobType, long executionVersion) {
         return jdbcTemplate.query("""
@@ -378,6 +383,104 @@ public class JobRepository {
                 WHERE id = ? AND job_type = 'SCAN' AND execution_version = 2
                   AND status IN ('PENDING', 'RUNNING')
                 """, failedAtMs, message, jobId);
+    }
+
+    public List<Job> findActiveMediaMetadataJobs() {
+        return jdbcTemplate.query("""
+                SELECT * FROM job
+                WHERE job_type = 'MEDIA_METADATA' AND execution_version = 1
+                  AND status IN ('PENDING', 'RUNNING')
+                ORDER BY id
+                """, JobRepository::mapJob);
+    }
+
+    public int startMediaMetadataJob(long jobId, long startedAtMs) {
+        return jdbcTemplate.update("""
+                UPDATE job
+                SET status = 'RUNNING', attempt_count = attempt_count + 1,
+                    started_at_ms = ?, finished_at_ms = NULL, error_message = NULL
+                WHERE id = ? AND job_type = 'MEDIA_METADATA' AND execution_version = 1
+                  AND status = 'PENDING' AND current_stage_type = 'IMAGE_METADATA'
+                """, startedAtMs, jobId);
+    }
+
+    public int startImageMetadataStage(long jobId, long jobStageId, long startedAtMs) {
+        return jdbcTemplate.update("""
+                UPDATE job_stage
+                SET status = 'RUNNING', progress_completed = 0, progress_total = NULL,
+                    attempt_count = attempt_count + 1, started_at_ms = ?, finished_at_ms = NULL,
+                    error_message = NULL
+                WHERE id = ? AND job_id = ? AND stage_type = 'IMAGE_METADATA' AND status = 'PENDING'
+                  AND EXISTS (
+                      SELECT 1 FROM job
+                      WHERE job.id = job_stage.job_id
+                        AND job.job_type = 'MEDIA_METADATA'
+                        AND job.execution_version = 1
+                        AND job.status = 'RUNNING'
+                        AND job.current_stage_type = 'IMAGE_METADATA'
+                  )
+                """, startedAtMs, jobStageId, jobId);
+    }
+
+    public int updateImageMetadataProgress(long jobId, long jobStageId, long progressCompleted) {
+        int stageRows = jdbcTemplate.update("""
+                UPDATE job_stage SET progress_completed = ?
+                WHERE id = ? AND job_id = ? AND stage_type = 'IMAGE_METADATA' AND status = 'RUNNING'
+                """, progressCompleted, jobStageId, jobId);
+        int jobRows = jdbcTemplate.update("""
+                UPDATE job SET progress_completed = ?
+                WHERE id = ? AND job_type = 'MEDIA_METADATA' AND execution_version = 1
+                  AND status = 'RUNNING' AND current_stage_type = 'IMAGE_METADATA'
+                """, progressCompleted, jobId);
+        return stageRows + jobRows;
+    }
+
+    public int completeImageMetadataStage(
+            long jobId, long jobStageId, String resultJson, long progressCompleted, long finishedAtMs) {
+        return jdbcTemplate.update("""
+                UPDATE job_stage
+                SET result_json = ?, status = 'COMPLETED', progress_completed = ?, progress_total = ?,
+                    finished_at_ms = ?, error_message = NULL
+                WHERE id = ? AND job_id = ? AND stage_type = 'IMAGE_METADATA' AND status = 'RUNNING'
+                  AND EXISTS (
+                      SELECT 1 FROM job
+                      WHERE job.id = job_stage.job_id
+                        AND job.job_type = 'MEDIA_METADATA'
+                        AND job.execution_version = 1
+                        AND job.status = 'RUNNING'
+                        AND job.current_stage_type = 'IMAGE_METADATA'
+                  )
+                """, resultJson, progressCompleted, progressCompleted, finishedAtMs,
+                jobStageId, jobId);
+    }
+
+    public int completeMediaMetadataJob(long jobId, long progressCompleted, long finishedAtMs) {
+        return jdbcTemplate.update("""
+                UPDATE job
+                SET status = 'COMPLETED', current_stage_type = NULL,
+                    progress_completed = ?, progress_total = ?, finished_at_ms = ?, error_message = NULL
+                WHERE id = ? AND job_type = 'MEDIA_METADATA' AND execution_version = 1
+                  AND status = 'RUNNING' AND current_stage_type = 'IMAGE_METADATA'
+                """, progressCompleted, progressCompleted, finishedAtMs, jobId);
+    }
+
+    public int failActiveImageMetadataStage(
+            long jobId, long jobStageId, long failedAtMs, String errorMessage) {
+        return jdbcTemplate.update("""
+                UPDATE job_stage
+                SET status = 'FAILED', finished_at_ms = ?, error_message = ?
+                WHERE id = ? AND job_id = ? AND stage_type = 'IMAGE_METADATA'
+                  AND status IN ('PENDING', 'RUNNING')
+                """, failedAtMs, errorMessage, jobStageId, jobId);
+    }
+
+    public int failActiveMediaMetadataJob(long jobId, long failedAtMs, String errorMessage) {
+        return jdbcTemplate.update("""
+                UPDATE job
+                SET status = 'FAILED', current_stage_type = NULL, finished_at_ms = ?, error_message = ?
+                WHERE id = ? AND job_type = 'MEDIA_METADATA' AND execution_version = 1
+                  AND status IN ('PENDING', 'RUNNING')
+                """, failedAtMs, errorMessage, jobId);
     }
 
     private static long generatedId(GeneratedKeyHolder keyHolder) {

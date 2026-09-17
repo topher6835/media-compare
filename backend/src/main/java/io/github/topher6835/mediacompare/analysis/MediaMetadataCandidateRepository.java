@@ -41,6 +41,7 @@ public class MediaMetadataCandidateRepository {
                         AND analysis_record.analyzer_version = ?
                         AND analysis_record.configuration_version = ?
                         AND analysis_record.configuration_hash = ?
+                        AND analysis_record.status IN ('COMPLETED', 'PENDING', 'RUNNING')
                   )
                 ORDER BY content_record.id
                 LIMIT ?

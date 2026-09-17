@@ -58,7 +58,8 @@ public class ImageIoMediaMetadataAnalyzer {
                         result = imageMetadataExtractor.extract(file);
                     } catch (ImageMetadataExtractionException exception) {
                         evidenceValidator.validateAfterExtraction(occurrence, file);
-                        throw exception;
+                        throw new CurrentImageMetadataExtractionException(
+                                occurrence, startedAtMs, exception);
                     }
                     evidenceValidator.validateAfterExtraction(occurrence, file);
                     publisher.publishIfStillCurrent(

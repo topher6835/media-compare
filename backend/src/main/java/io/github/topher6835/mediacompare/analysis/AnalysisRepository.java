@@ -107,6 +107,46 @@ public class AnalysisRepository {
                 configurationVersion, configurationHash).stream().findFirst();
     }
 
+    public int completeFailedAnalysisRecord(
+            long analysisRecordId, String resultJson, long startedAtMs, long finishedAtMs) {
+        return jdbcTemplate.update("""
+                UPDATE analysis_record
+                SET result_json = ?, status = 'COMPLETED', attempt_count = attempt_count + 1,
+                    started_at_ms = ?, finished_at_ms = ?, error_message = NULL
+                WHERE id = ? AND status = 'FAILED'
+                """, resultJson, startedAtMs, finishedAtMs, analysisRecordId);
+    }
+
+    public int failAgain(
+            long analysisRecordId, long startedAtMs, long finishedAtMs, String errorMessage) {
+        return jdbcTemplate.update("""
+                UPDATE analysis_record
+                SET result_json = NULL, status = 'FAILED', attempt_count = attempt_count + 1,
+                    started_at_ms = ?, finished_at_ms = ?, error_message = ?
+                WHERE id = ? AND status = 'FAILED'
+                """, startedAtMs, finishedAtMs, errorMessage, analysisRecordId);
+    }
+
+    public int recoverInterrupted(
+            MediaMetadataAnalysisDefinition definition, long finishedAtMs, String errorMessage) {
+        Objects.requireNonNull(definition, "definition");
+        return jdbcTemplate.update("""
+                UPDATE analysis_record
+                SET result_json = NULL, status = 'FAILED', finished_at_ms = ?, error_message = ?
+                WHERE analysis_type = ?
+                  AND analyzer_id = ?
+                  AND analyzer_version = ?
+                  AND configuration_version = ?
+                  AND configuration_hash = ?
+                  AND configuration_json = ?
+                  AND status IN ('PENDING', 'RUNNING')
+                """, finishedAtMs, errorMessage,
+                MediaMetadataAnalysisDefinition.ANALYSIS_TYPE,
+                definition.analyzerId(), definition.analyzerVersion(),
+                definition.configurationVersion(), definition.configurationHash(),
+                definition.configurationJson());
+    }
+
     public void insert(ContentHash contentHash) {
         jdbcTemplate.update("""
                 INSERT INTO content_hash (analysis_record_id, algorithm, digest_hex)

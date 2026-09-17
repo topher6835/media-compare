@@ -148,6 +148,23 @@ class MediaMetadataCandidateRepositoryTests {
     }
 
     @Test
+    void compatibleFailedRecordIsEligibleForRetryButNotReusable() {
+        Source source = insertSource("/catalog/failed");
+        ContentRecord content = insertContent(10);
+        insertFile(source, content, "failed.jpg", "PRESENT");
+        analysisRepository.insert(new AnalysisRecord(
+                null, content.id(), MediaMetadataAnalysisDefinition.ANALYSIS_TYPE,
+                DEFINITION.analyzerId(), DEFINITION.analyzerVersion(),
+                DEFINITION.configurationVersion(), DEFINITION.configurationHash(),
+                DEFINITION.configurationJson(), null,
+                "FAILED", 1, 1, 1L, 2L, "Image metadata extraction failed"));
+
+        assertEquals(List.of(content.id()), candidateRepository.findCandidates(DEFINITION, 0, 10)
+                .stream().map(MediaMetadataContentCandidate::contentRecordId).toList());
+        assertTrue(metadataCache.findReusableResult(content.id(), DEFINITION).isEmpty());
+    }
+
+    @Test
     void equalExactHashesDoNotMergeMetadataCandidates() {
         Source source = insertSource("/catalog/equal-hash");
         ContentRecord first = insertContent(10);

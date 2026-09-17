@@ -208,6 +208,20 @@ class MediaMetadataEvidenceAndPublicationTests {
         assertNoMetadataArtifact(fixture.content().id());
     }
 
+    @Test
+    void failurePublisherRejectsStaleCatalogEvidenceWithoutPublishing() throws Exception {
+        Fixture fixture = createFixture("stale-failure-publication", List.of("candidate.jpg"));
+        MediaMetadataFileCandidate candidate = occurrences(fixture).getFirst();
+        jdbcTemplate.update(
+                "UPDATE file_entry SET observation_revision = observation_revision + 1 WHERE id = ?",
+                candidate.fileEntryId());
+
+        assertThrows(StaleMediaMetadataEvidenceException.class,
+                () -> publisher.publishFailureIfStillCurrent(
+                        candidate, DEFINITION, 10, 20, "Image metadata extraction failed"));
+        assertNoMetadataArtifact(fixture.content().id());
+    }
+
     static Stream<Object[]> catalogMutations() {
         return Stream.of(
                 new Object[] { "Source location revision changed", "source-revision" },
@@ -235,6 +249,21 @@ class MediaMetadataEvidenceAndPublicationTests {
         assertEquals(unsupportedResult(), metadataCache.findReusableResult(
                 fixture.content().id(), DEFINITION).orElseThrow());
         assertTrue(candidateRepository.findCandidates(DEFINITION, 0, 10).isEmpty());
+    }
+
+    @Test
+    void completedArtifactThatAppearsBeforePublicationWinsWithoutDuplicateRow() throws Exception {
+        Fixture fixture = createFixture("publication-race", List.of("candidate.jpg"));
+        MediaMetadataFileCandidate candidate = occurrences(fixture).getFirst();
+        AnalysisRecord first = publisher.publishIfStillCurrent(
+                candidate, DEFINITION, unsupportedResult(), 10, 20);
+
+        AnalysisRecord observed = publisher.publishIfStillCurrent(
+                candidate, DEFINITION, unsupportedResult(), 30, 40);
+
+        assertEquals(first.id(), observed.id());
+        assertEquals(1, observed.attemptCount());
+        assertEquals(1, metadataArtifactCount(fixture.content().id()));
     }
 
     @Test
@@ -284,6 +313,13 @@ class MediaMetadataEvidenceAndPublicationTests {
                 MediaMetadataResult.class,
                 long.class,
                 long.class).getAnnotation(Transactional.class));
+        assertNotNull(MediaMetadataPublisher.class.getMethod(
+                "publishFailureIfStillCurrent",
+                MediaMetadataFileCandidate.class,
+                MediaMetadataAnalysisDefinition.class,
+                long.class,
+                long.class,
+                String.class).getAnnotation(Transactional.class));
         assertNull(MediaMetadataFileEvidenceValidator.class.getMethod(
                 "validateBeforeExtraction", MediaMetadataFileCandidate.class)
                 .getAnnotation(Transactional.class));

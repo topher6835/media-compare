@@ -151,6 +151,14 @@ Shutdown closes submission, waits up to 30 seconds, then interrupts active work 
 
 Public v2 start/read and idempotency contracts are described below; cancellation, SSE, and stage-instance history remain deferred.
 
+### Internal Image-Metadata Job
+
+`MediaMetadataBackgroundService.start()` is the internal handoff for a catalog-global `MEDIA_METADATA` Job at execution version 1. The Job has no ScanRun and owns one `IMAGE_METADATA` stage. Exclusive catalog ownership permits process-local serialization around the short, SQLite write-reserved creation transaction; together they admit at most one active metadata Job without consuming or changing the independent version-2 SCAN admission slot. No controller or automatic post-SCAN trigger calls this boundary yet.
+
+A dedicated core/max-one executor with one queue slot and abort rejection runs bounded ContentRecord keyset pages of 100 through `ImageIoMediaMetadataAnalyzer`; occurrence paging, filesystem pre/post validation, and extraction outside transactions remain unchanged. The stage stores only versioned aggregate counts for attempted, available, unsupported, failed, and stale/unavailable candidates. Current corrupt/unreadable content becomes a safe per-content `FAILED` AnalysisRecord and processing continues; stale evidence creates no artifact. Unexpected enumeration, persistence, or worker failure instead fails the stage and Job.
+
+The existing unique analysis cache identity is reused for retries. `FAILED` rows are candidates for later Jobs and transition in place with an incremented attempt count; success clears the error and stores typed result JSON. `COMPLETED` remains reusable, while `PENDING`/`RUNNING` remains owned. Startup changes only abandoned nonterminal rows for the exact ImageIO definition to retryable `FAILED`, fails abandoned active metadata Jobs, and preserves completed artifacts. Rejected scheduling fails both the accepted Job and stage. Public API, automatic scheduling, video/ffprobe extraction, and frontend display remain deferred.
+
 ## Public Version-2 Start and Polling
 
 `POST /api/indexing-runs` accepts a client UUID request key and 1–1,000 distinct positive Source IDs. UUID input must have the full 8-4-4-4-12 hexadecimal shape; uppercase is normalized to lowercase and whitespace/shortened forms are rejected. The canonical payload is `INDEX` plus the sorted unique Source ID set. Unknown Sources retain the existing 404 convention; malformed requests return 400.
