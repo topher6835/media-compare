@@ -228,13 +228,13 @@ The initial persistence implementation uses immutable Java records for row-shape
 
 ## Durable Image-Metadata Job
 
-- Use a catalog-global `MEDIA_METADATA` Job at execution version 1 with null ScanRun identity and one `IMAGE_METADATA` stage. Keep the internal start boundary unexposed and do not trigger it automatically after SCAN yet.
+- Use a catalog-global `MEDIA_METADATA` Job at execution version 1 with null ScanRun identity and one `IMAGE_METADATA` stage. Expose only a narrow manual start/read API and do not trigger it automatically after SCAN yet.
 - Admit at most one active metadata Job by holding a process-local lock across a short SQLite write-reserved transaction. Keep this admission independent of the partial-index-enforced version-2 SCAN slot; exclusive catalog ownership makes the in-process serialization complete and another migration unnecessary.
 - Run ImageIO work on a dedicated core/max-one executor with one queue slot, abort rejection, and bounded ownership-safe shutdown. Process ContentRecords in ID-keyset pages of 100 and retain separately bounded occurrence paging; do not hold a transaction across extraction.
 - Reuse the unique compatible AnalysisRecord for retry. `COMPLETED` remains reusable, `PENDING`/`RUNNING` remains owned, and `FAILED` is eligible for a later Job. Every retry increments attempt count; success stores typed result and clears error, while repeated failure retains null result and a bounded safe error.
 - Publish per-content failure only after filesystem post-validation and the same transactional catalog-evidence guard as success. Stale evidence produces no artifact. Individual extraction failures increment the completed stage's issue count and do not fail the Job; unexpected infrastructure failures fail the stage and Job.
 - On startup, fail abandoned active metadata Jobs and convert only exact `builtin.imageio` nonterminal analysis rows to retryable `FAILED`. Re-enumerate candidates on the next Job and preserve completed artifacts. Persist only the bounded version-1 stage summary counts; cursor resume and per-file result lists remain deferred.
-- Keep the public metadata API, automatic post-SCAN scheduling, video/ffprobe extraction, and frontend metadata display deferred.
+- Keep automatic post-SCAN scheduling, video/ffprobe extraction, and frontend metadata display deferred.
 
 ## Development
 

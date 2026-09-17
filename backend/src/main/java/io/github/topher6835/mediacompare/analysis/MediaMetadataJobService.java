@@ -1,6 +1,7 @@
 package io.github.topher6835.mediacompare.analysis;
 
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 
 import io.github.topher6835.mediacompare.job.Job;
@@ -74,9 +75,70 @@ public class MediaMetadataJobService {
 
     public MediaMetadataExecutionDetails find(long jobId) {
         Job job = jobs.findJobById(jobId)
-                .orElseThrow(() -> new MediaMetadataJobConflictException(
+                .orElseThrow(() -> new NoSuchElementException(
                         "Media metadata Job " + jobId + " does not exist"));
-        return new MediaMetadataExecutionDetails(job, jobs.findJobStagesByJobId(jobId));
+        if (job.scanRunId() != null
+                || !MediaMetadataJobDefinition.JOB_TYPE.equals(job.jobType())
+                || job.executionVersion() != MediaMetadataJobDefinition.EXECUTION_VERSION) {
+            throw new java.util.NoSuchElementException("Job is not a metadata execution");
+        }
+        List<JobStage> stages = jobs.findJobStagesByJobId(jobId);
+        if (stages.size() != 1
+                || !MediaMetadataJobDefinition.IMAGE_METADATA_STAGE.equals(stages.getFirst().stageType())) {
+            throw new IllegalStateException("Invalid metadata Job stage shape");
+        }
+        JobStage stage = stages.getFirst();
+        validateDurableState(job, stage);
+        return new MediaMetadataExecutionDetails(job, stages);
+    }
+
+    private void validateDurableState(Job job, JobStage stage) {
+        if (!List.of("PENDING", "RUNNING", "COMPLETED", "FAILED").contains(job.status())) {
+            throw new IllegalStateException("Invalid metadata Job status");
+        }
+        if (!List.of("PENDING", "RUNNING", "COMPLETED", "FAILED").contains(stage.status())) {
+            throw new IllegalStateException("Invalid metadata stage status");
+        }
+        if (!job.status().equals(stage.status())) {
+            throw new IllegalStateException("Metadata Job/stage status mismatch");
+        }
+        switch (job.status()) {
+        case "PENDING" -> {
+            require(job.startedAtMs() == null && job.finishedAtMs() == null
+                    && MediaMetadataJobDefinition.IMAGE_METADATA_STAGE.equals(job.currentStageType())
+                    && stage.startedAtMs() == null && stage.finishedAtMs() == null
+                    && stage.resultJson() == null, "Invalid pending metadata lifecycle");
+        }
+        case "RUNNING" -> {
+            require(job.startedAtMs() != null && job.finishedAtMs() == null
+                    && MediaMetadataJobDefinition.IMAGE_METADATA_STAGE.equals(job.currentStageType())
+                    && stage.startedAtMs() != null && stage.finishedAtMs() == null
+                    && stage.resultJson() == null, "Invalid running metadata lifecycle");
+        }
+        case "COMPLETED" -> {
+            require(job.startedAtMs() != null && job.finishedAtMs() != null
+                    && job.currentStageType() == null && stage.startedAtMs() != null
+                    && stage.finishedAtMs() != null && stage.resultJson() != null,
+                    "Invalid completed metadata lifecycle");
+            ImageMetadataStageResult result = resultCodec.read(stage.resultJson());
+            if (result.candidatesAttempted() != stage.progressCompleted()
+                    || result.candidatesAttempted() != job.progressCompleted()
+                    || !java.util.Objects.equals(stage.progressTotal(), stage.progressCompleted())
+                    || !java.util.Objects.equals(job.progressTotal(), job.progressCompleted())) {
+                throw new IllegalStateException("Metadata stage result disagrees with durable progress");
+            }
+        }
+        case "FAILED" -> require(job.finishedAtMs() != null && job.currentStageType() == null
+                && stage.finishedAtMs() != null && stage.resultJson() == null,
+                "Invalid failed metadata lifecycle");
+        default -> throw new IllegalStateException("Invalid metadata Job status");
+        }
+    }
+
+    private static void require(boolean valid, String message) {
+        if (!valid) {
+            throw new IllegalStateException(message);
+        }
     }
 
     private ImageMetadataStageResult processCandidates(Job job, JobStage stage) {
