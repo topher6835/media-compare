@@ -26,13 +26,18 @@ public class Version2BackgroundIndexingService {
     @Transactional(propagation = Propagation.NEVER)
     public ScanExecutionDetails start(long scanRunId) {
         ScanExecutionDetails accepted = executions.create(scanRunId);
+        submitAccepted(accepted);
+        return accepted;
+    }
+
+    @Transactional(propagation = Propagation.NEVER)
+    public void submitAccepted(ScanExecutionDetails accepted) {
         try {
-            executor.execute(() -> run(scanRunId, accepted.job().id()));
+            executor.execute(() -> run(accepted.job().scanRunId(), accepted.job().id()));
         } catch (RejectedExecutionException exception) {
             recovery.failIfActive(accepted.job().id(), "Execution could not be scheduled");
             throw new Version2SchedulingException(exception);
         }
-        return accepted;
     }
 
     private void run(long scanRunId, long jobId) {

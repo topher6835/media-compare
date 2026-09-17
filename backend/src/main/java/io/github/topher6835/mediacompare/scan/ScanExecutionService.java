@@ -45,7 +45,12 @@ public class ScanExecutionService {
 
     @Transactional
     public ScanExecutionDetails create(long scanRunId) {
+        scanRepository.reserveExecutionWrite();
         requireScanRun(scanRunId);
+        if (jobRepository.findJobByScanRunIdAndTypeAndExecutionVersion(
+                scanRunId, ScanExecutionDefinition.JOB_TYPE, ScanExecutionDefinition.VERSION_2).isPresent()) {
+            throw new ScanExecutionAlreadyExistsException(scanRunId);
+        }
         if (jobRepository.findJobByScanRunIdAndTypeAndExecutionVersion(
                 scanRunId, ScanExecutionDefinition.JOB_TYPE, ScanExecutionDefinition.VERSION_1).isPresent()) {
             throw new ScanExecutionAlreadyExistsException(scanRunId);

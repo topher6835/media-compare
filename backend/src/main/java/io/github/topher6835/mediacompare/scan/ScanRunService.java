@@ -32,6 +32,11 @@ public class ScanRunService {
 
     @Transactional
     public ScanRunDetails create(List<Long> sourceIds) {
+        return create(sourceIds, null);
+    }
+
+    @Transactional
+    public ScanRunDetails create(List<Long> sourceIds, String requestKey) {
         validateSourceIds(sourceIds);
 
         List<Source> sources = sourceIds.stream()
@@ -42,7 +47,7 @@ public class ScanRunService {
         long createdAtMs = System.currentTimeMillis();
         ScanRun scanRun = scanRepository.insert(new ScanRun(
                 null,
-                null,
+                requestKey,
                 INDEX_REQUEST_TYPE,
                 PENDING_STATUS,
                 null,
@@ -83,7 +88,7 @@ public class ScanRunService {
                 .orElseThrow(() -> new NoSuchElementException("Source " + sourceId + " does not exist"));
     }
 
-    private static void validateSourceIds(List<Long> sourceIds) {
+    static void validateSourceIds(List<Long> sourceIds) {
         if (sourceIds == null || sourceIds.isEmpty()) {
             throw new IllegalArgumentException("At least one Source ID is required");
         }

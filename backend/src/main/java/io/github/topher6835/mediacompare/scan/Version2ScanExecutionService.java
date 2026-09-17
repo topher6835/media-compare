@@ -37,11 +37,16 @@ public class Version2ScanExecutionService {
 
     @Transactional
     public ScanExecutionDetails create(long scanRunId) {
+        scanRepository.reserveExecutionWrite();
         ScanRun scanRun = scanRepository.findScanRunById(scanRunId)
                 .orElseThrow(() -> new NoSuchElementException("ScanRun " + scanRunId + " does not exist"));
         if (!"INDEX".equals(scanRun.requestType()) || !"PENDING".equals(scanRun.status())) {
             throw new Version2ExecutionConflictException(
                     "ScanRun is not eligible for a version-2 execution");
+        }
+        if (jobRepository.findJobByScanRunIdAndTypeAndExecutionVersion(
+                scanRunId, ScanExecutionDefinition.JOB_TYPE, ScanExecutionDefinition.VERSION_1).isPresent()) {
+            throw new Version2ExecutionConflictException("ScanRun already has a version-1 execution");
         }
         if (jobRepository.findJobByScanRunIdAndTypeAndExecutionVersion(
                 scanRunId, ScanExecutionDefinition.JOB_TYPE, ScanExecutionDefinition.VERSION_2).isPresent()) {
@@ -60,7 +65,8 @@ public class Version2ScanExecutionService {
                     "PENDING", 0, null, 0, createdAtMs, null, null, null));
             return new ScanExecutionDetails(job, List.of(discovery));
         } catch (DataAccessException exception) {
-            if (!isConstraintViolation(exception)) {
+            if (!IndexingConstraints.uniqueColumn(exception, "job.execution_version")
+                    && !IndexingConstraints.uniqueColumn(exception, "job.scan_run_id")) {
                 throw exception;
             }
             throw new Version2ExecutionConflictException(
@@ -84,15 +90,4 @@ public class Version2ScanExecutionService {
         return findByScanRunId(scanRunId).orElseThrow();
     }
 
-    private static boolean isConstraintViolation(Throwable exception) {
-        Throwable current = exception;
-        while (current != null) {
-            if (current instanceof java.sql.SQLException sqlException
-                    && sqlException.getErrorCode() == 19) {
-                return true;
-            }
-            current = current.getCause();
-        }
-        return false;
-    }
 }

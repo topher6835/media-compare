@@ -140,7 +140,8 @@ class Version2ScanExecutionTests {
         ScanRunDetails first = createScanRun(Files.createDirectory(temporaryDirectory.resolve("first")));
         ScanRunDetails second = createScanRun(Files.createDirectory(temporaryDirectory.resolve("second")));
 
-        Job version1 = version1ExecutionService.create(first.scanRun().id()).job();
+        ScanRunDetails legacy = createScanRun(Files.createDirectory(temporaryDirectory.resolve("legacy")));
+        Job version1 = version1ExecutionService.create(legacy.scanRun().id()).job();
         ScanExecutionDetails version2 = version2ExecutionService.create(first.scanRun().id());
 
         assertEquals(1, version1.executionVersion());
@@ -165,8 +166,10 @@ class Version2ScanExecutionTests {
         Path root = Files.createDirectory(temporaryDirectory.resolve("versions"));
         Files.writeString(root.resolve("one.txt"), "one");
         ScanRunDetails scanRun = createScanRun(root);
-        Job version1 = version1ExecutionService.create(scanRun.scanRun().id()).job();
         Job version2 = version2ExecutionService.create(scanRun.scanRun().id()).job();
+        // Historical coexistence remains readable, but normal service creation now excludes it.
+        Job version1 = jobRepository.insert(new Job(null, scanRun.scanRun().id(), "SCAN", 1,
+                "PENDING", "DISCOVERY", 0, null, 0, 1, null, null, null));
 
         assertEquals(version1.id(), version1ExecutionService.findByScanRunId(scanRun.scanRun().id())
                 .orElseThrow().job().id());

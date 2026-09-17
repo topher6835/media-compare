@@ -108,7 +108,7 @@ The initial persistence implementation uses immutable Java records for row-shape
 ## Durable Full-Pipeline Persistence Foundation
 
 - Flyway V3 retains the eleven application tables and adds nullable `scan_run.request_key`, positive `job.execution_version` defaulting to 1, and nullable `job_stage.result_json`.
-- Reserve non-null request keys for future durable start idempotency. Historical and current ScanRuns keep null keys; a partial unique index permits multiple nulls but rejects duplicate non-null keys.
+- Reserve non-null request keys for durable start idempotency. Historical and v1 ScanRuns keep null keys; public v2 starts now use canonical UUID keys as described below. A partial unique index permits multiple nulls but rejects duplicate non-null keys.
 - Version 1 means the historical/current reconciliation-ending SCAN execution. Reserve version 2 for the future backend-owned DISCOVERY → RECONCILIATION → CONTENT_ASSIGNMENT → CONTENT_HASHING pipeline; current execution creation remains version 1.
 - Reserve `result_json` for bounded, typed, versioned stage summaries, initially assignment and hashing outcome counts. Current stages leave it null; do not treat it as generic arbitrary metadata.
 - Enforce at most one version-2 SCAN Job per ScanRun and one globally active (`PENDING` or `RUNNING`) version-2 SCAN Job with SQLite partial unique indexes. Version-1 Jobs, unrelated Job types, and terminal version-2 Jobs remain outside the global admission constraint.
@@ -201,7 +201,7 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Let one version-2 SCAN Job own `DISCOVERY → RECONCILIATION → CONTENT_ASSIGNMENT → CONTENT_HASHING → COMPLETED`. Reconciliation completes ScanRunSource traversal evidence but leaves the Job and ScanRun running.
 - Use V3's partial unique indexes as the race-safe admission authority: one v2 SCAN Job per ScanRun and one globally active v2 SCAN Job. Conditional stage updates provide single-claim semantics without Java locking.
 - Persist only typed version-1 assignment and hashing result summaries for now. Candidate hash skips/failures complete the lifecycle with issue counts; whole-stage failures atomically fail the current stage, Job, and ScanRun with a safe message.
-- Reuse the existing traversal, reconciliation, assignment, and hashing algorithms and their short writer transactions. The internal coordinator is synchronous and holds no pipeline-wide transaction. The next section records the implemented background handoff and startup recovery. Public v2 APIs, polling, and frontend cutover remain later work.
+- Reuse the existing traversal, reconciliation, assignment, and hashing algorithms and their short writer transactions. The internal coordinator is synchronous and holds no pipeline-wide transaction. The next section records the implemented background handoff and startup recovery. The following public-contract section records implemented v2 APIs/polling; frontend cutover remains later work.
 
 ## Internal Background Version-2 Execution
 
@@ -211,7 +211,17 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Add an internal nontransactional handoff around committed v2 creation, then explicitly submit to a dedicated core/max-one worker with queue capacity one and abort rejection. Reject ambient transactions so worker reads cannot race uncommitted creation. Keep the existing synchronous coordinator as the only pipeline implementation.
 - Scheduler rejection fails the durable accepted execution without caller-runs; worker exceptions finalize still-active executions without altering terminal ones. If persistence itself prevents finalization, log the durable IDs and require startup recovery, not automatic retry.
 - Stop submissions and allow up to 30 seconds on shutdown, then interrupt the worker. Interruption propagates out of candidate processing rather than becoming a skipped/failed count. Retain catalog ownership until process exit if the worker outlives the shutdown budget.
-- Restart means interrupted attempt `FAILED`, not transparent resume. A later attempt creates a new ScanRun. Public/frontend flow remains version 1; public v2 start/read contracts, request-key idempotency, polling, SSE, and frontend cutover remain deferred.
+- Restart means interrupted attempt `FAILED`, not transparent resume. A later attempt creates a new ScanRun. The existing frontend flow remains version 1. The following section records public v2 start/read contracts and idempotency; SSE and frontend cutover remain deferred.
+
+## Public Version-2 Indexing Contract
+
+- Add `/api/indexing-runs` independently of existing v1 routes. POST accepts a client UUID and 1–1,000 distinct positive Source IDs; normalize full UUID text to lowercase and compare payloads as `INDEX` plus the Source ID set, ignoring order.
+- Atomically accept ScanRun/request key, ScanRunSources, v2 Job, and pending DISCOVERY stage, then submit only after commit through the existing worker. Use SQLite write reservation before acceptance/ownership reads; exact unique-column failures distinguish request-key replay, Job admission conflict, and other integrity errors.
+- New acceptance returns 202 with Location; exact replay returns 200 without resubmission, including terminal executions. Key misuse and competing active v2 admission return 409; admission rollback leaves no orphan request. Scheduler rejection returns 503 and retains a failed attempt; replay returns that same failure. A new attempt requires a new key, never automatic retry/resume.
+- Normal v1/v2 service creation excludes competing ownership of a ScanRun; retain version-aware repositories for historical coexistence. Existing v1 frontend endpoints/DTOs remain compatible.
+- Add durable detail GET and a compact Source-status GET. Snapshot reads are transactional, read-only, and no-store. Source status uses two queries, orders Sources by ID, includes no-history Sources, and selects latest by ScanRun creation time plus ID. No new index/migration is justified for this increment.
+- Parse final summaries with existing codecs; do not expose raw JSON or internal schema versions. Malformed durable state yields a safe 500 with IDs logged. Derive `completedWithIssues` only from completed hashing skipped/failed counts; never persist another Job status or invent live progress.
+- Frontend cutover, SSE, cancellation, retry, and resume remain deferred.
 
 ## Development
 

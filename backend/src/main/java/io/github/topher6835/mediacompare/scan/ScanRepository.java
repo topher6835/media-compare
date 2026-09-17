@@ -63,6 +63,17 @@ public class ScanRepository {
                 resultSet.getString("error_message")), id).stream().findFirst();
     }
 
+    public Optional<Long> findScanRunIdByRequestKey(String requestKey) {
+        return jdbcTemplate.queryForList("SELECT id FROM scan_run WHERE request_key = ?", Long.class, requestKey)
+                .stream().findFirst();
+    }
+
+    /** Reserve SQLite's writer before acceptance/ownership reads, avoiding deferred read-to-write races.
+     * No row is changed. Must be called inside the short creation transaction, never from polling. */
+    public void reserveExecutionWrite() {
+        jdbcTemplate.update("UPDATE scan_run SET id = id WHERE 0");
+    }
+
     public ScanRunSource insert(ScanRunSource scanRunSource) {
         var keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
