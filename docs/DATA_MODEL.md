@@ -2,7 +2,7 @@
 
 ## Status and Scope
 
-The reviewed V1 persistence design is implemented by Flyway migration `V1__create_core_schema.sql`. Java Flyway migration `V2__add_file_entry_extension_key` evolves `file_entry` with normalized technical extension metadata and an index. SQL migration `V3__add_durable_indexing_foundation.sql` adds fields and partial unique indexes used by internal durable full-pipeline indexing. Neither migration adds a table: the application retains eleven tables, immutable Java record representations, and small Spring JDBC repositories supporting the public version-1 and internal version-2 workflows. Background execution and interruption recovery require no additional migration.
+The reviewed V1 persistence design is implemented by Flyway migration `V1__create_core_schema.sql`. Java Flyway migration `V2__add_file_entry_extension_key` evolves `file_entry` with normalized technical extension metadata and an index. SQL migration `V3__add_durable_indexing_foundation.sql` adds fields and partial unique indexes used by internal durable full-pipeline indexing. V4 adds nullable `analysis_record.result_json` for typed compact analysis results. These later migrations add no table: the application retains eleven tables, immutable Java record representations, and small Spring JDBC repositories supporting the public version-1 and internal version-2 workflows.
 
 The first migration contains exactly eleven application tables. The fields and constraints below describe the implemented schema.
 
@@ -191,6 +191,7 @@ Implemented fields:
 - `configuration_version INTEGER NOT NULL CHECK > 0`
 - `configuration_hash TEXT NOT NULL`
 - `configuration_json TEXT NOT NULL`
+- `result_json TEXT NULL` (added by V4)
 - `status TEXT NOT NULL`
 - `attempt_count INTEGER NOT NULL DEFAULT 0 CHECK >= 0`
 - `created_at_ms INTEGER NOT NULL`
@@ -216,6 +217,8 @@ UNIQUE(
 `configuration_json` is retained for provenance and explainability, but is not part of this uniqueness constraint.
 
 Only successfully completed records with complete specialized results may be reused. The implemented exact SHA-256 definition uses `analysis_type = CONTENT_HASH`, `analyzer_id = builtin.sha256`, analyzer version `1`, configuration version `1`, configuration JSON `{}`, and the lowercase SHA-256 hash of that exact UTF-8 JSON. Newly published rows are `COMPLETED` with attempt count one, start/create timestamps from hashing start, a finish timestamp, and no error. A non-completed exact-key record is not overwritten; separate retry infrastructure remains deferred.
+
+`MEDIA_METADATA` uses V4's `result_json` for a strict version-1 `AVAILABLE` image/video payload or `UNSUPPORTED` outcome. Generic metadata mechanics accept extractor-specific analyzer/version/configuration identity rather than defining ImageIO or ffprobe provenance prematurely. New extraction candidates are deduplicated and paged by ContentRecord ID; their current present occurrences are independently paged by FileEntry ID. An existing compatible cache-key row blocks duplicate scheduling, and only a completed typed result is reusable. Publication uses one occurrence's snapshotted Source/FileEntry/ContentRecord evidence and attaches the result only if all catalog evidence remains current. Completed compatible results remain reusable after occurrences become missing. No SHA-256 prerequisite or cross-ContentRecord reuse by equal digest exists.
 
 ### `content_hash`
 

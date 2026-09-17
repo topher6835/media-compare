@@ -35,6 +35,8 @@ This file records decisions already made. It distinguishes the reviewed V1 imple
 - Use a general AnalysisRecord for analysis provenance, version/configuration, and lifecycle, with specialized structures for queryable results rather than placing every result in generic JSON.
 - Reuse analysis only when type, analyzer/model/provider, version, and configuration are compatible; preserve prior artifacts when those inputs change.
 - Keep filesystem metadata on FileEntry and media-derived metadata in ContentRecord analysis, so moves and renames do not invalidate compatible analysis.
+- Enumerate new media-metadata work by ContentRecord and page its current present FileEntry occurrences separately in ascending ID order. Use any still-valid occurrence, require filesystem validation before and after extraction, and transactionally revalidate the Source/FileEntry/ContentRecord snapshot before publication. Stale evidence produces no analysis result and does not poison later occurrences.
+- Keep generic media-metadata cache/publication mechanics analyzer-agnostic. Extractor-specific code must supply analyzer/version/configuration identity; equal SHA-256 digests do not create cross-ContentRecord metadata reuse.
 - Keep face analyzer output, detected faces, and embeddings separate from later human person or group classification.
 - Keep AI optional and provider-independent; local and cloud providers may coexist under the same provenance/versioning model.
 - Keep large derived files in a future application-managed cache rather than as large SQLite BLOBs; SQLite holds the catalog and compact/queryable artifacts.
