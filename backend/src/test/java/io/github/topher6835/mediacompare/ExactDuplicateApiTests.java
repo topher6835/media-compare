@@ -498,6 +498,7 @@ class ExactDuplicateApiTests {
                 configurationVersion,
                 configurationHash,
                 configurationJson,
+                null,
                 status,
                 1,
                 1,

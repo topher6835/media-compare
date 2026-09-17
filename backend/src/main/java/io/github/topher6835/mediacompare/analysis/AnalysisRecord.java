@@ -9,6 +9,7 @@ public record AnalysisRecord(
         long configurationVersion,
         String configurationHash,
         String configurationJson,
+        String resultJson,
         String status,
         long attemptCount,
         long createdAtMs,

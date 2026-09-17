@@ -26,9 +26,9 @@ public class AnalysisRepository {
             PreparedStatement statement = connection.prepareStatement("""
                     INSERT INTO analysis_record (
                         content_record_id, analysis_type, analyzer_id, analyzer_version,
-                        configuration_version, configuration_hash, configuration_json, status,
+                        configuration_version, configuration_hash, configuration_json, result_json, status,
                         attempt_count, created_at_ms, started_at_ms, finished_at_ms, error_message
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, Statement.RETURN_GENERATED_KEYS);
             statement.setLong(1, analysisRecord.contentRecordId());
             statement.setString(2, analysisRecord.analysisType());
@@ -37,19 +37,20 @@ public class AnalysisRepository {
             statement.setLong(5, analysisRecord.configurationVersion());
             statement.setString(6, analysisRecord.configurationHash());
             statement.setString(7, analysisRecord.configurationJson());
-            statement.setString(8, analysisRecord.status());
-            statement.setLong(9, analysisRecord.attemptCount());
-            statement.setLong(10, analysisRecord.createdAtMs());
-            setNullableLong(statement, 11, analysisRecord.startedAtMs());
-            setNullableLong(statement, 12, analysisRecord.finishedAtMs());
-            statement.setString(13, analysisRecord.errorMessage());
+            statement.setString(8, analysisRecord.resultJson());
+            statement.setString(9, analysisRecord.status());
+            statement.setLong(10, analysisRecord.attemptCount());
+            statement.setLong(11, analysisRecord.createdAtMs());
+            setNullableLong(statement, 12, analysisRecord.startedAtMs());
+            setNullableLong(statement, 13, analysisRecord.finishedAtMs());
+            statement.setString(14, analysisRecord.errorMessage());
             return statement;
         }, keyHolder);
 
         return new AnalysisRecord(generatedId(keyHolder), analysisRecord.contentRecordId(),
                 analysisRecord.analysisType(), analysisRecord.analyzerId(), analysisRecord.analyzerVersion(),
                 analysisRecord.configurationVersion(), analysisRecord.configurationHash(),
-                analysisRecord.configurationJson(), analysisRecord.status(), analysisRecord.attemptCount(),
+                analysisRecord.configurationJson(), analysisRecord.resultJson(), analysisRecord.status(), analysisRecord.attemptCount(),
                 analysisRecord.createdAtMs(), analysisRecord.startedAtMs(), analysisRecord.finishedAtMs(),
                 analysisRecord.errorMessage());
     }
@@ -65,6 +66,7 @@ public class AnalysisRepository {
                         resultSet.getLong("configuration_version"),
                         resultSet.getString("configuration_hash"),
                         resultSet.getString("configuration_json"),
+                        resultSet.getString("result_json"),
                         resultSet.getString("status"),
                         resultSet.getLong("attempt_count"),
                         resultSet.getLong("created_at_ms"),
@@ -94,6 +96,7 @@ public class AnalysisRepository {
                         resultSet.getLong("configuration_version"),
                         resultSet.getString("configuration_hash"),
                         resultSet.getString("configuration_json"),
+                        resultSet.getString("result_json"),
                         resultSet.getString("status"),
                         resultSet.getLong("attempt_count"),
                         resultSet.getLong("created_at_ms"),

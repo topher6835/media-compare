@@ -115,6 +115,64 @@ class DurableIndexingMigrationTests {
     }
 
     @Test
+    void v4AddsNullableResultJsonWithoutChangingExistingExactHashArtifacts() throws Exception {
+        String databaseUrl = databaseUrl("metadata-result-upgrade.db");
+        migrateToV3(databaseUrl);
+
+        try (Connection connection = DriverManager.getConnection(databaseUrl)) {
+            connection.createStatement().executeUpdate("""
+                    INSERT INTO content_record (id, size_bytes, created_at_ms) VALUES (10, 42, 1)
+                    """);
+            connection.createStatement().executeUpdate("""
+                    INSERT INTO analysis_record (
+                        id, content_record_id, analysis_type, analyzer_id, analyzer_version,
+                        configuration_version, configuration_hash, configuration_json, status,
+                        attempt_count, created_at_ms, started_at_ms, finished_at_ms
+                    ) VALUES (20, 10, 'CONTENT_HASH', 'builtin.sha256', '1', 1, 'config', '{}',
+                        'COMPLETED', 1, 2, 2, 3)
+                    """);
+            connection.createStatement().executeUpdate("""
+                    INSERT INTO content_hash (analysis_record_id, algorithm, digest_hex)
+                    VALUES (20, 'SHA-256', 'abc123')
+                    """);
+        }
+
+        migrateLatest(databaseUrl);
+
+        try (Connection connection = DriverManager.getConnection(databaseUrl);
+                var rows = connection.createStatement().executeQuery("""
+                        SELECT analysis_record.result_json, content_hash.algorithm, content_hash.digest_hex
+                        FROM analysis_record
+                        JOIN content_hash ON content_hash.analysis_record_id = analysis_record.id
+                        WHERE analysis_record.id = 20
+                        """)) {
+            assertTrue(rows.next());
+            assertNull(rows.getString("result_json"));
+            assertEquals("SHA-256", rows.getString("algorithm"));
+            assertEquals("abc123", rows.getString("digest_hex"));
+            assertFalse(rows.next());
+        }
+    }
+
+    @Test
+    void latestMigrationCreatesNullableAnalysisResultJsonOnFreshDatabase() throws Exception {
+        String databaseUrl = databaseUrl("metadata-result-fresh.db");
+        migrateLatest(databaseUrl);
+
+        try (Connection connection = DriverManager.getConnection(databaseUrl);
+                var columns = connection.createStatement().executeQuery("PRAGMA table_info('analysis_record')")) {
+            boolean found = false;
+            while (columns.next()) {
+                if ("result_json".equals(columns.getString("name"))) {
+                    found = true;
+                    assertEquals(0, columns.getInt("notnull"));
+                }
+            }
+            assertTrue(found);
+        }
+    }
+
+    @Test
     void v3EnforcesRequestKeyAndFutureV2AdmissionConstraints() throws Exception {
         String databaseUrl = databaseUrl("constraints.db");
         migrateLatest(databaseUrl);
@@ -173,6 +231,15 @@ class DurableIndexingMigrationTests {
                 .dataSource(databaseUrl, null, null)
                 .locations("classpath:db/migration")
                 .target(MigrationVersion.fromVersion("2"))
+                .load()
+                .migrate();
+    }
+
+    private void migrateToV3(String databaseUrl) {
+        Flyway.configure()
+                .dataSource(databaseUrl, null, null)
+                .locations("classpath:db/migration")
+                .target(MigrationVersion.fromVersion("3"))
                 .load()
                 .migrate();
     }

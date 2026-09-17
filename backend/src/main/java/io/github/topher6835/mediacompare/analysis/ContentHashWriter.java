@@ -38,6 +38,7 @@ public class ContentHashWriter {
                 Sha256AnalysisDefinition.CONFIGURATION_VERSION,
                 Sha256AnalysisDefinition.CONFIGURATION_HASH,
                 Sha256AnalysisDefinition.CONFIGURATION_JSON,
+                null,
                 COMPLETED_STATUS,
                 1,
                 startedAtMs,

@@ -470,7 +470,7 @@ class ContentHashingApiTests {
         analysisRepository.insert(new AnalysisRecord(
                 null, pending.contentRecordId(), pending.analysisType(), pending.analyzerId(),
                 pending.analyzerVersion(), pending.configurationVersion(), pending.configurationHash(),
-                pending.configurationJson(), "RUNNING", 1, 10, 10L, null, null));
+                pending.configurationJson(), null, "RUNNING", 1, 10, 10L, null, null));
         Files.delete(root.resolve("candidate.dat"));
         Files.delete(root);
 
@@ -570,7 +570,7 @@ class ContentHashingApiTests {
                 null, contentRecordId, Sha256AnalysisDefinition.ANALYSIS_TYPE,
                 Sha256AnalysisDefinition.ANALYZER_ID, Sha256AnalysisDefinition.ANALYZER_VERSION,
                 Sha256AnalysisDefinition.CONFIGURATION_VERSION, Sha256AnalysisDefinition.CONFIGURATION_HASH,
-                Sha256AnalysisDefinition.CONFIGURATION_JSON, "COMPLETED", 1,
+                Sha256AnalysisDefinition.CONFIGURATION_JSON, null, "COMPLETED", 1,
                 startedAtMs, startedAtMs, finishedAtMs, null);
     }
 
@@ -581,6 +581,7 @@ class ContentHashingApiTests {
         assertEquals(Sha256AnalysisDefinition.CONFIGURATION_VERSION, analysisRecord.configurationVersion());
         assertEquals(Sha256AnalysisDefinition.CONFIGURATION_HASH, analysisRecord.configurationHash());
         assertEquals(Sha256AnalysisDefinition.CONFIGURATION_JSON, analysisRecord.configurationJson());
+        assertNull(analysisRecord.resultJson());
         assertEquals("COMPLETED", analysisRecord.status());
         assertEquals(1, analysisRecord.attemptCount());
         assertEquals(analysisRecord.createdAtMs(), analysisRecord.startedAtMs());

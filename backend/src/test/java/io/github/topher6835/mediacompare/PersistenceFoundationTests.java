@@ -355,7 +355,7 @@ class PersistenceFoundationTests {
 
     private AnalysisRecord analysisRecord(long contentRecordId, String configurationHash, String configurationJson) {
         return new AnalysisRecord(null, contentRecordId, "EXACT_HASH", "java-message-digest", "1",
-                1, configurationHash, configurationJson, "PENDING", 0, 1, null, null, null);
+                1, configurationHash, configurationJson, null, "PENDING", 0, 1, null, null, null);
     }
 
     private void insertFileEntryDirectly(long sourceId, Long modifiedSecond, Integer modifiedNano) {
