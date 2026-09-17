@@ -489,6 +489,7 @@ export function SourcesPage() {
           showStartMessage(
             'Indexing state changed in another request. The durable Source status has been refreshed.',
             false,
+            true,
           )
           try {
             await refreshCollection()
@@ -692,8 +693,9 @@ export function SourcesPage() {
                   : null
               const displayRun = freshActiveDetail ?? latest
               const isActiveSource =
-                displayRun?.scanRunId === effectiveActiveRun?.scanRunId ||
-                effectiveActiveSourceIds.includes(status.sourceId)
+                effectiveActiveRun !== null &&
+                (displayRun?.scanRunId === effectiveActiveRun.scanRunId ||
+                  effectiveActiveSourceIds.includes(status.sourceId))
               const activeSourceRun =
                 displayRun?.scanRunId === effectiveActiveRun?.scanRunId
                   ? displayRun
