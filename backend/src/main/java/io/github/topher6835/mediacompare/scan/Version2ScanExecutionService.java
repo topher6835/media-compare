@@ -73,9 +73,13 @@ public class Version2ScanExecutionService {
     }
 
     public ScanExecutionDetails run(long scanRunId) {
+        IndexingInterruptedException.check();
         discoveryService.executeVersion2Discovery(scanRunId);
+        IndexingInterruptedException.check();
         reconciliationService.executeVersion2(scanRunId);
+        IndexingInterruptedException.check();
         assignmentService.execute(scanRunId);
+        IndexingInterruptedException.check();
         hashingService.execute(scanRunId);
         return findByScanRunId(scanRunId).orElseThrow();
     }

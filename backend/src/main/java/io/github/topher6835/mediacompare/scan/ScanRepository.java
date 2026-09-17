@@ -165,6 +165,13 @@ public class ScanRepository {
                 """, completedAtMs, scanRunId);
     }
 
+    public int failNonterminalScanRun(long scanRunId, long failedAtMs, String message) {
+        return jdbcTemplate.update("""
+                UPDATE scan_run SET status = 'FAILED', finished_at_ms = ?, error_message = ?
+                WHERE id = ? AND status IN ('PENDING', 'RUNNING')
+                """, failedAtMs, message, scanRunId);
+    }
+
     private static long generatedId(GeneratedKeyHolder keyHolder) {
         return Objects.requireNonNull(keyHolder.getKey(), "Database did not return a generated key").longValue();
     }

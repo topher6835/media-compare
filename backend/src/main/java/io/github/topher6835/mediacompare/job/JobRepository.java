@@ -364,6 +364,22 @@ public class JobRepository {
                 """, failedAtMs, errorMessage, jobId, stageType);
     }
 
+    public List<Job> findActiveVersion2ScanJobs() {
+        return jdbcTemplate.query("""
+                SELECT * FROM job WHERE job_type = 'SCAN' AND execution_version = 2
+                  AND status IN ('PENDING', 'RUNNING') ORDER BY id
+                """, JobRepository::mapJob);
+    }
+
+    public int failActiveVersion2Job(long jobId, long failedAtMs, String message) {
+        return jdbcTemplate.update("""
+                UPDATE job SET status = 'FAILED', current_stage_type = NULL,
+                    finished_at_ms = ?, error_message = ?
+                WHERE id = ? AND job_type = 'SCAN' AND execution_version = 2
+                  AND status IN ('PENDING', 'RUNNING')
+                """, failedAtMs, message, jobId);
+    }
+
     private static long generatedId(GeneratedKeyHolder keyHolder) {
         return Objects.requireNonNull(keyHolder.getKey(), "Database did not return a generated key").longValue();
     }

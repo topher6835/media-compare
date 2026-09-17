@@ -15,11 +15,11 @@ The repository currently contains a working full-stack scaffold:
 - A synchronous command that executes the pending RECONCILIATION stage and completes a ScanRun.
 - A synchronous database-only command that assigns ContentRecords to eligible completed-scan observations.
 - A synchronous command that publishes exact SHA-256 analysis for safe assigned-content candidates.
-- An internal synchronous version-2 coordinator whose one SCAN Job owns DISCOVERY, RECONCILIATION, CONTENT_ASSIGNMENT, and CONTENT_HASHING.
+- An internal background version-2 handoff using the synchronous coordinator whose one SCAN Job owns DISCOVERY, RECONCILIATION, CONTENT_ASSIGNMENT, and CONTENT_HASHING.
 - Read-only APIs that derive exact duplicate groups and retained occurrences from trusted SHA-256 artifacts, with catalog-correct file-category and extension filtering.
 - Frontend `/sources`, `/duplicates`, and `/duplicates/:digestHex` routes for Source registration/indexing and derived exact-group browsing, in addition to the `/` health route.
 
-The reviewed persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven application tables, structural constraints, foreign keys, and initial indexes. Java migration `V2__add_file_entry_extension_key` adds and backfills normalized FileEntry extension metadata plus its lookup index without adding a table. SQL migration `V3__add_durable_indexing_foundation.sql` retains those eleven tables while adding a future request idempotency key, an execution version, nullable stage-result storage, and database admission constraints for version-2 SCAN Jobs. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, `analysis`, and `matching` feature packages. Source registration/read, both execution versions, the four-stage internal version-2 lifecycle, exact analysis, and derived duplicate reporting/filtering are implemented. The public API and frontend remain version 1 and browser-orchestrated; background execution, polling, startup recovery, and frontend version-2 cutover do not exist yet.
+The reviewed persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven application tables, structural constraints, foreign keys, and initial indexes. Java migration `V2__add_file_entry_extension_key` adds and backfills normalized FileEntry extension metadata plus its lookup index without adding a table. SQL migration `V3__add_durable_indexing_foundation.sql` retains those eleven tables while adding a future request idempotency key, an execution version, nullable stage-result storage, and database admission constraints for version-2 SCAN Jobs. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, `analysis`, and `matching` feature packages. Source registration/read, both execution versions, the four-stage internal version-2 lifecycle, exact analysis, and derived duplicate reporting/filtering are implemented. The public API and frontend remain version 1 and browser-orchestrated; internal background execution and startup interruption recovery are implemented, while public v2 APIs, polling, and frontend cutover remain deferred.
 
 ## Architectural Style
 
@@ -83,7 +83,7 @@ A `ContentRecord` represents one immutable byte-version independently of locatio
 
 Revisiting a Source performs lightweight discovery and reconciliation before expensive analysis. Each root traversal receives a fresh positive traversal generation. A missing-file sweep is permitted only after a complete successful traversal of the intended scope. Interrupted, cancelled, incomplete, inaccessible, or offline scans do not mark previously known files missing. The missing update and completed-generation state are committed together.
 
-`observation_revision` allows future workers to reject stale publication after a FileEntry may have changed. Discovery may restart after application shutdown; fragile filesystem iterator cursors are not persisted. Directory-level traversal checkpoints remain deferred.
+`observation_revision` allows future workers to reject stale publication after a FileEntry may have changed. A later new ScanRun may rediscover after application shutdown; fragile filesystem iterator cursors are not persisted. Directory-level traversal checkpoints remain deferred.
 
 The implemented DISCOVERY command is manually and synchronously invoked through `POST /api/scan-runs/{id}/execution/discovery`. Before filesystem work or state mutation, it verifies the ScanRun Source snapshots against every current Source location revision and verifies that the SCAN Job and DISCOVERY stage are pending and eligible. It then starts the ScanRun, Job, stage, and Source traversal state in a short transaction.
 
@@ -127,7 +127,7 @@ The list appends keyset pages with duplicate-digest protection and retains loade
 
 The detail route preserves URL filters, uses the full digest as identity while displaying a non-authoritative `DUP-` label from its first eight hexadecimal characters, and requests the complete group with match context. It highlights matching occurrences, keeps every nonmatching occurrence visible, and derives whole-group extension display from backend occurrence extensions. A bounded, session-memory-only trail records duplicate-group visits and preserves current filters. None of this frontend state is persisted.
 
-Filesystem failure marks every ScanRunSource participating in that started DISCOVERY attempt, the DISCOVERY stage, Job, and ScanRun failed without creating RECONCILIATION or marking any FileEntry missing. This ensures no child of the terminally failed attempt remains `DISCOVERING`. Earlier committed observation batches remain tagged with their incomplete generations; `completed_generation` remains null, so those partial observations do not authorize a missing sweep. Retry and recovery behavior is not implemented.
+Filesystem failure marks every ScanRunSource participating in that started DISCOVERY attempt, the DISCOVERY stage, Job, and ScanRun failed without creating RECONCILIATION or marking any FileEntry missing. This ensures no child of the terminally failed attempt remains `DISCOVERING`. Earlier committed observation batches remain tagged with their incomplete generations; `completed_generation` remains null, so those partial observations do not authorize a missing sweep. Public v1 retry/recovery is not implemented; internal v2 interruption recovery is described below.
 
 `ScanRun` records user intent, selected Sources or WorkingSet, request type, options, and lifecycle. Its options become immutable when execution begins. The first implemented request creation accepts one or more registered Source IDs and atomically writes one ScanRun plus its ScanRunSource rows. It uses request type `INDEX`, initial status `PENDING`, options version `1`, and effective options `{}`. Each child begins `PENDING`, snapshots the Source's current location revision, and has traversal generation `0` with no completion or execution state. Child responses are ordered by Source ID.
 
@@ -137,7 +137,19 @@ The current API permits at most one sequentially created `SCAN` execution handof
 
 V3 reserves `scan_run.request_key` for future durable start-request idempotency, distinguishes public/historical version-1 Jobs from internal full-pipeline version-2 Jobs with `job.execution_version`, and provides nullable `job_stage.result_json` for bounded, typed, versioned assignment and hashing summaries. Partial unique indexes allow at most one version-2 SCAN Job per ScanRun and at most one globally active (`PENDING` or `RUNNING`) version-2 SCAN Job. They do not constrain version-1 Jobs or unrelated Job types. The internal v2 creation service translates database constraint races to a domain conflict; none of the new internal fields or services changes existing public response shapes.
 
-Execution state is durable across application shutdown. Version 2 is currently synchronous and internal; no executor discovers or resumes it. The approved later startup policy will mark interrupted active executions failed rather than transparently resuming them. Background scheduling, polling/read recovery, interruption handling, cancellation, frontend cutover, and stage-instance history remain unimplemented.
+### Internal Background Execution and Startup Safety
+
+`CatalogConfiguration` acquires `CatalogOwnership` before constructing the datasource, so even Flyway writes require ownership. The lock derives from `spring.datasource.url`: resolve the local catalog path (including existing symlinks), append `.lock`, and hold a Java NIO `FileChannel.tryLock()` OS lock. A second backend fails startup clearly. The file is not deleted on release. Plain SQLite paths and local `file:` URIs are supported; in-memory SQLite catalogs have no cross-process persistence and need no file lock. Local filesystem use is required; hard-link aliases are not a supported way to configure the same catalog.
+
+After Flyway, `Version2IndexingStartup` calls a transaction-proxied recovery method for each active v2 SCAN Job. The executor depends on successful startup recovery, making ownership → schema → recovery → submission deterministic. Impossible lifecycle state aborts startup and logs Job/ScanRun/stage IDs rather than guessing a repair.
+
+Recovery fails each `PENDING`/`RUNNING` Job, clears its current stage, and fails its nonterminal ScanRun with `Execution interrupted by application restart` and a shared finish timestamp. Only the actual `RUNNING` stage is failed. Never-started stages stay `PENDING`, completed stages and their final results remain unchanged. During discovery, actively `DISCOVERING` Source rows become `FAILED` without reconciling or removing observations. At/between reconciliation boundaries, `DISCOVERED` rows remain as successful discovery evidence (not active traversal), and already `COMPLETED` Source rows retain their committed missing sweeps and generations. Assignment associations and published hash artifacts are untouched. Terminal Jobs and version-1 Jobs are not recovered. No stage is automatically resumed or retried; a later attempt needs a new ScanRun.
+
+`Version2BackgroundIndexingService.start(scanRunId)` rejects ambient transactions, calls the existing transactional v2 creation service, then submits only after that call commits. It returns durable ScanRun/Job identity immediately; no controller exposes it. `Version2IndexingExecutor` owns a dedicated `ThreadPoolExecutor`: core/max 1, queue 1, named thread, abort rejection, never caller-runs. The worker invokes the existing `Version2ScanExecutionService.run(...)` without a pipeline-wide transaction. Escaping failures inspect durable state and finalize still-active execution; already-finalized stage failures remain unchanged. Rejected submission fails the accepted Job/ScanRun with `Execution could not be scheduled`, retaining the pending stage and releasing admission.
+
+Shutdown closes submission, waits up to 30 seconds, then interrupts active work and discards queued tasks; unfinished durable attempts are recovered on next startup. Checks between stages, discovery batches/directories, assignment pages/candidates, and hash candidates/stream chunks propagate interruption rather than counting it as a failed candidate. If a worker still has not terminated at the deadline, the OS lock is conservatively retained until process exit, even if the Spring context closes. Filesystem calls are not guaranteed interruptible. If the failure-finalization transaction itself cannot persist, an error is logged and startup recovery is required; it does not retry work.
+
+Public v2 start/read APIs, request-key idempotency, polling, cancellation, frontend cutover, SSE, and stage-instance history remain deferred.
 
 ## Working Sets and Analysis
 
@@ -297,7 +309,7 @@ The frontend consumes that slice as:
     -> filter-keyed browser-memory list context and recent-visit trail
 ```
 
-These commands and reads run synchronously in their HTTP requests. Refresh-safe orchestration recovery, scheduler/background execution, simultaneous-call hardening, retry/recovery, materialized equality decisions, and SSE remain deferred.
+These commands and reads run synchronously in their HTTP requests. Refresh-safe orchestration recovery, public v2 cutover, version-1 simultaneous-call hardening and retry/recovery, materialized equality decisions, and SSE remain deferred.
 
 ## SQLite and Cross-Platform Requirements
 
@@ -316,7 +328,7 @@ The following remain open after the V1 review:
 - Final symlink and Windows junction traversal behavior.
 - Detailed path equivalence beyond the V1 lossless key policy.
 - ContentRecord reconciliation/merge behavior.
-- Job scheduling, concurrency, cancellation, retries, and startup recovery.
+- Scheduling beyond the bounded v2 worker, public cancellation/retries, and future resume.
 - Detailed scan scope representation and source-specific progress.
 - Specialized result schemas beyond `content_hash`.
 - Candidate, similarity, materialized relationship/grouping, and manual override schemas.

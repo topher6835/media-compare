@@ -15,6 +15,7 @@ import java.util.HexFormat;
 import java.util.Set;
 
 import io.github.topher6835.mediacompare.catalog.ContentHashCandidate;
+import io.github.topher6835.mediacompare.scan.IndexingInterruptedException;
 
 import org.springframework.stereotype.Component;
 
@@ -33,6 +34,7 @@ public class ContentHashFileHasher {
         try (SeekableByteChannel channel = Files.newByteChannel(
                 file, Set.of(StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS))) {
             while (channel.read(buffer) != -1) {
+                IndexingInterruptedException.check();
                 buffer.flip();
                 digest.update(buffer);
                 buffer.clear();

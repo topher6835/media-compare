@@ -50,6 +50,7 @@ public class ReconciliationService {
         try {
             long progressCompleted = 0;
             for (ScanRunSource source : plan.sources()) {
+                IndexingInterruptedException.check();
                 progressCompleted++;
                 reconciliationWriter.reconcile(
                         plan.job().id(), plan.reconciliationStage().id(), executionVersion,
@@ -59,6 +60,7 @@ public class ReconciliationService {
             executionState.complete(scanRunId, plan.job(), plan.reconciliationStage(), sourceCount,
                     System.currentTimeMillis());
         } catch (RuntimeException exception) {
+            IndexingInterruptedException.propagateIfInterrupted(exception);
             if (executionVersion != ScanExecutionDefinition.VERSION_2) {
                 throw exception;
             }

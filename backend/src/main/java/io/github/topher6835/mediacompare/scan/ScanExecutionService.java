@@ -119,12 +119,15 @@ public class ScanExecutionService {
         DiscoverySource activeSource = plan.sources().getFirst();
         try {
             for (DiscoverySource source : plan.sources()) {
+                IndexingInterruptedException.check();
                 activeSource = source;
                 discoveredCount = walkSource(plan.job(), plan.discoveryStage(), source, discoveredCount);
             }
+            IndexingInterruptedException.check();
             executionState.complete(plan.job(), plan.discoveryStage(), plan.sources(), discoveredCount,
                     System.currentTimeMillis());
         } catch (IOException | InvalidPathException | SecurityException exception) {
+            IndexingInterruptedException.propagateIfInterrupted(exception);
             String errorMessage = executionVersion == ScanExecutionDefinition.VERSION_2
                     ? safeDiscoveryError(activeSource.source())
                     : discoveryError(activeSource.source(), exception);
@@ -132,6 +135,7 @@ public class ScanExecutionService {
                     System.currentTimeMillis(), errorMessage);
             throw new DiscoveryExecutionFailedException(errorMessage, exception);
         } catch (RuntimeException exception) {
+            IndexingInterruptedException.propagateIfInterrupted(exception);
             if (executionVersion != ScanExecutionDefinition.VERSION_2) {
                 throw exception;
             }
@@ -221,6 +225,7 @@ public class ScanExecutionService {
     }
 
     private long flushBatch(Job job, JobStage discoveryStage, List<FileObservation> batch, long previousCount) {
+        IndexingInterruptedException.check();
         long progressCompleted = previousCount + batch.size();
         batchWriter.write(job.id(), discoveryStage.id(), job.executionVersion(),
                 List.copyOf(batch), progressCompleted);

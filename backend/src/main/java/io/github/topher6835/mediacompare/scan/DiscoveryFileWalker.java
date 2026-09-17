@@ -25,7 +25,14 @@ public class DiscoveryFileWalker {
 
         Files.walkFileTree(root, new SimpleFileVisitor<>() {
             @Override
+            public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) {
+                IndexingInterruptedException.check();
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
+                IndexingInterruptedException.check();
                 if (attributes.isRegularFile() && !attributes.isSymbolicLink()) {
                     Path relativePath = root.relativize(file);
                     Instant modifiedTime = attributes.lastModifiedTime().toInstant();

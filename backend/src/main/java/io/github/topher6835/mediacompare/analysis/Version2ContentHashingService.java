@@ -6,6 +6,7 @@ import java.util.NoSuchElementException;
 import io.github.topher6835.mediacompare.job.Job;
 import io.github.topher6835.mediacompare.job.JobRepository;
 import io.github.topher6835.mediacompare.job.JobStage;
+import io.github.topher6835.mediacompare.scan.IndexingInterruptedException;
 import io.github.topher6835.mediacompare.scan.ScanExecutionDefinition;
 import io.github.topher6835.mediacompare.scan.ScanRepository;
 import io.github.topher6835.mediacompare.scan.ScanRun;
@@ -42,6 +43,7 @@ public class Version2ContentHashingService {
 
         try {
             ContentHashingResult hashing = contentHashingService.hashSources(scanRunId, plan.sources());
+            IndexingInterruptedException.check();
             ContentHashingStageResult result = ContentHashingStageResult.from(hashing);
             long processedCount = result.hashedCount() + result.cachedCount()
                     + result.skippedCount() + result.failedCount();
@@ -49,6 +51,7 @@ public class Version2ContentHashingService {
                     resultCodec.write(result), processedCount, System.currentTimeMillis());
             return result;
         } catch (RuntimeException exception) {
+            IndexingInterruptedException.propagateIfInterrupted(exception);
             String errorMessage = "Content hashing failed";
             executionState.failCurrentStage(
                     scanRunId, plan.job(), plan.stage(), System.currentTimeMillis(), errorMessage);

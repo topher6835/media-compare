@@ -13,6 +13,7 @@ import io.github.topher6835.mediacompare.catalog.Source;
 import io.github.topher6835.mediacompare.job.Job;
 import io.github.topher6835.mediacompare.job.JobRepository;
 import io.github.topher6835.mediacompare.job.JobStage;
+import io.github.topher6835.mediacompare.scan.IndexingInterruptedException;
 import io.github.topher6835.mediacompare.scan.ScanRepository;
 import io.github.topher6835.mediacompare.scan.ScanExecutionDefinition;
 import io.github.topher6835.mediacompare.scan.ScanRun;
@@ -59,6 +60,7 @@ public class ContentHashingService {
         for (ScanRunSource scanRunSource : sources) {
             long afterFileEntryId = 0;
             while (true) {
+                IndexingInterruptedException.check();
                 List<ContentHashCandidate> candidates = catalogRepository.findContentHashCandidates(
                         scanRunSource.id(), scanRunSource.completedGeneration(),
                         afterFileEntryId, PAGE_SIZE);
@@ -67,6 +69,7 @@ public class ContentHashingService {
                 }
 
                 for (ContentHashCandidate candidate : candidates) {
+                    IndexingInterruptedException.check();
                     afterFileEntryId = candidate.fileEntryId();
                     CacheState cacheState = cacheState(candidate);
                     if (cacheState == CacheState.REUSABLE) {
@@ -93,13 +96,16 @@ public class ContentHashingService {
                     try {
                         String digestHex = fileHasher.hash(
                                 Path.of(source.rootPath()), candidate);
+                        IndexingInterruptedException.check();
                         contentHashWriter.publish(
                                 candidate, digestHex, startedAtMs, System.currentTimeMillis());
                         hashedCount++;
                     } catch (StaleContentHashException exception) {
+                        IndexingInterruptedException.propagateIfInterrupted(exception);
                         skippedCount++;
                     } catch (IOException | InvalidPathException | SecurityException
                             | UnsupportedOperationException exception) {
+                        IndexingInterruptedException.propagateIfInterrupted(exception);
                         failedCount++;
                     }
                 }

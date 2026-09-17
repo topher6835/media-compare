@@ -45,6 +45,7 @@ public class ContentAssignmentService {
         for (ScanRunSource source : sources) {
             long afterFileEntryId = 0;
             while (true) {
+                IndexingInterruptedException.check();
                 List<ContentAssignmentCandidate> candidates = catalogRepository.findContentAssignmentCandidates(
                         source.id(), source.completedGeneration(), afterFileEntryId, PAGE_SIZE);
                 if (candidates.isEmpty()) {
@@ -52,6 +53,7 @@ public class ContentAssignmentService {
                 }
 
                 for (ContentAssignmentCandidate candidate : candidates) {
+                    IndexingInterruptedException.check();
                     afterFileEntryId = candidate.fileEntryId();
                     try {
                         contentAssignmentWriter.assign(candidate, System.currentTimeMillis());

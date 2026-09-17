@@ -2,11 +2,11 @@
 
 ## Current State
 
-Media Compare is a fresh v2 repository with a working full-stack scaffold. The backend supports the existing public version-1 indexing workflow and an internal synchronous version-2 lifecycle in which one durable SCAN Job owns DISCOVERY, RECONCILIATION, CONTENT_ASSIGNMENT, and CONTENT_HASHING. It also derives and catalog-correctly filters exact duplicate groups through REST. The frontend can register and browse Sources, launch the existing version-1 pipeline through exact hashing, follow its stage and supplied counts, then browse/filter exact duplicate groups and inspect complete group/member/occurrence context. Broader library/review workflows, media analysis, similarity matching, materialized decisions, and cleanup are not implemented.
+Media Compare is a fresh v2 repository with a working full-stack scaffold. The backend supports the existing public version-1 indexing workflow and an internal background version-2 lifecycle in which one durable SCAN Job owns DISCOVERY, RECONCILIATION, CONTENT_ASSIGNMENT, and CONTENT_HASHING. It also derives and catalog-correctly filters exact duplicate groups through REST. The frontend can register and browse Sources, launch the existing version-1 pipeline through exact hashing, follow its stage and supplied counts, then browse/filter exact duplicate groups and inspect complete group/member/occurrence context. Broader library/review workflows, media analysis, similarity matching, materialized decisions, and cleanup are not implemented.
 
 The backend is a Java 21 and Spring Boot 4.1.1 Maven application. It connects to a local SQLite database, starts Flyway, exposes `GET /api/health`, provides Source endpoints under `/api/sources`, scan-request endpoints under `/api/scan-runs`, execution-handoff endpoints under `/api/scan-runs/{id}/execution`, synchronous DISCOVERY and RECONCILIATION POST endpoints, `POST /api/scan-runs/{id}/content-assignment`, `POST /api/scan-runs/{id}/content-hashing`, and read-only exact duplicate endpoints under `/api/exact-duplicate-groups`. The frontend is a React and TypeScript Vite application with React Router. Its `/` route retains the health check and directs users to Sources or Exact Duplicates; `/sources` registers/lists Sources and orchestrates indexing; `/duplicates` browses and filters aggregate summaries; and `/duplicates/:digestHex` shows complete group, member, occurrence, and filter-match context.
 
-The reviewed persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven application tables with their structural constraints, foreign keys, and initial indexes. Java Flyway migration `V2__add_file_entry_extension_key` adds nullable normalized FileEntry extension metadata, bounded backfill, and its lookup index. SQL migration `V3__add_durable_indexing_foundation.sql` retains eleven tables and adds future start-idempotency plus execution-version, bounded stage-result, and version-2 SCAN admission primitives now used by the internal lifecycle. Immutable Java records and focused Spring JDBC repositories map the fields. Background execution, polling/read recovery, startup interruption handling, public v2 endpoints, and frontend cutover remain unimplemented.
+The reviewed persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven application tables with their structural constraints, foreign keys, and initial indexes. Java Flyway migration `V2__add_file_entry_extension_key` adds nullable normalized FileEntry extension metadata, bounded backfill, and its lookup index. SQL migration `V3__add_durable_indexing_foundation.sql` retains eleven tables and adds future start-idempotency plus execution-version, bounded stage-result, and version-2 SCAN admission primitives now used by the internal lifecycle. Immutable Java records and focused Spring JDBC repositories map the fields. Exclusive local catalog ownership, bounded background execution, and startup interruption recovery are implemented internally. Public v2 endpoints, request-key idempotency, polling/read recovery, and frontend cutover remain unimplemented.
 
 ## Documentation
 
@@ -20,6 +20,14 @@ The durable documentation baseline is:
 - `docs/STATUS.md` — current handoff state and next step.
 
 ## What Currently Works
+
+- Catalog ownership uses Java NIO `FileChannel.tryLock()` on a `.lock` sidecar derived from `spring.datasource.url`. Ownership precedes datasource/Flyway initialization, lasts through shutdown, and prevents a second backend from using the same local catalog. The sidecar is retained; the OS lock is authoritative.
+- After schema initialization and before executor availability, startup recovery atomically fails each interrupted active v2 SCAN Job and nonterminal ScanRun. Only the current running stage fails; pending stages remain unclaimed and completed stages/results survive. Malformed state aborts startup with durable IDs in logs.
+- Recovery fails actively discovering Source rows but preserves discovered evidence, committed Source reconciliation boundaries, observations, content associations, and hash artifacts. It never runs a missing sweep, resumes a stage, retries, or reopens a terminal Job. Version-1 executions remain untouched.
+- The internal `Version2BackgroundIndexingService.start(scanRunId)` creates/commits v2 execution before submission and returns durable identity. Ambient transactions are rejected. A dedicated named worker has core/max size one, one queue slot, and abort rejection; it invokes the existing coordinator without a pipeline-wide transaction.
+- Scheduling rejection terminally fails the accepted execution and releases admission. Escaping worker failures inspect and finalize still-active durable state; normal terminal failures remain intact. Finalization persistence failure is logged and requires startup recovery.
+- Shutdown stops submission and waits up to 30 seconds, then interrupts unfinished work. Cooperative checks distinguish interruption from ordinary candidate issues. If a worker outlives the budget, ownership remains held until process exit to prevent another backend recovering live work.
+- This milestone adds 24 tests for real catalog locking (including a second JVM), application restart ordering, every recovery stage boundary, rollback/malformed state, asynchronous handoff, rejection, bounded shutdown, and interruption propagation. The full backend suite has 176 tests; existing public v1 regression tests are retained. Frontend source, public DTOs/controllers, dependencies, and migrations are unchanged.
 
 - The backend Maven wrapper is available for macOS/Linux (`mvnw`) and Windows (`mvnw.cmd`).
 - The backend compiles and its Spring context test passes on Java 21.
@@ -74,7 +82,7 @@ The durable documentation baseline is:
 - Reconciliation uses no filesystem or current Source configuration data. It succeeds after Source roots are removed or location revisions change because it consumes durable FileEntry traversal identity.
 - An exact current `(scan_run_source_id, traversal_generation)` pair keeps an entry `PRESENT`. Other currently-present entries for that Source, including rows with null last-seen fields, become `MISSING`; entries belonging to unselected Sources are untouched.
 - Becoming `MISSING` preserves extension metadata, content association, observation revision, path, filesystem metadata, seen timestamps, and last-seen traversal identity. Already-missing entries remain unchanged.
-- Each Source's missing sweep, transition to `COMPLETED`, completed-generation/timestamp publication, and progress update share one transaction. A failure within that boundary rolls all of those changes back together; generic recovery after separately committed Sources remains deferred.
+- Each Source's missing sweep, transition to `COMPLETED`, completed-generation/timestamp publication, and progress update share one transaction. A failure within that boundary rolls all of those changes back together; internal v2 interruption recovery preserves separately committed Sources without performing further missing sweeps.
 - RECONCILIATION progress counts completed Sources. Job progress mirrors the current stage and resets from DISCOVERY file units to zero out of the Source count when reconciliation starts.
 - Successful reconciliation completes all ScanRunSources, the RECONCILIATION stage, the Job, and the ScanRun; clears the Job's current stage; preserves the Job attempt count and ScanRun start timestamp; and creates no subsequent stage.
 - Reconciliation creates no ContentRecord, hash, or analysis row. Integration tests cover lifecycle/final state, multi-Source isolation, empty Sources, exact and null traversal identities, field preservation, unavailable roots, stale Source revisions, conflicts, repeat prevention, and transactional rollback.
@@ -123,24 +131,24 @@ The durable documentation baseline is:
 - Loaded list pages and scroll position survive normal list/detail navigation only for the same order-insensitive canonical filter key. Filter changes start from the first page at the top. A bounded browser-memory trail records meaningful group visits without consecutive duplicates and preserves current filters on its links.
 - Loading, empty, malformed-request, unknown-group, and backend-failure states have user-facing messages without backend details.
 - The exact-duplicate frontend has no mutation controls; it performs no deletion, move, cleanup, merge, keeper selection, or persistent review-state write.
-- Local `HEAD`, `main`, and `origin/main` started this lifecycle increment at `ef941b2` (`Add durable indexing persistence foundation`) with a clean worktree.
+- Local `HEAD`, `main`, and `origin/main` started this background increment at `6d444c6` (`Add version 2 indexing lifecycle`) with a clean worktree; no interrupted-run edits existed.
 - Git origin uses `git@github-personal:topher6835/media-compare.git`, with repository-local identity configured for `topher6835`.
 
 ## Known Limitations / Not Yet Implemented
 
 - No Source update, deletion, or relocation/remount recognition workflow exists.
-- No ScanRun list, cancellation, retry/recovery, WorkingSet request, custom options, scheduling, or background execution exists.
+- No ScanRun list, public cancellation/retry, WorkingSet request, custom options, or public background execution exists.
 - Simultaneous duplicate version-1 execution-request hardening remains deferred; database admission indexes deliberately apply only to version-2 SCAN Jobs.
 - No materialized equality-group identity, ContentRecord reconciliation/merge, media metadata, perceptual fingerprints, embeddings, face analysis, or AI integration exists.
-- No general durable worker, pause/resume, startup recovery, or live progress delivery exists.
+- No general scheduler, pause/resume, or live progress delivery exists; the dedicated internal v2 worker and fail-on-startup recovery are implemented.
 - No SSE endpoint or event design exists.
-- Active frontend orchestration is browser-local. Refreshing or leaving `/sources` during an in-flight synchronous request cannot reconstruct or resume the remaining sequence; backend retry/recovery semantics remain unimplemented.
+- Active frontend orchestration is browser-local. Refreshing or leaving `/sources` during an in-flight synchronous request cannot reconstruct or resume the remaining sequence; public v1 retry/recovery semantics remain unimplemented.
 - No matching candidates, similarity relationships, materialized groups, manual overrides, or filesystem-action history exists.
 - No broader Library/Review UI, review states/flags, persistent categories/tags, AI suggestions, similarity-group UI, or actual filesystem actions exist.
 - Advanced sorting is deferred; the frontend preserves deterministic server digest ordering rather than sorting only loaded pages.
 - Retry/resume semantics, request-key use, public version-2 read/start APIs, scheduling concurrency beyond the one-active constraint, merge behavior, cache locations, and FFmpeg/ffprobe discovery remain open as documented.
-- The frontend still has no automated test framework. This increment was validated with lint, a production TypeScript/Vite build, and focused server-render/API fixture checks; durable component tests remain a future testing-infrastructure decision.
+- The frontend still has no automated test framework. Frontend validation remains lint and a production TypeScript/Vite build; durable component tests remain a future testing-infrastructure decision.
 
 ## Next Recommended Step
 
-After reviewing this synchronous internal lifecycle, add the approved background executor and startup interruption finalization as a separate milestone. Public start/read polling and frontend cutover should remain separately reviewable; no current UI should use v2 until those contracts exist.
+Design and implement public v2 start/read contracts with request-key idempotency and polling before frontend cutover. The current UI must continue using v1 until those contracts exist. There is no transparent resume: interrupted attempts fail, and later attempts create new ScanRuns.

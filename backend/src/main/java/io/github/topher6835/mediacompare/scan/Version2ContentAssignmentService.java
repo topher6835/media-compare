@@ -35,12 +35,14 @@ public class Version2ContentAssignmentService {
 
         try {
             ContentAssignmentResult assignment = contentAssignmentService.assignSources(scanRunId, plan.sources());
+            IndexingInterruptedException.check();
             ContentAssignmentStageResult result = ContentAssignmentStageResult.from(assignment);
             long processedCount = result.assignedCount() + result.skippedCount();
             executionState.completeAssignment(
                     plan.job(), plan.stage(), resultCodec.write(result), processedCount, System.currentTimeMillis());
             return result;
         } catch (RuntimeException exception) {
+            IndexingInterruptedException.propagateIfInterrupted(exception);
             String errorMessage = "Content assignment failed";
             executionState.failCurrentStage(
                     scanRunId, plan.job(), plan.stage(), System.currentTimeMillis(), errorMessage);

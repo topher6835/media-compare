@@ -112,7 +112,7 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Version 1 means the historical/current reconciliation-ending SCAN execution. Reserve version 2 for the future backend-owned DISCOVERY → RECONCILIATION → CONTENT_ASSIGNMENT → CONTENT_HASHING pipeline; current execution creation remains version 1.
 - Reserve `result_json` for bounded, typed, versioned stage summaries, initially assignment and hashing outcome counts. Current stages leave it null; do not treat it as generic arbitrary metadata.
 - Enforce at most one version-2 SCAN Job per ScanRun and one globally active (`PENDING` or `RUNNING`) version-2 SCAN Job with SQLite partial unique indexes. Version-1 Jobs, unrelated Job types, and terminal version-2 Jobs remain outside the global admission constraint.
-- Do not expose these internal persistence fields through current public responses. Background execution, polling, startup interruption handling, and all version-2 creation/execution behavior remain later milestones.
+- Do not expose these internal persistence fields through current public responses. The subsequent internal v2 lifecycle and background milestones use these fields; public v2 APIs and polling remain deferred.
 
 ## Initial DISCOVERY Execution
 
@@ -190,7 +190,7 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Expose Source registration and browsing at `/sources` with an explicit absolute-path text field interpreted by the local backend. The frontend does not inspect filesystem availability or impose platform-specific path rules beyond macOS and Windows examples.
 - Treat Source registration as configuration only. The frontend performs no filesystem mutation and does not add Source editing or deletion.
 - Let one user action sequentially invoke the existing Source-based `INDEX` ScanRun creation, `SCAN` execution handoff, DISCOVERY, RECONCILIATION, ContentRecord assignment, and exact-hashing endpoints. Validate returned durable IDs and expected lifecycle boundaries before advancing.
-- Keep current orchestration in browser-local React state. Synchronous requests expose their active stage and supplied counts; do not fake polling or percentage completion. Refresh-safe recovery, background workers, and SSE remain deferred.
+- Keep current orchestration in browser-local React state. Synchronous requests expose their active stage and supplied counts; do not fake polling or percentage completion. Refresh-safe browser recovery, public background execution, and SSE remain deferred.
 - Guard registration and analysis actions against obvious repeated submissions in the current page, while leaving concurrency correctness to the backend.
 - Stop on the first failed stage, retain known ScanRun/Job identifiers, and do not automatically retry. A new attempt creates a new ScanRun because retry/recovery semantics are not implemented.
 - After hashing returns, present analysis as complete and link to the existing exact duplicate workflow without implying that duplicate groups exist. If hashing reports skipped or failed candidates, present a completed-with-issues warning (not a failed run) while retaining the link for successfully hashed content.
@@ -201,7 +201,17 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Let one version-2 SCAN Job own `DISCOVERY → RECONCILIATION → CONTENT_ASSIGNMENT → CONTENT_HASHING → COMPLETED`. Reconciliation completes ScanRunSource traversal evidence but leaves the Job and ScanRun running.
 - Use V3's partial unique indexes as the race-safe admission authority: one v2 SCAN Job per ScanRun and one globally active v2 SCAN Job. Conditional stage updates provide single-claim semantics without Java locking.
 - Persist only typed version-1 assignment and hashing result summaries for now. Candidate hash skips/failures complete the lifecycle with issue counts; whole-stage failures atomically fail the current stage, Job, and ScanRun with a safe message.
-- Reuse the existing traversal, reconciliation, assignment, and hashing algorithms and their short writer transactions. The internal coordinator is synchronous and holds no pipeline-wide transaction. Background execution, polling/read recovery, startup interruption handling, public APIs, and frontend cutover remain later work.
+- Reuse the existing traversal, reconciliation, assignment, and hashing algorithms and their short writer transactions. The internal coordinator is synchronous and holds no pipeline-wide transaction. The next section records the implemented background handoff and startup recovery. Public v2 APIs, polling, and frontend cutover remain later work.
+
+## Internal Background Version-2 Execution
+
+- Acquire a Java NIO OS lock derived from the configured SQLite URL before datasource/Flyway work; hold it for the application lifetime. A second backend using the same local catalog fails startup. Do not delete the sidecar lock file or substitute a database row lock. In-memory test catalogs need no process lock.
+- Recover active v2 SCAN Jobs only after ownership and schema initialization, before constructing the indexing executor. Finalize each execution in its own transaction with safe interruption text; reject malformed durable state and fail startup with IDs in logs.
+- Never-started stages remain `PENDING`; only the current `RUNNING` stage fails. Preserve completed stages/results and committed observations, reconciliations, assignments, and hashes. Fail actively `DISCOVERING` Source rows; retain `DISCOVERED` evidence and `COMPLETED` Source boundaries. Do not reconcile during recovery.
+- Add an internal nontransactional handoff around committed v2 creation, then explicitly submit to a dedicated core/max-one worker with queue capacity one and abort rejection. Reject ambient transactions so worker reads cannot race uncommitted creation. Keep the existing synchronous coordinator as the only pipeline implementation.
+- Scheduler rejection fails the durable accepted execution without caller-runs; worker exceptions finalize still-active executions without altering terminal ones. If persistence itself prevents finalization, log the durable IDs and require startup recovery, not automatic retry.
+- Stop submissions and allow up to 30 seconds on shutdown, then interrupt the worker. Interruption propagates out of candidate processing rather than becoming a skipped/failed count. Retain catalog ownership until process exit if the worker outlives the shutdown budget.
+- Restart means interrupted attempt `FAILED`, not transparent resume. A later attempt creates a new ScanRun. Public/frontend flow remains version 1; public v2 start/read contracts, request-key idempotency, polling, SSE, and frontend cutover remain deferred.
 
 ## Development
 
@@ -226,7 +236,7 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Source remount/relocation recognition and filesystem volume hints.
 - Final symlink/junction traversal behavior and detailed path equivalence.
 - ContentRecord merge/reconciliation behavior.
-- Job scheduling, concurrency, cancellation, retry, and startup recovery.
+- Scheduling beyond the bounded v2 worker, public cancellation/retry, and future resume.
 - Detailed scan scope representation and source-specific progress.
 - Specialized result schemas beyond `content_hash`.
 - Matching, similarity, materialized relationship/grouping, and manual override schemas.
