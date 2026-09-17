@@ -1,15 +1,27 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from 'react'
 import { Link } from 'react-router-dom'
 
 import { ApiError } from '../api/http.ts'
 import {
+  clearPendingIndexingStart,
+  getIndexingRun,
+  getIndexingSourceStatus,
+  getPendingIndexingStart,
   indexingStageLabels,
-  indexingCompletionStatus,
-  IndexingWorkflowError,
-  runSourceIndexing,
-  type IndexingProgress,
-  type IndexingStage,
-  type IndexingCompletionStatus,
+  isActiveIndexingRun,
+  rememberPendingIndexingStart,
+  startIndexingRun,
+  type IndexingRun,
+  type IndexingRunSummary,
+  type IndexingSourceStatus,
+  type IndexingStageType,
+  type PendingIndexingStart,
 } from '../api/indexing.ts'
 import {
   getSources,
@@ -19,41 +31,13 @@ import {
   type Source,
 } from '../api/sources.ts'
 
-const stageOrder: IndexingStage[] = [
-  'PREPARING',
+const pollIntervalMs = 1500
+const stageOrder: IndexingStageType[] = [
   'DISCOVERY',
   'RECONCILIATION',
   'CONTENT_ASSIGNMENT',
   'CONTENT_HASHING',
-  'COMPLETE',
 ]
-
-interface ActiveRun {
-  sourceId: number
-  sourceName: string
-  status: 'active' | IndexingCompletionStatus | 'failed'
-  progress: IndexingProgress
-  failedStage: IndexingStage | null
-  errorMessage: string | null
-}
-
-function emptyProgress(): IndexingProgress {
-  return {
-    stage: 'PREPARING',
-    scanRunId: null,
-    jobId: null,
-    discoveredFileCount: null,
-    reconciledSourceCount: null,
-    assignment: null,
-    hashing: null,
-  }
-}
-
-function mergeSources(current: Source[], incoming: Source[]): Source[] {
-  const byId = new Map(current.map((source) => [source.id, source]))
-  incoming.forEach((source) => byId.set(source.id, source))
-  return [...byId.values()].sort((left, right) => left.id - right.id)
-}
 
 function registrationErrorMessage(error: unknown): string {
   if (error instanceof ApiError && error.status === 400) {
@@ -62,48 +46,44 @@ function registrationErrorMessage(error: unknown): string {
   return 'The Source could not be registered. Check that the backend is running and try again.'
 }
 
-function indexingErrorMessage(error: unknown): string {
-  if (!(error instanceof IndexingWorkflowError)) {
-    return 'Analysis stopped because the backend request could not be completed.'
+function runDisplayStatus(run: IndexingRunSummary): string {
+  if (run.status === 'COMPLETED') {
+    return run.completedWithIssues
+      ? 'Analysis finished with issues'
+      : 'Analysis complete'
   }
+  if (run.status === 'FAILED') return 'Analysis stopped'
+  if (run.status === 'PENDING') return 'Waiting to start'
+  if (run.currentStage) return indexingStageLabels[run.currentStage]
+  return 'Running in background'
+}
 
-  if (
-    error.stage === 'DISCOVERY' &&
-    error.cause instanceof ApiError &&
-    error.cause.status === 500
-  ) {
-    return 'File discovery could not read this Source. Confirm that its path is available to the local backend, then start a new analysis.'
-  }
+function isDefinitiveStartResponse(error: ApiError): boolean {
+  return [400, 404, 409, 503].includes(error.status)
+}
 
-  if (error.cause instanceof ApiError) {
-    if (error.cause.status === 404) {
-      return 'Analysis stopped because its saved backend state could not be found.'
-    }
-    if (error.cause.status === 409) {
-      return 'Analysis stopped because the backend state no longer allowed this stage.'
-    }
-  }
-
-  return 'Analysis stopped because the backend could not complete this stage.'
+function runStatusClass(
+  run: IndexingRunSummary,
+): 'active' | 'complete' | 'complete-with-issues' | 'failed' {
+  if (isActiveIndexingRun(run)) return 'active'
+  if (run.status === 'FAILED') return 'failed'
+  return run.completedWithIssues ? 'complete-with-issues' : 'complete'
 }
 
 function stageState(
-  run: ActiveRun,
-  candidate: IndexingStage,
-): 'waiting' | 'running' | 'complete' | 'failed' {
-  if (run.status === 'failed' && run.failedStage === candidate) return 'failed'
-  if (run.status === 'complete' || run.status === 'complete-with-issues') {
-    return 'complete'
-  }
-
-  const activeIndex = stageOrder.indexOf(run.progress.stage)
-  const candidateIndex = stageOrder.indexOf(candidate)
-  if (candidateIndex < activeIndex) return 'complete'
-  if (candidateIndex === activeIndex) return 'running'
-  return 'waiting'
+  run: IndexingRun,
+  candidate: IndexingStageType,
+): 'waiting' | 'pending' | 'running' | 'complete' | 'failed' {
+  const stage = run.stages.find((item) => item.stageType === candidate)
+  if (!stage) return 'waiting'
+  if (stage.status === 'FAILED') return 'failed'
+  if (stage.status === 'COMPLETED') return 'complete'
+  if (stage.status === 'RUNNING') return 'running'
+  return run.currentStage === candidate ? 'pending' : 'waiting'
 }
 
 function stageStateLabel(state: ReturnType<typeof stageState>): string {
+  if (state === 'pending') return 'Pending'
   if (state === 'running') return 'In progress'
   if (state === 'complete') return 'Complete'
   if (state === 'failed') return 'Failed'
@@ -111,28 +91,33 @@ function stageStateLabel(state: ReturnType<typeof stageState>): string {
 }
 
 interface IndexingPanelProps {
-  run: ActiveRun
+  run: IndexingRun
+  sourceName: string
+  canStartNew: boolean
   onStartNew: () => void
 }
 
-export function IndexingPanel({ run, onStartNew }: IndexingPanelProps) {
-  const { progress } = run
+function IndexingPanel({
+  run,
+  sourceName,
+  canStartNew,
+  onStartNew,
+}: IndexingPanelProps) {
+  const statusClass = runStatusClass(run)
+  const discovery = run.stages.find((stage) => stage.stageType === 'DISCOVERY')
+  const reconciliation = run.stages.find(
+    (stage) => stage.stageType === 'RECONCILIATION',
+  )
 
   return (
     <section className="indexing-panel" aria-labelledby="indexing-heading">
       <div className="indexing-heading-row">
         <div>
           <p className="eyebrow">Source analysis</p>
-          <h2 id="indexing-heading">{run.sourceName}</h2>
+          <h2 id="indexing-heading">{sourceName}</h2>
         </div>
-        <span className={`run-status ${run.status}`}>
-          {run.status === 'active'
-            ? indexingStageLabels[progress.stage]
-            : run.status === 'complete'
-              ? 'Analysis complete'
-              : run.status === 'complete-with-issues'
-                ? 'Analysis finished with issues'
-                : 'Analysis stopped'}
+        <span className={`run-status ${statusClass}`}>
+          {runDisplayStatus(run)}
         </span>
       </div>
 
@@ -149,46 +134,54 @@ export function IndexingPanel({ run, onStartNew }: IndexingPanelProps) {
         })}
       </ol>
 
-      {(progress.discoveredFileCount !== null ||
-        progress.reconciledSourceCount !== null ||
-        progress.assignment !== null ||
-        progress.hashing !== null) && (
+      {(discovery !== undefined ||
+        reconciliation !== undefined ||
+        run.assignmentResult !== null ||
+        run.hashingResult !== null) && (
         <dl className="pipeline-metrics">
-          {progress.discoveredFileCount !== null && (
+          {discovery && (
             <div>
               <dt>Files discovered</dt>
-              <dd>{progress.discoveredFileCount.toLocaleString()}</dd>
+              <dd>
+                {discovery.progressCompleted.toLocaleString()}
+                {discovery.progressTotal !== null &&
+                  ` of ${discovery.progressTotal.toLocaleString()}`}
+              </dd>
             </div>
           )}
-          {progress.reconciledSourceCount !== null && (
+          {reconciliation && (
             <div>
               <dt>Sources reconciled</dt>
-              <dd>{progress.reconciledSourceCount.toLocaleString()}</dd>
+              <dd>
+                {reconciliation.progressCompleted.toLocaleString()}
+                {reconciliation.progressTotal !== null &&
+                  ` of ${reconciliation.progressTotal.toLocaleString()}`}
+              </dd>
             </div>
           )}
-          {progress.assignment !== null && (
+          {run.assignmentResult !== null && (
             <div>
               <dt>Content assigned</dt>
-              <dd>{progress.assignment.assignedCount.toLocaleString()}</dd>
-              {progress.assignment.skippedCount > 0 && (
+              <dd>{run.assignmentResult.assignedCount.toLocaleString()}</dd>
+              {run.assignmentResult.skippedCount > 0 && (
                 <small>
-                  {progress.assignment.skippedCount.toLocaleString()} stale skipped
+                  {run.assignmentResult.skippedCount.toLocaleString()} stale skipped
                 </small>
               )}
             </div>
           )}
-          {progress.hashing !== null && (
+          {run.hashingResult !== null && (
             <div>
               <dt>Hashes</dt>
               <dd>
-                {progress.hashing.hashedCount.toLocaleString()} new ·{' '}
-                {progress.hashing.cachedCount.toLocaleString()} reused
+                {run.hashingResult.hashedCount.toLocaleString()} new ·{' '}
+                {run.hashingResult.cachedCount.toLocaleString()} reused
               </dd>
-              {(progress.hashing.skippedCount > 0 ||
-                progress.hashing.failedCount > 0) && (
+              {(run.hashingResult.skippedCount > 0 ||
+                run.hashingResult.failedCount > 0) && (
                 <small>
-                  {progress.hashing.skippedCount.toLocaleString()} skipped ·{' '}
-                  {progress.hashing.failedCount.toLocaleString()} failed
+                  {run.hashingResult.skippedCount.toLocaleString()} skipped ·{' '}
+                  {run.hashingResult.failedCount.toLocaleString()} failed
                 </small>
               )}
             </div>
@@ -197,18 +190,21 @@ export function IndexingPanel({ run, onStartNew }: IndexingPanelProps) {
       )}
 
       <div
-        className={`run-message ${run.status}`}
-        role={run.status === 'failed' ? 'alert' : 'status'}
+        className={`run-message ${statusClass}`}
+        role={run.status === 'FAILED' ? 'alert' : 'status'}
         aria-live="polite"
       >
-        {run.status === 'active' && (
+        {run.status === 'PENDING' && (
+          <p>Analysis is waiting for the background worker.</p>
+        )}
+        {run.status === 'RUNNING' && (
           <p>
-            {indexingStageLabels[progress.stage]} is running in a synchronous
-            backend request. Keep this page open until it finishes; refreshing
-            cannot resume this in-browser sequence.
+            {run.currentStage
+              ? `${indexingStageLabels[run.currentStage]} is running in the background. You can leave this page and return without interrupting it.`
+              : 'Analysis is waiting for the background worker.'}
           </p>
         )}
-        {run.status === 'complete' && (
+        {run.status === 'COMPLETED' && !run.completedWithIssues && (
           <div>
             <strong>Analysis complete</strong>
             <p>The catalog is ready for exact duplicate browsing.</p>
@@ -217,7 +213,7 @@ export function IndexingPanel({ run, onStartNew }: IndexingPanelProps) {
             </Link>
           </div>
         )}
-        {run.status === 'complete-with-issues' && (
+        {run.status === 'COMPLETED' && run.completedWithIssues && (
           <div>
             <strong>Analysis finished with issues</strong>
             <p>
@@ -230,34 +226,29 @@ export function IndexingPanel({ run, onStartNew }: IndexingPanelProps) {
             </Link>
           </div>
         )}
-        {run.status === 'failed' && (
+        {run.status === 'FAILED' && (
           <div>
-            <strong>{indexingStageLabels[run.failedStage ?? progress.stage]} failed</strong>
-            <p>{run.errorMessage}</p>
-            <p>
-              This attempt is not retried automatically. Starting again creates
-              a new ScanRun.
-            </p>
-            <button type="button" onClick={onStartNew}>
+            <strong>Analysis stopped</strong>
+            <p>{run.errorMessage ?? 'The backend could not complete this analysis.'}</p>
+            <p>A new attempt creates a new durable indexing run.</p>
+            <button type="button" disabled={!canStartNew} onClick={onStartNew}>
               Start new analysis
             </button>
           </div>
         )}
       </div>
 
-      {(progress.scanRunId !== null || progress.jobId !== null) && (
-        <p className="run-identifiers">
-          {progress.scanRunId !== null && `ScanRun #${progress.scanRunId}`}
-          {progress.scanRunId !== null && progress.jobId !== null && ' · '}
-          {progress.jobId !== null && `Job #${progress.jobId}`}
-        </p>
-      )}
+      <p className="run-identifiers">
+        ScanRun #{run.scanRunId} · Job #{run.jobId}
+      </p>
     </section>
   )
 }
 
 export function SourcesPage() {
   const [sources, setSources] = useState<Source[] | null>(null)
+  const [sourceStatus, setSourceStatus] =
+    useState<IndexingSourceStatus | null>(null)
   const [listError, setListError] = useState(false)
   const [listRequest, setListRequest] = useState(0)
   const [form, setForm] = useState<RegisterSourceInput>({
@@ -267,37 +258,176 @@ export function SourcesPage() {
   const [formError, setFormError] = useState<string | null>(null)
   const [formSuccess, setFormSuccess] = useState<string | null>(null)
   const [isRegistering, setIsRegistering] = useState(false)
-  const [run, setRun] = useState<ActiveRun | null>(null)
+  const [run, setRun] = useState<IndexingRun | null>(null)
+  const [startingSourceId, setStartingSourceId] = useState<number | null>(null)
+  const [uncertainStart, setUncertainStart] = useState<PendingIndexingStart | null>(
+    getPendingIndexingStart,
+  )
+  const [statusRecoveryNeeded, setStatusRecoveryNeeded] = useState(false)
+  const [statusRecoveryRequest, setStatusRecoveryRequest] = useState(0)
+  const [startMessage, setStartMessage] = useState<string | null>(null)
+  const [startMessageIsError, setStartMessageIsError] = useState(false)
   const registrationLock = useRef(false)
-  const analysisLock = useRef(false)
-  const analysisController = useRef<AbortController | null>(null)
+  const startLock = useRef(false)
+  const mounted = useRef(true)
+  const recoveryMessage = useRef(false)
+
+  const showStartMessage = useCallback(
+    (message: string, isError: boolean, isTransientRecovery = false) => {
+      recoveryMessage.current = isTransientRecovery
+      setStartMessage(message)
+      setStartMessageIsError(isError)
+    },
+    [],
+  )
+
+  const clearTransientRecoveryMessage = useCallback(() => {
+    if (!recoveryMessage.current) return
+    recoveryMessage.current = false
+    setStartMessage(null)
+    setStartMessageIsError(false)
+  }, [])
+
+  const refreshCollection = useCallback(async (signal?: AbortSignal) => {
+    const [loadedSources, loadedStatus] = await Promise.all([
+      getSources(signal),
+      getIndexingSourceStatus(signal),
+    ])
+    setSources(loadedSources)
+    setSourceStatus(loadedStatus)
+    setListError(false)
+    return loadedStatus
+  }, [])
+
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
 
   useEffect(() => {
     const controller = new AbortController()
-
-    getSources(controller.signal)
-      .then((loadedSources) =>
-        setSources((current) =>
-          current === null
-            ? loadedSources
-            : mergeSources(current, loadedSources),
-        ),
-      )
+    Promise.all([
+      getSources(controller.signal),
+      getIndexingSourceStatus(controller.signal),
+    ])
+      .then(([loadedSources, loadedStatus]) => {
+        setSources(loadedSources)
+        setSourceStatus(loadedStatus)
+        setListError(false)
+      })
       .catch((error: unknown) => {
         if (!(error instanceof DOMException && error.name === 'AbortError')) {
           setListError(true)
         }
       })
-
     return () => controller.abort()
   }, [listRequest])
 
-  useEffect(
-    () => () => {
-      analysisController.current?.abort()
-    },
-    [],
-  )
+  useEffect(() => {
+    if (!statusRecoveryNeeded) return
+
+    const controller = new AbortController()
+    let timer: number | undefined
+
+    async function recoverCollection() {
+      try {
+        await refreshCollection(controller.signal)
+        setStatusRecoveryNeeded(false)
+        clearTransientRecoveryMessage()
+      } catch {
+        if (controller.signal.aborted) return
+        setListError(true)
+        showStartMessage(
+          'Durable Source status could not be refreshed. Retrying status refresh.',
+          true,
+          true,
+        )
+        timer = window.setTimeout(recoverCollection, pollIntervalMs)
+      }
+    }
+
+    void recoverCollection()
+    return () => {
+      controller.abort()
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
+  }, [
+    clearTransientRecoveryMessage,
+    refreshCollection,
+    showStartMessage,
+    statusRecoveryNeeded,
+    statusRecoveryRequest,
+  ])
+
+  const effectiveActiveRun =
+    sourceStatus?.active ?? (run && isActiveIndexingRun(run) ? run : null)
+  const activeScanRunId = effectiveActiveRun?.scanRunId ?? null
+
+  useEffect(() => {
+    if (activeScanRunId === null) return
+
+    const controller = new AbortController()
+    let timer: number | undefined
+
+    async function poll() {
+      try {
+        const current = await getIndexingRun(activeScanRunId!, controller.signal)
+        const retainedAttempt = getPendingIndexingStart()
+        if (retainedAttempt?.requestKey === current.requestKey) {
+          clearPendingIndexingStart(current.requestKey)
+          setUncertainStart(null)
+          recoveryMessage.current = false
+          setStartMessage(null)
+        }
+        setRun(current)
+        clearTransientRecoveryMessage()
+        if (isActiveIndexingRun(current)) {
+          timer = window.setTimeout(poll, pollIntervalMs)
+        } else {
+          await refreshCollection(controller.signal)
+            .then(clearTransientRecoveryMessage)
+            .catch(() => {
+              if (controller.signal.aborted) return
+              setSourceStatus(null)
+              setStatusRecoveryNeeded(true)
+              setListError(true)
+              showStartMessage(
+                'Analysis finished, but the latest Source status could not be refreshed.',
+                true,
+                true,
+              )
+            })
+        }
+      } catch (error: unknown) {
+        if (controller.signal.aborted) return
+        if (error instanceof ApiError && error.status === 404) {
+          setRun(null)
+          setSourceStatus(null)
+          setStatusRecoveryNeeded(true)
+          showStartMessage(
+            'The active indexing run is no longer available. Refreshing durable Source status.',
+            true,
+            true,
+          )
+          return
+        }
+        showStartMessage(
+          'Current indexing progress could not be refreshed. Polling will continue.',
+          true,
+          true,
+        )
+        timer = window.setTimeout(poll, pollIntervalMs)
+      }
+    }
+
+    void poll()
+    return () => {
+      controller.abort()
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
+  }, [activeScanRunId, clearTransientRecoveryMessage, refreshCollection, showStartMessage])
 
   async function submitSource(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -316,11 +446,9 @@ export function SourcesPage() {
     setFormSuccess(null)
     try {
       const created = await registerSource(form)
-      setSources((current) =>
-        mergeSources(current ?? [], [created]),
-      )
       setForm({ name: '', rootPath: '' })
       setFormSuccess(`${created.name} was registered.`)
+      await refreshCollection().catch(() => setListError(true))
     } catch (error: unknown) {
       setFormError(registrationErrorMessage(error))
     } finally {
@@ -329,70 +457,103 @@ export function SourcesPage() {
     }
   }
 
-  async function startAnalysis(source: Source) {
-    if (analysisLock.current) return
+  async function startAnalysis(source: Source, retryUncertain = false) {
+    if (startLock.current) return
 
-    analysisLock.current = true
-    const controller = new AbortController()
-    analysisController.current = controller
-    let latestProgress = emptyProgress()
-    setRun({
-      sourceId: source.id,
-      sourceName: source.name,
-      status: 'active',
-      progress: latestProgress,
-      failedStage: null,
-      errorMessage: null,
-    })
+    const retainedAttempt = getPendingIndexingStart()
+    const requestKey =
+      retryUncertain && retainedAttempt?.sourceId === source.id
+        ? retainedAttempt.requestKey
+        : crypto.randomUUID()
+    const attempt = { sourceId: source.id, requestKey }
+    rememberPendingIndexingStart(attempt)
+    startLock.current = true
+    setStartingSourceId(source.id)
+    setUncertainStart(null)
+    recoveryMessage.current = false
+    setStartMessage(null)
 
     try {
-      const completed = await runSourceIndexing(
-        source.id,
-        (progress) => {
-          latestProgress = progress
-          setRun({
-            sourceId: source.id,
-            sourceName: source.name,
-            status:
-              progress.stage === 'COMPLETE'
-                ? indexingCompletionStatus(progress)
-                : 'active',
-            progress,
-            failedStage: null,
-            errorMessage: null,
-          })
-        },
-        { signal: controller.signal },
-      )
-      latestProgress = completed
+      const accepted = await startIndexingRun(requestKey, source.id)
+      clearPendingIndexingStart(requestKey)
+      if (!mounted.current) return
+      setRun(accepted)
+      setUncertainStart(null)
+      await refreshCollection().catch(() => setListError(true))
     } catch (error: unknown) {
-      if (!controller.signal.aborted) {
-        const failedStage =
-          error instanceof IndexingWorkflowError
-            ? error.stage
-            : latestProgress.stage
-        setRun({
-          sourceId: source.id,
-          sourceName: source.name,
-          status: 'failed',
-          progress: latestProgress,
-          failedStage,
-          errorMessage: indexingErrorMessage(error),
-        })
+      if (error instanceof ApiError && isDefinitiveStartResponse(error)) {
+        clearPendingIndexingStart(requestKey)
+        if (!mounted.current) return
+        setUncertainStart(null)
+        if (error.status === 409) {
+          showStartMessage(
+            'Indexing state changed in another request. The durable Source status has been refreshed.',
+            false,
+          )
+          try {
+            await refreshCollection()
+          } catch {
+            setListError(true)
+          }
+        } else if (error.status === 503) {
+          showStartMessage(
+            'The indexing attempt could not be scheduled. Its durable failed result is shown below; starting again will create a new attempt.',
+            true,
+          )
+          try {
+            await refreshCollection()
+          } catch {
+            setListError(true)
+          }
+        } else {
+          showStartMessage(
+            'The backend did not accept the indexing request. Check that it is running and try again.',
+            true,
+          )
+        }
+      } else {
+        if (!mounted.current) return
+        setUncertainStart(attempt)
+        showStartMessage(
+          'The request outcome is uncertain. Retry this request to reuse the same request key safely.',
+          true,
+        )
+        try {
+          await refreshCollection()
+        } catch {
+          setListError(true)
+        }
       }
     } finally {
-      if (analysisController.current === controller) {
-        analysisController.current = null
-        analysisLock.current = false
-      }
+      startLock.current = false
+      if (mounted.current) setStartingSourceId(null)
     }
   }
 
-  const activeSourceId = run?.status === 'active' ? run.sourceId : null
+  const metadataById = new Map(sources?.map((source) => [source.id, source]))
+  const displayedSources =
+    sourceStatus?.sources.map((status) => ({
+      status,
+      source: metadataById.get(status.sourceId),
+    })) ?? []
+  const effectiveActiveSourceIds =
+    effectiveActiveRun?.scanRunId === run?.scanRunId ? (run?.sourceIds ?? []) : []
+  const globallyBusy =
+    effectiveActiveRun !== null ||
+    startingSourceId !== null ||
+    uncertainStart !== null ||
+    statusRecoveryNeeded
+  const panelSourceId = run?.sourceIds[0] ?? null
+  const panelSourceName =
+    (panelSourceId === null ? null : metadataById.get(panelSourceId)?.name) ??
+    (panelSourceId === null ? 'Source' : `Source #${panelSourceId}`)
 
   function retrySourceList() {
     setListError(false)
-    setSources(null)
+    if (statusRecoveryNeeded) {
+      setStatusRecoveryRequest((value) => value + 1)
+      return
+    }
     setListRequest((value) => value + 1)
   }
 
@@ -470,11 +631,23 @@ export function SourcesPage() {
         </form>
       </section>
 
+      {startMessage && (
+        <p
+          className={`indexing-request-message${startMessageIsError ? ' error' : ''}`}
+          role={startMessageIsError ? 'alert' : 'status'}
+        >
+          {startMessage}
+        </p>
+      )}
+
       {run && (
         <IndexingPanel
           run={run}
+          sourceName={panelSourceName}
+          canStartNew={!globallyBusy}
           onStartNew={() => {
-            const source = sources?.find((candidate) => candidate.id === run.sourceId)
+            const source =
+              panelSourceId === null ? undefined : metadataById.get(panelSourceId)
             if (source) void startAnalysis(source)
           }}
         />
@@ -486,12 +659,12 @@ export function SourcesPage() {
             <h2 id="registered-sources-heading">Registered Sources</h2>
             <p>Analysis reads from these paths but does not modify their files.</p>
           </div>
-          {sources !== null && (
-            <span>{sources.length.toLocaleString()} registered</span>
+          {sourceStatus !== null && (
+            <span>{sourceStatus.sources.length.toLocaleString()} registered</span>
           )}
         </div>
 
-        {sources === null && !listError && (
+        {(sources === null || sourceStatus === null) && !listError && (
           <p className="source-list-state" role="status">
             Loading Sources…
           </p>
@@ -504,31 +677,107 @@ export function SourcesPage() {
             </button>
           </div>
         )}
-        {sources?.length === 0 && (
+        {sourceStatus?.sources.length === 0 && (
           <p className="source-list-state">No Sources are registered yet.</p>
         )}
-        {sources && sources.length > 0 && (
+        {displayedSources.length > 0 && (
           <div className="source-list">
-            {sources.map((source) => (
-              <article className="source-card" key={source.id}>
-                <div className="source-card-main">
-                  <div className="source-name-row">
-                    <h3>{source.name}</h3>
-                    <span>Source #{source.id}</span>
+            {displayedSources.map(({ source, status }) => {
+              const latest = status.latest
+              const freshActiveDetail =
+                run !== null &&
+                run.scanRunId === effectiveActiveRun?.scanRunId &&
+                run.sourceIds.includes(status.sourceId)
+                  ? run
+                  : null
+              const displayRun = freshActiveDetail ?? latest
+              const isActiveSource =
+                displayRun?.scanRunId === effectiveActiveRun?.scanRunId ||
+                effectiveActiveSourceIds.includes(status.sourceId)
+              const activeSourceRun =
+                displayRun?.scanRunId === effectiveActiveRun?.scanRunId
+                  ? displayRun
+                  : effectiveActiveRun
+              const isStarting = startingSourceId === status.sourceId
+              const isUncertain = uncertainStart?.sourceId === status.sourceId
+              const blockedByActiveRun =
+                effectiveActiveRun !== null && !isActiveSource
+              const blockedByLocalStart =
+                effectiveActiveRun === null &&
+                startingSourceId !== null &&
+                !isStarting
+              const blockedByUncertainStart =
+                effectiveActiveRun === null &&
+                startingSourceId === null &&
+                uncertainStart !== null &&
+                !isUncertain
+              const disabledByOther =
+                blockedByActiveRun ||
+                blockedByLocalStart ||
+                blockedByUncertainStart
+              return (
+                <article className="source-card" key={status.sourceId}>
+                  <div className="source-card-main">
+                    <div className="source-name-row">
+                      <h3>{source?.name ?? `Source #${status.sourceId}`}</h3>
+                      <span>Source #{status.sourceId}</span>
+                    </div>
+                    {source && (
+                      <p className="source-path" title={source.rootPath}>
+                        {source.rootPath}
+                      </p>
+                    )}
+                    {displayRun && (
+                      <div className={`source-latest ${runStatusClass(displayRun)}`}>
+                        <strong>Latest: {runDisplayStatus(displayRun)}</strong>
+                        {displayRun.status === 'FAILED' && displayRun.errorMessage && (
+                          <span>{displayRun.errorMessage}</span>
+                        )}
+                        {displayRun.status === 'COMPLETED' && (
+                          <Link to="/duplicates">View exact duplicates</Link>
+                        )}
+                      </div>
+                    )}
+                    {blockedByActiveRun && (
+                      <p className="source-action-note">
+                        Another Source is currently indexing.
+                      </p>
+                    )}
+                    {blockedByLocalStart && (
+                      <p className="source-action-note">
+                        Another Source is starting analysis.
+                      </p>
+                    )}
+                    {blockedByUncertainStart && (
+                      <p className="source-action-note">
+                        Another indexing request is awaiting confirmation.
+                      </p>
+                    )}
                   </div>
-                  <p className="source-path" title={source.rootPath}>
-                    {source.rootPath}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  disabled={activeSourceId !== null}
-                  onClick={() => void startAnalysis(source)}
-                >
-                  {activeSourceId === source.id ? 'Analyzing…' : 'Analyze Source'}
-                </button>
-              </article>
-            ))}
+                  {isActiveSource ? (
+                    <span className="source-active-label" role="status">
+                      {activeSourceRun
+                        ? runDisplayStatus(activeSourceRun)
+                        : 'Waiting to start'}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={disabledByOther || isStarting || !source}
+                      onClick={() => {
+                        if (source) void startAnalysis(source, isUncertain)
+                      }}
+                    >
+                      {isStarting
+                        ? 'Starting…'
+                        : isUncertain
+                          ? 'Retry request'
+                          : 'Analyze Source'}
+                    </button>
+                  )}
+                </article>
+              )
+            })}
           </div>
         )}
       </section>

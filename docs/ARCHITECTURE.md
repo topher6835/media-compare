@@ -19,7 +19,7 @@ The repository currently contains a working full-stack scaffold:
 - Read-only APIs that derive exact duplicate groups and retained occurrences from trusted SHA-256 artifacts, with catalog-correct file-category and extension filtering.
 - Frontend `/sources`, `/duplicates`, and `/duplicates/:digestHex` routes for Source registration/indexing and derived exact-group browsing, in addition to the `/` health route.
 
-The reviewed persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven application tables, structural constraints, foreign keys, and initial indexes. Java migration `V2__add_file_entry_extension_key` adds and backfills normalized FileEntry extension metadata plus its lookup index without adding a table. SQL migration `V3__add_durable_indexing_foundation.sql` retains those eleven tables while adding a future request idempotency key, an execution version, nullable stage-result storage, and database admission constraints for version-2 SCAN Jobs. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, `analysis`, and `matching` feature packages. Source registration/read, both execution versions, the four-stage internal version-2 lifecycle, exact analysis, and derived duplicate reporting/filtering are implemented. The existing scan APIs and frontend remain version 1 and browser-orchestrated; background execution, startup interruption recovery, and public v2 start/polling APIs are implemented; frontend cutover remains deferred.
+The reviewed persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven application tables, structural constraints, foreign keys, and initial indexes. Java migration `V2__add_file_entry_extension_key` adds and backfills normalized FileEntry extension metadata plus its lookup index without adding a table. SQL migration `V3__add_durable_indexing_foundation.sql` retains those eleven tables while adding request idempotency, an execution version, nullable stage-result storage, and database admission constraints for version-2 SCAN Jobs. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, `analysis`, and `matching` feature packages. Source registration/read, both execution versions, the four-stage version-2 lifecycle, background execution/recovery, public v2 start/polling APIs, frontend polling, exact analysis, and derived duplicate reporting/filtering are implemented. Legacy v1 scan APIs remain available but are no longer used by `/sources`.
 
 ## Architectural Style
 
@@ -149,7 +149,7 @@ Recovery fails each `PENDING`/`RUNNING` Job, clears its current stage, and fails
 
 Shutdown closes submission, waits up to 30 seconds, then interrupts active work and discards queued tasks; unfinished durable attempts are recovered on next startup. Checks between stages, discovery batches/directories, assignment pages/candidates, and hash candidates/stream chunks propagate interruption rather than counting it as a failed candidate. If a worker still has not terminated at the deadline, the OS lock is conservatively retained until process exit, even if the Spring context closes. Filesystem calls are not guaranteed interruptible. If the failure-finalization transaction itself cannot persist, an error is logged and startup recovery is required; it does not retry work.
 
-Public v2 start/read and idempotency contracts are described below; cancellation, frontend cutover, SSE, and stage-instance history remain deferred.
+Public v2 start/read and idempotency contracts are described below; cancellation, SSE, and stage-instance history remain deferred.
 
 ## Public Version-2 Start and Polling
 
@@ -165,7 +165,7 @@ After acceptance commits, the service submits the already-created execution thro
 
 `GET /api/indexing-runs/source-status` uses two queries in one read transaction: the globally active v2 summary and a window-ranked latest v2 execution per registered Source. Latest orders by ScanRun creation time then ScanRun ID descending. Source rows are ascending ID, include null latest values, and may share a multi-Source execution. Existing relationship/admission indexes are retained; there is no per-Source query loop. Summaries omit full stage arrays. Both GETs return `Cache-Control: no-store` and perform no mutation or long polling.
 
-The current React frontend and existing v1 routes/DTOs remain compatible. Frontend v2 cutover and SSE remain deferred, as do cancellation, retry, and resume.
+The current React `/sources` flow uses these v2 routes; existing v1 routes/DTOs remain compatible. SSE, cancellation, automatic retry/resume, and multi-Source UI remain deferred.
 
 ## Working Sets and Analysis
 
@@ -312,8 +312,9 @@ The frontend consumes that slice as:
 ```text
 /sources
     -> typed Source API registration/list
-    -> one-click browser orchestration of the existing synchronous pipeline
-    -> stage progress, supplied counts, safe failure state, and durable IDs
+    -> client UUID + one POST to start a single-Source v2 indexing run
+    -> Source-status reconstruction plus one active detail polling loop
+    -> persisted stage progress, typed summaries, safe failure state, and durable IDs
     -> completion link to /duplicates
 /duplicates
     -> typed exact-duplicate API client
@@ -325,7 +326,7 @@ The frontend consumes that slice as:
     -> filter-keyed browser-memory list context and recent-visit trail
 ```
 
-These commands and reads run synchronously in their HTTP requests. Frontend refresh-safe polling cutover, retry/resume, materialized equality decisions, and SSE remain deferred.
+Source registration and duplicate reads complete within their HTTP requests. Indexing runs in the backend and `/sources` polls durable state every 1.5 seconds only while active, without overlapping requests. Collection refresh uses `/api/indexing-runs/source-status` as indexing authority and one `/api/sources` request for names/paths; there is no per-Source status loop. Retry/resume, materialized equality decisions, and SSE remain deferred.
 
 ## SQLite and Cross-Platform Requirements
 
