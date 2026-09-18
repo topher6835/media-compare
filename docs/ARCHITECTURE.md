@@ -199,21 +199,29 @@ Face analyzer output, detected face instances, and embeddings remain conceptuall
 
 The current schema remains `Source -> FileEntry -> ContentRecord`; its Source-owned FileEntries, FileEntry presence, and version-2 SCAN lifecycle are implemented behavior. The following is the approved target architecture and must not be read as a description of existing tables, APIs, or migrations.
 
-### Catalogs and Active Context
+### Catalogs and Location Contexts
 
 A Catalog will be one independent durable collection, initially stored in its own SQLite file with an immutable internal `catalog_uuid`. Many catalogs may be known through settings outside their database files, but exactly one will be active/open at a time initially. Switching should use controlled backend/context restart or reinitialization, not a live routing-DataSource swap. Cross-catalog query/reuse, simultaneous active catalogs, and a catalog manager UI are deferred.
 
-The catalog metadata will name an application-issued active location-context token. This token isolates a known bound address environment; it is not a volume ID or proof of physical-storage identity. A foreign restored catalog opens with a new active context, while historical FileEntries retain their historical contexts until Sources are explicitly rebound.
+`LocationContext` is a planned durable entity representing one accepted continuity period for one address/binding domain. It is neither the whole catalog, necessarily one Source, nor a physical-volume identifier. Its conceptual fields are application UUID, structured anchor `location_path`, anchor `location_key`, `ACTIVE`/`RETIRED` lifecycle, `ACCEPTED`/`REVIEW_REQUIRED` continuity status, revision, versioned continuity evidence, and timestamps. A New Catalog starts with zero contexts. A foreign restore preserves historical contexts but leaves Sources unbound until explicit binding on the new environment.
 
 ### Sources, Memberships, and Location Identity
 
 The target relationship is:
 
 ```text
-Catalog -> Source -> SourceMembership -> FileEntry -> ContentRecord -> AnalysisRecord
+Catalog
+  ├─ LocationContext
+  ├─ Source ──→ LocationContext
+  └─ SourceMembership ──→ Source
+                       └─→ FileEntry ──→ ContentRecord ──→ AnalysisRecord
+
+FileEntry ──→ LocationContext
 ```
 
 Sources may overlap at arbitrary depth. A current durable `SourceMembership`, rather than a generation per Source revision, will carry a Source's relationship to a FileEntry: Source-relative portable path/key, `ACTIVE` or `RETIRED` applicability, `PRESENT` or `MISSING` presence, membership revision, observed FileEntry revision, positive-observation timestamps, and traversal/reconciliation evidence. The intended constraints are one membership per `(source_id, file_entry_id)` and one active membership per `(source_id, path_key)`. Rebinding retains the Source ID, increments its binding revision, retires active memberships, and makes no missing claim or filesystem observation by itself. Future `ScanRunSource` records will snapshot sufficient binding/root context for later interpretation. Existing historical records retain only the provenance already persisted and must not be backfilled with invented context.
+
+Initial context domains are one per Windows drive root, one per supported UNC server/share, and an explicitly selected storage/address anchor on Unix/macOS rather than the catalog-wide `/`. Sources in the same accepted domain share a context, including unrelated folders on one drive or share; independent drives, shares, and explicitly separate Unix anchors use independent contexts. Active domains must not overlap, and a Source cannot cross independently managed domains in v1. Structural containment establishes domain eligibility, not storage continuity. Mapped-drive and UNC forms remain distinct.
 
 Target FileEntry identity is source-independent: a surrogate ID plus `location_identity_status`, `location_context_id`, lossless `location_path`, and versioned equality `location_key`. Resolved identities will be unique by `(location_context_id, location_key)`; ambiguous legacy cases remain `UNRESOLVED` rather than being guessed or merged. `location_path` supports display/diagnostics/reconstruction, while `location_key` is an unambiguous lookup encoding. The initial resolver will support only explicitly accepted address cases. It will not globally lowercase or Unicode-normalize, use `toRealPath()`, treat hashes/inodes/file keys as durable identity, equate mapped drives with UNC paths automatically, or collapse distinct hard-link names. Rename/move detection and automatic remount recognition remain deferred.
 
@@ -223,9 +231,11 @@ Thus parent-first and child-first scans of unchanged overlapping roots converge 
 
 Target authoritative presence belongs only to SourceMembership. `PRESENT` means a positive observation not superseded by an authorized missing sweep; `MISSING` requires a complete successful traversal of that membership's applicable Source scope that did not observe it. Unavailable Sources and incomplete traversal never prove absence. Aggregate FileEntry presence will initially be derived: any applicable present membership preserves last-known presence, all applicable missing memberships imply last-known missing, and no applicable membership is historical/unbound rather than automatically missing.
 
-Candidate eligibility will require an active, present, current-context membership whose observed FileEntry revision matches the FileEntry revision. That is only catalog eligibility: filesystem work remains outside transactions and must retain pre/post validation and transactional publication revalidation. FileEntry observation revision changes only when byte-version evidence changes or is invalidated; membership revision changes with semantic access evidence; Source binding revision changes with root/context/scope interpretation, not display-name edits or temporary availability.
+Candidate eligibility will require an active, present membership bound to an applicable accepted LocationContext whose observed FileEntry revision matches the FileEntry revision. That is only catalog eligibility: filesystem work remains outside transactions and must retain pre/post validation and transactional publication revalidation. FileEntry observation revision changes only when byte-version evidence changes or is invalidated; membership revision changes with semantic access evidence; Source binding revision changes with root/context/scope interpretation, not display-name edits or temporary availability.
 
-Rebinding or restoring a catalog preserves ContentRecords and analyses but does not prove a newly configured path represents prior bytes. Current trust is re-established through explicit reconciliation and sufficient verification. Passive restore/open will validate compatibility, open a working copy, migrate it, run database-only abandoned-work recovery, and expose durable records without automatically traversing, hashing, rebuilding caches, probing media, or running AI. Future archive export must use a consistent SQLite backup/snapshot boundary, preferably while work is quiesced; copying a live SQLite file during writes is not a valid export strategy.
+Rebinding or restoring a catalog preserves ContentRecords and analyses but does not prove a newly configured path represents prior bytes. A context baseline protects the shared domain and a Source-root baseline protects the recursive root. Provider-specific continuity profiles must pass all required comparisons before and after traversal for unattended missing inference. Missing required evidence, contradictory observations, inaccessible subtrees, or unresolved storage/link boundaries require review; positive inspection may be diagnostic but cannot attach uncertain observations to trusted historical FileEntries or ContentRecords. Passive restore/open will validate compatibility, open a working copy, migrate it, run database-only abandoned-work recovery, and expose durable records without automatically traversing, hashing, rebuilding caches, probing media, or running AI. Future archive export must use a consistent SQLite backup/snapshot boundary, preferably while work is quiesced; copying a live SQLite file during writes is not a valid export strategy.
+
+Temporary unavailability retains Source bindings, contexts, memberships, and historical presence. A confirmed domain replacement retires only that LocationContext, creates a new context for the domain, and requires affected Sources to bind again; unrelated contexts remain usable. A Source-specific root conflict can invalidate only that Source while leaving other Sources in the context usable.
 
 ### Future Phased Scanning
 
