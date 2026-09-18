@@ -35,7 +35,7 @@ The durable documentation baseline is:
 - The background milestone added 24 tests for real catalog locking (including a second JVM), application restart ordering, every recovery stage boundary, rollback/malformed state, asynchronous handoff, rejection, bounded shutdown, and interruption propagation. Existing public v1 regression tests are retained. The public-API milestone added new DTOs/controllers without changing v1 response shapes, dependencies, or migrations; this frontend milestone consumes those DTOs without backend changes.
 
 - The backend Maven wrapper is available for macOS/Linux (`mvnw`) and Windows (`mvnw.cmd`).
-- The public indexing API baseline has 23 tests covering acceptance/replay races, rollback, ownership exclusion, durable reads/results, scheduling failure, and bounded Source-status queries. The full backend suite passes 282 tests with no failures, errors, or skips.
+- The public indexing API baseline has 23 tests covering acceptance/replay races, rollback, ownership exclusion, durable reads/results, scheduling failure, and bounded Source-status queries. The latest established full backend validation passed 292 tests with 0 failures, 0 errors, and 0 skipped tests; Maven package and `git diff --check` also passed.
 - The backend compiles and its Spring context test passes on Java 21.
 - Spring Boot starts successfully on port `8080`.
 - SQLite connectivity uses `jdbc:sqlite:data/media-compare.db?foreign_keys=on`.
@@ -154,7 +154,7 @@ The durable documentation baseline is:
 - No Source update, deletion, or relocation/remount recognition workflow exists.
 - No general ScanRun list, cancellation/retry/resume, WorkingSet request, or custom indexing options API exists.
 - Normal v1/v2 creation excludes competing ScanRun ownership under SQLite write reservation. Database admission indexes still apply only to version-2 SCAN Jobs.
-- No materialized equality-group identity, ContentRecord reconciliation/merge, media-metadata job/API, video extraction, perceptual fingerprints, embeddings, face analysis, or AI integration exists.
+- No materialized equality-group identity, ContentRecord reconciliation/merge, video extraction, perceptual fingerprints, embeddings, face analysis, or AI integration exists. The catalog-global image-only media-metadata Job and its manual start/read API are implemented; automatic scheduling and frontend metadata display remain deferred.
 - No general scheduler, pause/resume, or live progress delivery exists; the dedicated internal v2 worker and fail-on-startup recovery are implemented.
 - No SSE endpoint or event design exists.
 - No automatic indexing retry or resume exists. Refresh/navigation reconstructs durable active/latest v2 state, while interrupted backend work retains the existing fail-on-restart behavior.

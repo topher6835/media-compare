@@ -112,10 +112,10 @@ The initial persistence implementation uses immutable Java records for row-shape
 
 - Flyway V3 retains the eleven application tables and adds nullable `scan_run.request_key`, positive `job.execution_version` defaulting to 1, and nullable `job_stage.result_json`.
 - Reserve non-null request keys for durable start idempotency. Historical and v1 ScanRuns keep null keys; public v2 starts now use canonical UUID keys as described below. A partial unique index permits multiple nulls but rejects duplicate non-null keys.
-- Version 1 means the historical/current reconciliation-ending SCAN execution. Reserve version 2 for the future backend-owned DISCOVERY → RECONCILIATION → CONTENT_ASSIGNMENT → CONTENT_HASHING pipeline; current execution creation remains version 1.
-- Reserve `result_json` for bounded, typed, versioned stage summaries, initially assignment and hashing outcome counts. Current stages leave it null; do not treat it as generic arbitrary metadata.
+- In the initial persistence review, version 1 meant the historical/current reconciliation-ending SCAN execution and version 2 was reserved for the backend-owned DISCOVERY → RECONCILIATION → CONTENT_ASSIGNMENT → CONTENT_HASHING pipeline. The later version-2 background and public indexing milestones implemented that reserved pipeline; historical version-1 SCAN records remain supported.
+- Reserve `result_json` for bounded, typed, versioned stage summaries, initially assignment and hashing outcome counts. Durable SCAN discovery/reconciliation stages leave it null; the later MEDIA_METADATA image stage uses its own typed summary. Do not treat it as generic arbitrary metadata.
 - Enforce at most one version-2 SCAN Job per ScanRun and one globally active (`PENDING` or `RUNNING`) version-2 SCAN Job with SQLite partial unique indexes. Version-1 Jobs, unrelated Job types, and terminal version-2 Jobs remain outside the global admission constraint.
-- Do not expose these internal persistence fields through current public responses. The subsequent internal v2 lifecycle and background milestones use these fields; public v2 APIs and polling remain deferred.
+- Do not expose these internal persistence fields through the original public SCAN responses. The subsequent internal v2 lifecycle and background milestones use these fields; the later public v2 indexing API exposes only its narrow durable representation.
 
 ## Initial DISCOVERY Execution
 
