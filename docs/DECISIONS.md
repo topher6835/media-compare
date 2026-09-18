@@ -40,6 +40,7 @@ This file records decisions already made. It distinguishes the reviewed V1 imple
 - Use Java ImageIO as the first image-only metadata extractor. Sniff bytes with an ImageInputStream/ImageReader and read encoded dimensions without decoding the whole image; accept only canonical JPEG, PNG, GIF, BMP, and runtime-provided TIFF. No reader/unsupported format is a completed `UNSUPPORTED` artifact; current ImageIO reader/decoder failures become retryable per-content `FAILED` artifacts through the metadata Job, while stale evidence creates no artifact.
 - Use `builtin.ffprobe` analyzer version `1`, configuration version `1`, and exact configuration `{}` for video metadata. Keep this cache identity independent from `builtin.imageio`; executable selection, installed ffprobe version, and process resource limits are operational concerns rather than analyzer compatibility inputs.
 - Interpret structured ffprobe output through a small strict typed projection. Accept successfully probed genuine video broadly without a positive application container allowlist; narrowly exclude image-oriented demuxers/ISO BMFF brands, external presentations, attached pictures, thumbnails, and still-image streams. Prefer the lowest-index default eligible video/audio stream and otherwise the lowest index. Missing or malformed required video metadata is a typed failed interpretation, while valid non-video/image-oriented content is `UNSUPPORTED`.
+- Select ffprobe through an optional absolute path in `media-compare.ffprobe.executable` and otherwise the PATH command `ffprobe`; an invalid explicit selection never falls back. Qualify the exact command with bounded version, `fd` input-protocol, and required MOV-control checks. Invoke it without a shell, redirect the validated regular file to stdin, expose only `fd:` under protocol whitelist `fd`, disable MOV external references/absolute paths, request only the version-1 JSON fields, and bound time plus both output streams. Treat an individual probe's nonzero exit, invalid UTF-8, timeout, or output-limit breach as content/probe failure while retaining process-facility, stream-reader, and cleanup failures as infrastructure failures. Keep interruption distinct. This boundary is not an OS sandbox and does not replace stale-evidence validation.
 - Keep face analyzer output, detected faces, and embeddings separate from later human person or group classification.
 - Keep AI optional and provider-independent; local and cloud providers may coexist under the same provenance/versioning model.
 - Keep large derived files in a future application-managed cache rather than as large SQLite BLOBs; SQLite holds the catalog and compact/queryable artifacts.
@@ -236,7 +237,7 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Reuse the unique compatible AnalysisRecord for retry. `COMPLETED` remains reusable, `PENDING`/`RUNNING` remains owned, and `FAILED` is eligible for a later Job. Every retry increments attempt count; success stores typed result and clears error, while repeated failure retains null result and a bounded safe error.
 - Publish per-content failure only after filesystem post-validation and the same transactional catalog-evidence guard as success. Stale evidence produces no artifact. Individual extraction failures increment the completed stage's issue count and do not fail the Job; unexpected infrastructure failures fail the stage and Job.
 - On startup, fail abandoned active metadata Jobs and convert only exact `builtin.imageio` nonterminal analysis rows to retryable `FAILED`. Re-enumerate candidates on the next Job and preserve completed artifacts. Persist only the bounded version-1 stage summary counts; cursor resume and per-file result lists remain deferred.
-- Keep automatic post-SCAN scheduling, ffprobe process execution/video publication, and frontend metadata display deferred.
+- Keep automatic post-SCAN scheduling, ffprobe video analysis/publication, and frontend metadata display deferred.
 
 ## Development
 
@@ -267,5 +268,5 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Matching, similarity, materialized relationship/grouping, and manual override schemas.
 - Face/person schema and AI-provider architecture.
 - Application-managed cache locations and lifecycle.
-- FFmpeg/ffprobe discovery and process management.
+- Real-Windows ffprobe redirected-file/`fd:` qualification and acceptance.
 - Safeguards for eventual filesystem-modifying operations.

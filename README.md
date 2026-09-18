@@ -6,7 +6,7 @@ Media Compare is an early-stage application for media comparison workflows. The 
 
 - Backend: Java 21, Spring Boot 4.1.1, Maven, Spring JDBC, Flyway, and SQLite
 - Frontend: React, TypeScript, Vite, React Router, and ESLint
-- Planned integration direction: Java NIO, FFmpeg/ffprobe, REST APIs, Server-Sent Events (SSE), and pluggable local/cloud AI providers
+- Integration direction: Java NIO, FFmpeg/ffprobe, REST APIs, Server-Sent Events (SSE), and pluggable local/cloud AI providers
 
 ## Repository Structure
 
@@ -20,7 +20,7 @@ Media Compare is an early-stage application for media comparison workflows. The 
 - Java 21
 - Node.js and npm
 
-Maven does not need to be installed separately because the backend includes Maven wrappers for macOS/Linux and Windows. FFmpeg and ffprobe are planned for future media features but are not used by the current scaffold.
+Maven does not need to be installed separately because the backend includes Maven wrappers for macOS/Linux and Windows. The bounded ffprobe runner exists but is not yet connected to durable video analysis, so ffprobe is not required for the current indexing and image-metadata workflows. When the runner is exercised, it uses an absolute path supplied through the optional `media-compare.ffprobe.executable` property or, when the property is absent, the `ffprobe` command from PATH.
 
 ## Run Locally
 
