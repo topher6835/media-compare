@@ -27,7 +27,7 @@ Media Compare will begin as a modular monolith:
 
 - One Spring Boot backend.
 - One React frontend.
-- One SQLite catalog.
+- One SQLite catalog in the current implementation.
 - No microservices, message queues, Docker requirement, or separate worker process initially.
 
 Responsibilities remain meaningfully separated inside the applications without creating elaborate layered architecture. The initial responsibility areas are catalog/indexing, scanning/reconciliation, analysis, matching, jobs/progress, organization/manual decisions, filesystem operations, media tooling, and AI integrations.
@@ -175,7 +175,7 @@ The current React `/sources` flow uses these v2 routes; existing v1 routes/DTOs 
 
 ## Working Sets and Analysis
 
-A `WorkingSet` is a persistent logical collection of `ContentRecord` membership for repeated comparison and organization workflows. Replacing the bytes at a FileEntry does not silently replace historical WorkingSet membership. Physical copies can become missing while content identity, membership, and reusable analysis remain useful. Saved indexes use the one catalog database rather than separate database files.
+A `WorkingSet` is a persistent logical collection of `ContentRecord` membership for repeated comparison and organization workflows. Replacing the bytes at a FileEntry does not silently replace historical WorkingSet membership. Physical copies can become missing while content identity, membership, and reusable analysis remain useful. In the current implementation, saved indexes use the one configured catalog database.
 
 `AnalysisRecord` captures reusable analysis provenance, lifecycle, analyzer identity/version, configuration version/hash, and effective configuration. A compatible completed artifact can be reused; changes to analysis type, analyzer, model, version, preprocessing, provider, or configuration create a new artifact rather than silently overwriting the prior result. Specialized result structures hold hashes, media metadata, fingerprints, embeddings, face results, video fingerprints, and AI results as those features are designed.
 
@@ -195,13 +195,51 @@ Filesystem metadata belongs to FileEntry. Media-derived metadata belongs to Cont
 
 Face analyzer output, detected face instances, and embeddings remain conceptually separate from later human person or group classification. AI analysis follows the same provenance and versioning rules: it is optional and provider-independent, and local and cloud providers may coexist without making the rest of the catalog depend on one provider. Face/person schemas, AI result schemas, provider interfaces, and runtime architecture remain undecided.
 
+## Approved Planned Catalog Architecture (Not Yet Implemented)
+
+The current schema remains `Source -> FileEntry -> ContentRecord`; its Source-owned FileEntries, FileEntry presence, and version-2 SCAN lifecycle are implemented behavior. The following is the approved target architecture and must not be read as a description of existing tables, APIs, or migrations.
+
+### Catalogs and Active Context
+
+A Catalog will be one independent durable collection, initially stored in its own SQLite file with an immutable internal `catalog_uuid`. Many catalogs may be known through settings outside their database files, but exactly one will be active/open at a time initially. Switching should use controlled backend/context restart or reinitialization, not a live routing-DataSource swap. Cross-catalog query/reuse, simultaneous active catalogs, and a catalog manager UI are deferred.
+
+The catalog metadata will name an application-issued active location-context token. This token isolates a known bound address environment; it is not a volume ID or proof of physical-storage identity. A foreign restored catalog opens with a new active context, while historical FileEntries retain their historical contexts until Sources are explicitly rebound.
+
+### Sources, Memberships, and Location Identity
+
+The target relationship is:
+
+```text
+Catalog -> Source -> SourceMembership -> FileEntry -> ContentRecord -> AnalysisRecord
+```
+
+Sources may overlap at arbitrary depth. A current durable `SourceMembership`, rather than a generation per Source revision, will carry a Source's relationship to a FileEntry: Source-relative portable path/key, `ACTIVE` or `RETIRED` applicability, `PRESENT` or `MISSING` presence, membership revision, observed FileEntry revision, positive-observation timestamps, and traversal/reconciliation evidence. The intended constraints are one membership per `(source_id, file_entry_id)` and one active membership per `(source_id, path_key)`. Rebinding retains the Source ID, increments its binding revision, retires active memberships, and makes no missing claim or filesystem observation by itself. Future `ScanRunSource` records will snapshot sufficient binding/root context for later interpretation. Existing historical records retain only the provenance already persisted and must not be backfilled with invented context.
+
+Target FileEntry identity is source-independent: a surrogate ID plus `location_identity_status`, `location_context_id`, lossless `location_path`, and versioned equality `location_key`. Resolved identities will be unique by `(location_context_id, location_key)`; ambiguous legacy cases remain `UNRESOLVED` rather than being guessed or merged. `location_path` supports display/diagnostics/reconstruction, while `location_key` is an unambiguous lookup encoding. The initial resolver will support only explicitly accepted address cases. It will not globally lowercase or Unicode-normalize, use `toRealPath()`, treat hashes/inodes/file keys as durable identity, equate mapped drives with UNC paths automatically, or collapse distinct hard-link names. Rename/move detection and automatic remount recognition remain deferred.
+
+Thus parent-first and child-first scans of unchanged overlapping roots converge on the same resolved FileEntry and ContentRecord while adding distinct memberships. They do not promise identical numeric IDs, timestamps, or execution history. Equal hashes still never merge ContentRecords; reuse comes from resolving the same FileEntry/ContentRecord and compatible analysis provenance.
+
+### Presence, Revisions, and Filesystem Trust
+
+Target authoritative presence belongs only to SourceMembership. `PRESENT` means a positive observation not superseded by an authorized missing sweep; `MISSING` requires a complete successful traversal of that membership's applicable Source scope that did not observe it. Unavailable Sources and incomplete traversal never prove absence. Aggregate FileEntry presence will initially be derived: any applicable present membership preserves last-known presence, all applicable missing memberships imply last-known missing, and no applicable membership is historical/unbound rather than automatically missing.
+
+Candidate eligibility will require an active, present, current-context membership whose observed FileEntry revision matches the FileEntry revision. That is only catalog eligibility: filesystem work remains outside transactions and must retain pre/post validation and transactional publication revalidation. FileEntry observation revision changes only when byte-version evidence changes or is invalidated; membership revision changes with semantic access evidence; Source binding revision changes with root/context/scope interpretation, not display-name edits or temporary availability.
+
+Rebinding or restoring a catalog preserves ContentRecords and analyses but does not prove a newly configured path represents prior bytes. Current trust is re-established through explicit reconciliation and sufficient verification. Passive restore/open will validate compatibility, open a working copy, migrate it, run database-only abandoned-work recovery, and expose durable records without automatically traversing, hashing, rebuilding caches, probing media, or running AI. Future archive export must use a consistent SQLite backup/snapshot boundary, preferably while work is quiesced; copying a live SQLite file during writes is not a valid export strategy.
+
+### Future Phased Scanning
+
+Historical SCAN execution version 2 remains exactly `DISCOVERY -> RECONCILIATION -> CONTENT_ASSIGNMENT -> CONTENT_HASHING -> COMPLETED`. A later SCAN semantic, likely execution version 3, is approved to end after `DISCOVERY -> RECONCILIATION -> CONTENT_ASSIGNMENT -> COMPLETED`; exact hashing becomes a separately invoked deterministic-analysis operation. A UI convenience may request reconciliation then hashing, but no phase automatically launches the next. Old v1/v2 Jobs remain readable.
+
+The migration will move Source ownership, Source-relative path/key, authoritative presence, and Source-specific observation evidence from FileEntry to SourceMembership while retaining FileEntry, ContentRecord, and AnalysisRecord identities. Each current FileEntry initially yields one membership. Existing overlapping duplicates and unresolved collisions are preserved; they are not merged merely because paths or hashes look equal. Exact SQL, resolver-key encoding, supported path dialects, binding continuity rules, mountpoint behavior, legacy-key conflicts, historical Source revision handling, and Windows reparse-point treatment remain the next focused design work.
+
 ## Matching and Scale
 
 The design targets thousands, tens of thousands, and potentially hundreds of thousands of files. Implementations should stream Java NIO traversal, use bounded database batches and indexed queries, avoid loading complete drive listings into memory, and avoid expensive work for files that do not need it.
 
 Exact byte-equality grouping is the first implemented matching behavior and uses indexed digest aggregation rather than pairwise comparison. Broader matching uses cheap candidate generation followed by deeper comparison for plausible candidates. Full pairwise comparison is not a V1 strategy. Candidate persistence and later matching algorithms remain open, while pending work must eventually support durable resume.
 
-## Broader Conceptual Relationship View
+## Current Implemented Relationship View
 
 ```text
 Source -> FileEntry -> ContentRecord -> AnalysisRecord -> specialized results
@@ -214,7 +252,7 @@ WorkingSet -> ContentRecord membership
 ScanRun -> Job -> stages/checkpoints
 ```
 
-This shows long-term conceptual ownership and relationships, not only the V1 tables, foreign keys, packages, or final cardinalities. Of specialized analysis-result structures, only `content_hash` is part of the reviewed V1 schema.
+This shows the current implemented ownership and relationships, not only the V1 tables, foreign keys, packages, or final cardinalities. Of specialized analysis-result structures, only `content_hash` is part of the reviewed V1 schema. The approved planned Catalog/SourceMembership relationship is described above.
 
 ## Current Development Request Flow
 

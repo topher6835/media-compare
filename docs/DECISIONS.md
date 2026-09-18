@@ -21,17 +21,17 @@ This file records decisions already made. It distinguishes the reviewed V1 imple
 
 ## Architecture
 
-- Begin as a modular monolith: one Spring Boot backend, one React frontend, and one SQLite catalog.
+- Begin the implemented system as a modular monolith: one Spring Boot backend, one React frontend, and one active SQLite catalog.
 - Do not introduce microservices, message queues, a Docker requirement, or a separate worker process initially.
 - Catalog files generally, not only media. Apply cheap catalog work broadly and expensive analysis only to selected/supported media.
 - Keep internal responsibility boundaries meaningful without creating elaborate layered architecture.
 - Give each registered scan Source a durable internal identity. Its root path and path key are location/configuration data, not identity; a path-key match alone cannot identify a returning Source. Platform-specific volume/filesystem IDs, file IDs, or inodes may be optional hints, never required cross-platform identity.
-- Represent a FileEntry as a current or historical filesystem occurrence within a Source. Preserve missing history rather than deleting an entry automatically.
-- Represent exact bytes with a stable internal ContentRecord identity independent of path and hashing algorithm. Multiple exact duplicate FileEntries may share a ContentRecord; transformed copies must not.
+- In the implemented V1/V2 schema, represent a FileEntry as a current or historical filesystem occurrence within a Source and preserve missing history rather than deleting it automatically. The approved replacement target is recorded below.
+- Represent exact bytes with a stable internal ContentRecord identity independent of path and hashing algorithm. The implemented assignment flow creates distinct ContentRecords for distinct FileEntry observations even when bytes are equal; transformed copies must not share identity. The future overlapping-Source design reuses a record only when memberships resolve to the same FileEntry, never by merging equal hashes.
 - Treat a trusted exact hash as confirmation of byte identity, with its algorithm recorded explicitly. Size and timestamp are optimization signals, not proof.
 - Attach reusable expensive analysis primarily to ContentRecord so it survives moves, renames, duplicates, later scans, and missing/reappearing copies.
 - Make resume database-driven and durable across full application shutdown. Prefer idempotent stages and small committed batches over serialized Java state or fragile iterator cursors.
-- Represent a saved index as a persistent WorkingSet backed by the one catalog database. WorkingSets reference ContentRecords, reuse their analysis, and retain useful identity/history when physical copies disappear.
+- In the implemented system, represent a saved index as a persistent WorkingSet backed by the configured catalog database. WorkingSets reference ContentRecords, reuse their analysis, and retain useful identity/history when physical copies disappear.
 - Use a general AnalysisRecord for analysis provenance, version/configuration, and lifecycle, with specialized structures for queryable results rather than placing every result in generic JSON.
 - Reuse analysis only when type, analyzer/model/provider, version, and configuration are compatible; preserve prior artifacts when those inputs change.
 - Keep filesystem metadata on FileEntry and media-derived metadata in ContentRecord analysis, so moves and renames do not invalidate compatible analysis.
@@ -238,6 +238,21 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Publish per-content failure only after filesystem post-validation and the same transactional catalog-evidence guard as success. Stale evidence produces no artifact. Individual extraction failures increment the completed stage's issue count and do not fail the Job; unexpected infrastructure failures fail the stage and Job.
 - On startup, fail abandoned active metadata Jobs and convert only exact `builtin.imageio` nonterminal analysis rows to retryable `FAILED`. Re-enumerate candidates on the next Job and preserve completed artifacts. Persist only the bounded version-1 stage summary counts; cursor resume and per-file result lists remain deferred.
 - Keep automatic post-SCAN scheduling, ffprobe video analysis/publication, and frontend metadata display deferred.
+
+## Approved Future Catalog Boundaries
+
+- Use one independent SQLite file per Catalog, with an immutable internal catalog UUID and a rebuildable known-catalog registry/settings store outside individual catalog databases. Initially allow exactly one active/open catalog; use controlled backend/context restart or reinitialization rather than hot DataSource switching. Do not silently query or reuse data across catalogs.
+- Introduce SourceMembership as the current durable relationship between a Source and a source-independent FileEntry. Sources may overlap at arbitrary depth; scan order must converge on the same resolved FileEntry/ContentRecord while preserving a membership for every participating Source.
+- Keep one current membership per `(source_id, file_entry_id)`, with active-path uniqueness for an `ACTIVE` membership. Do not create membership generations for every Source revision. Rebinding retains the Source ID, advances its binding revision, retires active memberships, preserves historical artifacts, and makes neither an observation nor a missing claim.
+- Give FileEntry a surrogate identity within an application-issued location context. Store both a lossless location path and a versioned equality key. The context is not a physical-volume identity; resolved `(location_context_id, location_key)` uniqueness is limited to supported cases, while legacy or ambiguous identities remain `UNRESOLVED`. Do not use global case folding/Unicode normalization, `toRealPath()`, content hash, inode/file key alone, automatic mapped-drive/UNC equivalence, or automatic rename/remount recognition as durable identity.
+- Move authoritative presence to SourceMembership. `MISSING` requires a complete authorized traversal of the applicable Source scope that did not observe the membership. Unavailable or incomplete traversal never proves absence. Derive aggregate FileEntry presence initially instead of caching another authority.
+- Keep filesystem work outside transactions. Future analysis selection/publication snapshots and revalidates Source binding/context, membership, FileEntry, ContentRecord, and revisions; an alternate membership route cannot validate stale work through a different route.
+- Treat archive restore as passive: validate compatibility, open a working copy, migrate it, run database-only abandoned-work recovery, and expose durable records. Do not automatically traverse, hash, rebuild caches, probe media, or run AI. Export live SQLite data through a consistent backup/snapshot boundary rather than copying an actively written database file.
+- Preserve analysis artifacts on rebind/restore, but do not confuse preservation with proof that a current filesystem path represents historic bytes. Explicit reconciliation and sufficient verification re-establish current trust.
+- Preserve historical SCAN v2 meaning exactly as `DISCOVERY -> RECONCILIATION -> CONTENT_ASSIGNMENT -> CONTENT_HASHING -> COMPLETED`. A likely future SCAN v3 ends after assignment, with exact hashing a separate explicitly invoked deterministic operation; convenience UI may sequence requests but phases do not automatically launch one another.
+- Migrate conservatively: create one membership from every existing FileEntry without changing FileEntry, ContentRecord, or AnalysisRecord identity. Do not merge pre-existing overlapping duplicates or ambiguous collisions solely because paths or hashes match; actual consolidation evidence is a later operation.
+
+These are approved target decisions, not implemented schema or product functionality. Before migration, define the limited platform resolver/binding acceptance contract: key encoding/version, supported path dialects and spelling equivalence, binding continuity/context transitions, uncertain mountpoints, legacy conflicts, historical Source revisions, and relevant Windows junction/reparse-point behavior.
 
 ## Development
 

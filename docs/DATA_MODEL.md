@@ -238,7 +238,29 @@ Occurrence filters use `file_entry.extension_key` to select complete exact group
 
 Application lifecycle timestamps use epoch milliseconds stored as SQLite integers. Filesystem modification times preserve available Java `FileTime` precision with an epoch-second value and nanosecond component. The two values are both present or both absent; nanoseconds are constrained to `0..999999999`. Filesystems that provide less precision remain valid.
 
-## Relationships, Foreign Keys, and Deletion
+## Approved Target Model (Not Yet Migrated)
+
+The preceding sections describe the implemented eleven-table schema. This target model is approved architecture, not existing SQL, Java records, constraints, or APIs. Exact migration SQL and the location-resolver contract remain unfinalized.
+
+```text
+Catalog -> Source -> SourceMembership -> FileEntry -> ContentRecord -> AnalysisRecord
+```
+
+Each independent Catalog will eventually use a separate SQLite file and immutable internal `catalog_uuid`. Catalog metadata will carry an application-issued active `location_context_id`; Sources bind to a context and FileEntries retain the context in which their location resolved. It is a binding/isolation token, not a volume identifier or proof of physical-storage identity. An initial separate `location_namespace` table is not required.
+
+`SourceMembership` will be a current durable relationship, not a row per Source revision. Conceptual fields are Source/FileEntry IDs, Source-relative portable path/key, `ACTIVE`/`RETIRED` applicability, `PRESENT`/`MISSING` membership presence, membership revision, observed FileEntry revision, positive-observation timestamps, and traversal/reconciliation evidence. Intended uniqueness is `UNIQUE(source_id, file_entry_id)` plus active-path uniqueness equivalent to `UNIQUE(source_id, path_key) WHERE applicability_status = 'ACTIVE'`. A rebind retains the Source ID, changes its binding revision, retires active memberships, and makes no missing claim or filesystem observation. It never retargets a membership merely because a relative path matches.
+
+Target FileEntry retains its surrogate ID, content association, size, exact mtime, extension metadata, observation revision, and location-level timestamps. Source ownership, relative path/key, authoritative presence, and Source traversal evidence move to SourceMembership. It gains `location_identity_status`, `location_context_id`, `location_path`, and `location_key`. The path is lossless display/diagnostic/reconstruction data; the key is a versioned unambiguous equality encoding. Resolved identities are intended to be unique by `(location_context_id, location_key)`; legacy ambiguity remains `UNRESOLVED` rather than guessed or consolidated.
+
+There is no universal path equality: no global case folding or Unicode normalization, `toRealPath()` identity, content-hash identity, inode/file-key-only identity, automatic mapped-drive/UNC equivalence, or automatic rename/move/remount recognition. Different hard-link names remain separate FileEntries. Only explicitly supported platform/address cases resolve; ambiguous cases remain unresolved.
+
+In the target model FileEntry has no independently authoritative persisted presence. Membership `PRESENT` reflects positive observation absent a later authorized sweep; `MISSING` requires a successful complete applicable traversal that did not observe it. Unavailable Sources, incomplete traversal, and age alone never prove absence. Aggregate FileEntry presence is initially derived rather than cached. A candidate still requires a current active/present membership in the active context with matching observed FileEntry revision, then existing filesystem pre/post checks and transactional publication revalidation.
+
+FileEntry observation revision changes only when byte-version evidence changes or becomes untrusted. Membership revision changes with applicability, presence, relative path/key, or observed FileEntry revision. Source binding revision changes with root/context/scope interpretation, not name edits or temporary availability. Publication will snapshot and revalidate Source, membership, FileEntry, ContentRecord, and context evidence.
+
+The eventual migration creates one membership from each current FileEntry without changing ContentRecord or AnalysisRecord identities. It preserves ambiguous legacy duplicates and does not merge them because hashes match. Future ScanRunSource rows must snapshot enough binding/root context to interpret history after a rebind. Historical SCAN v2 remains `DISCOVERY -> RECONCILIATION -> CONTENT_ASSIGNMENT -> CONTENT_HASHING -> COMPLETED`; a likely future v3 ends after assignment and runs exact hashing as a separate deterministic operation. Existing v1/v2 Jobs remain readable. Catalog switching, cross-catalog queries, hot switching, membership-history generations, cached aggregate presence, automatic freshness expiry, and resolver details remain deferred.
+
+## Current Implemented Relationships, Foreign Keys, and Deletion
 
 The conceptual relationship is:
 
