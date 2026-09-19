@@ -1,4 +1,4 @@
-package io.github.topher6835.mediacompare.analysis;
+package io.github.topher6835.mediacompare.process;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -22,11 +22,21 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-final class FfprobeProcessExecutor {
+/** Runs one direct child process with bounded time, output, cleanup, and reader lifetime. */
+public final class BoundedProcessExecutor {
 
     private static final AtomicInteger READER_SEQUENCE = new AtomicInteger();
 
-    Execution execute(
+    private final String readerThreadPrefix;
+
+    public BoundedProcessExecutor(String readerThreadPrefix) {
+        if (readerThreadPrefix == null || readerThreadPrefix.isBlank()) {
+            throw new IllegalArgumentException("Reader thread prefix must not be blank");
+        }
+        this.readerThreadPrefix = readerThreadPrefix;
+    }
+
+    public Execution execute(
             List<String> command,
             Path redirectedInput,
             Duration timeout,
@@ -34,8 +44,17 @@ final class FfprobeProcessExecutor {
             Duration cleanupTimeout,
             int stdoutLimitBytes,
             int stderrLimitBytes) {
-        Objects.requireNonNull(command, "command");
-        Objects.requireNonNull(timeout, "timeout");
+        command = List.copyOf(Objects.requireNonNull(command, "command"));
+        if (command.isEmpty() || command.stream().anyMatch(String::isBlank)) {
+            throw new IllegalArgumentException("Process command must not be empty or blank");
+        }
+        requirePositive(timeout, "timeout");
+        requirePositive(terminationGrace, "terminationGrace");
+        requirePositive(cleanupTimeout, "cleanupTimeout");
+        if (stdoutLimitBytes <= 0 || stderrLimitBytes <= 0) {
+            throw new IllegalArgumentException("Process output limits must be positive");
+        }
+
         ExecutorService readers = Executors.newFixedThreadPool(2, readerThreadFactory());
         Process process;
         try {
@@ -111,7 +130,7 @@ final class FfprobeProcessExecutor {
             if (captured.interrupted()) {
                 terminateAndStop(process, readers, terminationGrace, cleanupTimeout);
                 Thread.currentThread().interrupt();
-                throw new FfprobeRunnerInterruptedException();
+                throw new BoundedProcessInterruptedException();
             }
             if (!captured.completed()) {
                 Cleanup cleanup = terminateAndStop(
@@ -132,7 +151,7 @@ final class FfprobeProcessExecutor {
         } catch (InterruptedException exception) {
             terminateAndStop(process, readers, terminationGrace, cleanupTimeout);
             Thread.currentThread().interrupt();
-            throw new FfprobeRunnerInterruptedException();
+            throw new BoundedProcessInterruptedException();
         }
     }
 
@@ -180,13 +199,13 @@ final class FfprobeProcessExecutor {
             Duration cleanupTimeout) {
         boolean interrupted = false;
         List<ProcessHandle> descendants = descendantsOf(process);
-        descendants.forEach(FfprobeProcessExecutor::destroy);
+        descendants.forEach(BoundedProcessExecutor::destroy);
         process.destroy();
 
         WaitResult graceful = waitForProcess(process, terminationGrace);
         interrupted |= graceful.interrupted();
         if (!graceful.completed() || descendants.stream().anyMatch(ProcessHandle::isAlive)) {
-            descendants.forEach(FfprobeProcessExecutor::destroyForcibly);
+            descendants.forEach(BoundedProcessExecutor::destroyForcibly);
             process.destroyForcibly();
         }
 
@@ -300,29 +319,59 @@ final class FfprobeProcessExecutor {
     private static void propagateInterruption(boolean interrupted) {
         if (interrupted) {
             Thread.currentThread().interrupt();
-            throw new FfprobeRunnerInterruptedException();
+            throw new BoundedProcessInterruptedException();
         }
     }
 
-    private static ThreadFactory readerThreadFactory() {
+    private ThreadFactory readerThreadFactory() {
         return task -> {
             Thread thread = new Thread(
-                    task, "media-compare-ffprobe-reader-" + READER_SEQUENCE.incrementAndGet());
+                    task, readerThreadPrefix + READER_SEQUENCE.incrementAndGet());
             thread.setDaemon(true);
             return thread;
         };
     }
 
-    sealed interface Execution permits ExecutionFinished, ExecutionFailed {
+    private static void requirePositive(Duration value, String name) {
+        Objects.requireNonNull(value, name);
+        if (value.isZero() || value.isNegative()) {
+            throw new IllegalArgumentException(name + " must be positive");
+        }
     }
 
-    record ExecutionFinished(int exitCode, byte[] stdout, byte[] stderr) implements Execution {
+    public sealed interface Execution permits ExecutionFinished, ExecutionFailed {
     }
 
-    record ExecutionFailed(ExecutionFailure reason, byte[] diagnostic) implements Execution {
+    public record ExecutionFinished(int exitCode, byte[] stdout, byte[] stderr) implements Execution {
+        public ExecutionFinished {
+            stdout = stdout.clone();
+            stderr = stderr.clone();
+        }
+
+        @Override
+        public byte[] stdout() {
+            return stdout.clone();
+        }
+
+        @Override
+        public byte[] stderr() {
+            return stderr.clone();
+        }
     }
 
-    enum ExecutionFailure {
+    public record ExecutionFailed(ExecutionFailure reason, byte[] diagnostic) implements Execution {
+        public ExecutionFailed {
+            Objects.requireNonNull(reason, "reason");
+            diagnostic = diagnostic.clone();
+        }
+
+        @Override
+        public byte[] diagnostic() {
+            return diagnostic.clone();
+        }
+    }
+
+    public enum ExecutionFailure {
         START_FAILED,
         SETUP_FAILED,
         TIMEOUT,

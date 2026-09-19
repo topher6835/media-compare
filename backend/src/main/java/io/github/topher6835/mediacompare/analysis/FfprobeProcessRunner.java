@@ -15,6 +15,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import io.github.topher6835.mediacompare.process.BoundedProcessExecutor;
+import io.github.topher6835.mediacompare.process.BoundedProcessInterruptedException;
+
 @Component
 public final class FfprobeProcessRunner {
 
@@ -41,17 +44,18 @@ public final class FfprobeProcessRunner {
             "-of", "json",
             "-i", "fd:");
 
-    private final FfprobeProcessExecutor executor;
+    private final BoundedProcessExecutor executor;
     private final Settings settings;
     private Qualification qualification;
 
     @Autowired
     public FfprobeProcessRunner(
             @Value("${media-compare.ffprobe.executable:#{null}}") String executable) {
-        this(new FfprobeProcessExecutor(), Settings.defaults(configuredExecutable(executable)));
+        this(new BoundedProcessExecutor("media-compare-ffprobe-reader-"),
+                Settings.defaults(configuredExecutable(executable)));
     }
 
-    private FfprobeProcessRunner(FfprobeProcessExecutor executor, Settings settings) {
+    private FfprobeProcessRunner(BoundedProcessExecutor executor, Settings settings) {
         this.executor = executor;
         this.settings = settings;
     }
@@ -63,15 +67,19 @@ public final class FfprobeProcessRunner {
             return currentQualification.failure();
         }
 
-        FfprobeProcessExecutor.Execution execution = executor.execute(
-                command(PROBE_ARGUMENTS),
-                validatedFile,
-                settings.probeTimeout(),
-                settings.terminationGrace(),
-                settings.cleanupTimeout(),
-                settings.stdoutLimitBytes(),
-                settings.stderrLimitBytes());
-        return probeResult(execution);
+        try {
+            BoundedProcessExecutor.Execution execution = executor.execute(
+                    command(PROBE_ARGUMENTS),
+                    validatedFile,
+                    settings.probeTimeout(),
+                    settings.terminationGrace(),
+                    settings.cleanupTimeout(),
+                    settings.stdoutLimitBytes(),
+                    settings.stderrLimitBytes());
+            return probeResult(execution);
+        } catch (BoundedProcessInterruptedException exception) {
+            throw new FfprobeRunnerInterruptedException();
+        }
     }
 
     private synchronized Qualification qualify() {
@@ -79,14 +87,14 @@ public final class FfprobeProcessRunner {
             return qualification;
         }
 
-        FfprobeProcessExecutor.Execution version = executeQualification(VERSION_ARGUMENTS);
+        BoundedProcessExecutor.Execution version = executeQualification(VERSION_ARGUMENTS);
         FfprobeProcessResult.InfrastructureFailure versionFailure = qualificationExecutionFailure(version);
         if (versionFailure != null) {
             qualification = new Qualification(versionFailure);
             return qualification;
         }
-        FfprobeProcessExecutor.ExecutionFinished versionOutput =
-                (FfprobeProcessExecutor.ExecutionFinished) version;
+        BoundedProcessExecutor.ExecutionFinished versionOutput =
+                (BoundedProcessExecutor.ExecutionFinished) version;
         String versionText;
         try {
             versionText = decodeStrictUtf8(versionOutput.stdout());
@@ -103,14 +111,14 @@ public final class FfprobeProcessRunner {
             return qualification;
         }
 
-        FfprobeProcessExecutor.Execution protocols = executeQualification(PROTOCOL_ARGUMENTS);
+        BoundedProcessExecutor.Execution protocols = executeQualification(PROTOCOL_ARGUMENTS);
         FfprobeProcessResult.InfrastructureFailure protocolsFailure = qualificationExecutionFailure(protocols);
         if (protocolsFailure != null) {
             qualification = new Qualification(protocolsFailure);
             return qualification;
         }
-        FfprobeProcessExecutor.ExecutionFinished protocolOutput =
-                (FfprobeProcessExecutor.ExecutionFinished) protocols;
+        BoundedProcessExecutor.ExecutionFinished protocolOutput =
+                (BoundedProcessExecutor.ExecutionFinished) protocols;
         String protocolText;
         try {
             protocolText = decodeStrictUtf8(protocolOutput.stdout());
@@ -127,14 +135,14 @@ public final class FfprobeProcessRunner {
             return qualification;
         }
 
-        FfprobeProcessExecutor.Execution movHelp = executeQualification(MOV_HELP_ARGUMENTS);
+        BoundedProcessExecutor.Execution movHelp = executeQualification(MOV_HELP_ARGUMENTS);
         FfprobeProcessResult.InfrastructureFailure movHelpFailure = qualificationExecutionFailure(movHelp);
         if (movHelpFailure != null) {
             qualification = new Qualification(movHelpFailure);
             return qualification;
         }
-        FfprobeProcessExecutor.ExecutionFinished movHelpOutput =
-                (FfprobeProcessExecutor.ExecutionFinished) movHelp;
+        BoundedProcessExecutor.ExecutionFinished movHelpOutput =
+                (BoundedProcessExecutor.ExecutionFinished) movHelp;
         String movHelpText;
         try {
             movHelpText = decodeStrictUtf8(movHelpOutput.stdout());
@@ -155,20 +163,24 @@ public final class FfprobeProcessRunner {
         return qualification;
     }
 
-    private FfprobeProcessExecutor.Execution executeQualification(List<String> arguments) {
-        return executor.execute(
-                command(arguments),
-                null,
-                settings.qualificationTimeout(),
-                settings.terminationGrace(),
-                settings.cleanupTimeout(),
-                settings.stdoutLimitBytes(),
-                settings.stderrLimitBytes());
+    private BoundedProcessExecutor.Execution executeQualification(List<String> arguments) {
+        try {
+            return executor.execute(
+                    command(arguments),
+                    null,
+                    settings.qualificationTimeout(),
+                    settings.terminationGrace(),
+                    settings.cleanupTimeout(),
+                    settings.stdoutLimitBytes(),
+                    settings.stderrLimitBytes());
+        } catch (BoundedProcessInterruptedException exception) {
+            throw new FfprobeRunnerInterruptedException();
+        }
     }
 
     private FfprobeProcessResult.InfrastructureFailure qualificationExecutionFailure(
-            FfprobeProcessExecutor.Execution execution) {
-        if (execution instanceof FfprobeProcessExecutor.ExecutionFailed failed) {
+            BoundedProcessExecutor.Execution execution) {
+        if (execution instanceof BoundedProcessExecutor.ExecutionFailed failed) {
             FfprobeProcessResult.InfrastructureFailureReason reason = switch (failed.reason()) {
                 case START_FAILED -> FfprobeProcessResult.InfrastructureFailureReason.EXECUTABLE_UNAVAILABLE;
                 case SETUP_FAILED -> FfprobeProcessResult.InfrastructureFailureReason.QUALIFICATION_FAILED;
@@ -179,8 +191,8 @@ public final class FfprobeProcessRunner {
             return infrastructureFailure(reason, failed.diagnostic());
         }
 
-        FfprobeProcessExecutor.ExecutionFinished finished =
-                (FfprobeProcessExecutor.ExecutionFinished) execution;
+        BoundedProcessExecutor.ExecutionFinished finished =
+                (BoundedProcessExecutor.ExecutionFinished) execution;
         if (finished.exitCode() != 0) {
             return infrastructureFailure(
                     FfprobeProcessResult.InfrastructureFailureReason.QUALIFICATION_FAILED,
@@ -189,8 +201,8 @@ public final class FfprobeProcessRunner {
         return null;
     }
 
-    private FfprobeProcessResult probeResult(FfprobeProcessExecutor.Execution execution) {
-        if (execution instanceof FfprobeProcessExecutor.ExecutionFailed failed) {
+    private FfprobeProcessResult probeResult(BoundedProcessExecutor.Execution execution) {
+        if (execution instanceof BoundedProcessExecutor.ExecutionFailed failed) {
             return switch (failed.reason()) {
                 case TIMEOUT -> probeFailure(
                         FfprobeProcessResult.ProbeFailureReason.PROCESS_TIMEOUT,
@@ -213,8 +225,8 @@ public final class FfprobeProcessRunner {
             };
         }
 
-        FfprobeProcessExecutor.ExecutionFinished finished =
-                (FfprobeProcessExecutor.ExecutionFinished) execution;
+        BoundedProcessExecutor.ExecutionFinished finished =
+                (BoundedProcessExecutor.ExecutionFinished) execution;
         String diagnostic = decodeDiagnostic(finished.stderr());
         if (finished.exitCode() != 0) {
             return new FfprobeProcessResult.ProbeFailure(
@@ -321,7 +333,7 @@ public final class FfprobeProcessRunner {
             int stdoutLimitBytes,
             int stderrLimitBytes) {
         return new FfprobeProcessRunner(
-                new FfprobeProcessExecutor(),
+                new BoundedProcessExecutor("media-compare-ffprobe-reader-"),
                 new Settings(
                         commandPrefix,
                         qualificationTimeout,
