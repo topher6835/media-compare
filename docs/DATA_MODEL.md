@@ -65,6 +65,16 @@ Canonical `location_key` v1 is `lk1:` plus lowercase hexadecimal for: one stable
 
 These codecs do not reinterpret the legacy `source.root_path_key`, validate existing `location_context` strings, probe a filesystem, or establish a Source binding. Wiring them into persistence requires a later explicit workflow.
 
+### Implemented Pure macOS/APFS Evidence Contracts (not yet wired)
+
+`MacOsApfsLocationContextEvidence` defines the typed version-1 `macos-local-apfs` context-anchor contract. Its authoritative fields are the exact Unix `LocationPath`/`LocationKey`, filesystem type `apfs`, canonical Volume UUID, positive unsigned-64 anchor inode in canonical decimal text, and directory/non-symbolic-link classification. It also retains a nonnegative acceptance timestamp and optional bounded Unix-device, FileStore-name, and provider-class diagnostics; those fields do not participate in continuity comparison.
+
+`MacOsApfsSourceRootEvidence` separately defines version-1 `macos-local-apfs-source-root` evidence: canonical LocationContext UUID, nonnegative context and Source revisions, exact Unix root path/key, canonical Volume UUID, positive unsigned-64 root inode, birth time as signed epoch seconds plus nanoseconds `0..999999999`, classification flags, and nonnegative acceptance timestamp. It does not duplicate the context anchor inode or diagnostics.
+
+Both JSON codecs require exact field sets and types; reject duplicate keys, trailing content, unknown schema/profile versions, malformed/noncanonical UUIDs and unsigned values, malformed nested `lp1`/`lk1`, and inconsistent path/key pairs; and enforce a 128 KiB UTF-8 document limit. Writers use deterministic field order. Context diagnostics are a required object whose three known fields are individually optional; unknown diagnostic fields are rejected.
+
+Pure comparison returns one of `ACCEPTED`, `UNAVAILABLE`, `UNCERTAIN`, `MISMATCH`, `UNSUPPORTED`, or `ERROR` with a bounded enum reason. Current comparison produces `ACCEPTED` for matching evidence, `MISMATCH` for coherent authoritative contradictions, and `UNCERTAIN` when a Source root is structurally outside its claimed context. The unavailable/error categories are reserved for the future probe boundary. No comparator rewrites a baseline, and no current repository, Source workflow, or indexing path decodes or consults this evidence.
+
 ### `content_record`
 
 Implemented fields:
