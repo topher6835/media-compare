@@ -47,6 +47,24 @@ The table requires non-null continuity evidence when `continuity_status = ACCEPT
 
 `LocationContextRepository` inserts a caller-supplied context, finds by exact canonical UUID text ID, and finds the active row for an exact binary anchor key. It performs no filesystem probing, automatic ID/context creation, lifecycle transition, continuity acceptance, structural-overlap resolution, or Source binding.
 
+### Implemented Pure Location Formats (not yet persisted by a workflow)
+
+The host-independent `location` package implements three initial dialects: `unix`, `win-drive`, and restricted `win-unc`. A `LocationPath` consists of a dialect, exact root-field list, and exact component list. It preserves case and Unicode spelling without normalization. Containment requires the same dialect and exact root fields plus an element-wise component prefix; raw text prefixes are never hierarchy evidence. The parser accepts ordinary absolute Unix paths, drive-rooted Windows paths, and UNC server/share roots. It rejects relative and drive-relative paths, dot components, redundant/trailing separators, NUL or malformed Unicode, device namespaces, and restricted Windows device names/characters/trailing dot or space. Unix backslash is literal; both slash forms are structural for Windows dialects.
+
+Canonical `location_path` v1 is a four-element JSON array:
+
+```text
+["lp1","unix",[],["Users","chris","Photos","a.jpg"]]
+["lp1","win-drive",["D"],["Photos","a.jpg"]]
+["lp1","win-unc",["server","share"],["Photos","a.jpg"]]
+```
+
+The strict decoder requires exactly those typed fields and a known dialect/version, rejects trailing JSON/content, and applies the same path invariants. Deterministic encoding and decoding are bounded to 64 KiB of UTF-8 JSON.
+
+Canonical `location_key` v1 is `lk1:` plus lowercase hexadecimal for: one stable dialect byte (`01`, `02`, or `03`); a big-endian unsigned 32-bit root-field count followed by each big-endian unsigned 32-bit UTF-8 byte length and bytes; then the same count/length/bytes structure for components. Decoding uses strict UTF-8, rejects malformed/non-lowercase hex, truncation, trailing bytes, unknown IDs/versions, impossible lengths, and noncanonical structure, then re-encodes for canonical verification. Payloads are limited to 16 KiB, component count to 1,024, and each field to 4 KiB of UTF-8. Keys compare exactly under SQLite binary semantics. Mapped-drive and UNC values remain different dialect identities.
+
+These codecs do not reinterpret the legacy `source.root_path_key`, validate existing `location_context` strings, probe a filesystem, or establish a Source binding. Wiring them into persistence requires a later explicit workflow.
+
 ### `content_record`
 
 Implemented fields:
@@ -277,7 +295,7 @@ FileEntry ──→ LocationContext
 
 Each independent Catalog will eventually use a separate SQLite file and immutable internal `catalog_uuid`. The implemented LocationContext foundation is intended to represent one accepted continuity period for one address/binding domain; it is not the entire catalog, necessarily one Source, or a physical-volume identifier. Production Sources do not bind yet, and current FileEntries do not reference LocationContext.
 
-V5 implements the LocationContext fields described above but not their production semantics. The future context baseline will protect a shared address domain, while a separate Source binding baseline will protect each recursive Source root. Resolver key encoding, supported path dialects, provider-specific evidence validation, transition rules, and structural-domain overlap enforcement remain open.
+V5 implements the LocationContext fields described above but not their production semantics. The future context baseline will protect a shared address domain, while a separate Source binding baseline will protect each recursive Source root. The initial pure path dialect and key encoding contract is implemented as described above; exact-spelling resolution, provider-specific evidence validation, transition rules, and structural-domain overlap enforcement remain open.
 
 `SourceMembership` will be a current durable relationship, not a row per Source revision. Conceptual fields are Source/FileEntry IDs, Source-relative portable path/key, `ACTIVE`/`RETIRED` applicability, `PRESENT`/`MISSING` membership presence, membership revision, observed FileEntry revision, positive-observation timestamps, and traversal/reconciliation evidence. Intended uniqueness is `UNIQUE(source_id, file_entry_id)` plus active-path uniqueness equivalent to `UNIQUE(source_id, path_key) WHERE applicability_status = 'ACTIVE'`. A rebind retains the Source ID, changes its binding revision, retires active memberships, and makes no missing claim or filesystem observation. It never retargets a membership merely because a relative path matches.
 
@@ -291,7 +309,7 @@ FileEntry observation revision changes only when byte-version evidence changes o
 
 The target `PRESENT` to `MISSING` transition additionally requires an active Source binding to an accepted LocationContext; passing context-anchor and Source-root continuity profiles before and after traversal; unchanged captured Source/context revisions; complete intended-scope coverage with no inaccessible subtree, cancellation, traversal failure, or unresolved link/reparse/storage boundary; and transactional revalidation of that evidence. Routine scans may infer absence when these checks pass. Under uncertain continuity, current inspection may be diagnostic, but existing membership presence and content associations are preserved and no missing sweep or trusted historical-content attachment is allowed.
 
-The eventual migration creates one membership from each current FileEntry without changing ContentRecord or AnalysisRecord identities. It preserves ambiguous legacy duplicates and does not merge them because hashes match. Future ScanRunSource rows must snapshot Source/context revisions, resolved root/scope, continuity profile versions, and scan-time acceptance evidence; historical v1/v2 executions cannot be backfilled with information they never stored. Historical SCAN v2 remains `DISCOVERY -> RECONCILIATION -> CONTENT_ASSIGNMENT -> CONTENT_HASHING -> COMPLETED`; a likely future v3 ends after assignment and runs exact hashing as a separate deterministic operation. Existing v1/v2 Jobs remain readable. Catalog switching, cross-catalog queries, hot switching, membership-history generations, cached aggregate presence, automatic freshness expiry, and resolver details remain deferred.
+The eventual migration creates one membership from each current FileEntry without changing ContentRecord or AnalysisRecord identities. It preserves ambiguous legacy duplicates and does not merge them because hashes match. Future ScanRunSource rows must snapshot Source/context revisions, resolved root/scope, continuity profile versions, and scan-time acceptance evidence; historical v1/v2 executions cannot be backfilled with information they never stored. Historical SCAN v2 remains `DISCOVERY -> RECONCILIATION -> CONTENT_ASSIGNMENT -> CONTENT_HASHING -> COMPLETED`; a likely future v3 ends after assignment and runs exact hashing as a separate deterministic operation. Existing v1/v2 Jobs remain readable. Catalog switching, cross-catalog queries, hot switching, membership-history generations, cached aggregate presence, automatic freshness expiry, and host/provider resolver details remain deferred.
 
 ## Current Implemented Relationships, Foreign Keys, and Deletion
 
