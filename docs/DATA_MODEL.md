@@ -2,11 +2,11 @@
 
 ## Status and Scope
 
-The reviewed V1 persistence design is implemented by Flyway migration `V1__create_core_schema.sql`. Java Flyway migration `V2__add_file_entry_extension_key` evolves `file_entry` with normalized technical extension metadata and an index. SQL migration `V3__add_durable_indexing_foundation.sql` adds fields and partial unique indexes used by internal durable full-pipeline indexing. V4 adds nullable `analysis_record.result_json` for typed compact analysis results. These later migrations add no table: the application retains eleven tables, immutable Java record representations, and small Spring JDBC repositories supporting the public version-1 and internal version-2 workflows.
+The reviewed V1 persistence design is implemented by Flyway migration `V1__create_core_schema.sql`. Java Flyway migration `V2__add_file_entry_extension_key` evolves `file_entry` with normalized technical extension metadata and an index. SQL migration `V3__add_durable_indexing_foundation.sql` adds fields and partial unique indexes used by internal durable full-pipeline indexing. V4 adds nullable `analysis_record.result_json` for typed compact analysis results. V5 adds the dormant `location_context` table and nullable Source binding fields. The application now has twelve tables, immutable Java record representations, and small Spring JDBC repositories.
 
 The first migration contains exactly eleven application tables. The fields and constraints below describe the implemented schema.
 
-## V1 Tables
+## Implemented Tables
 
 ### `source`
 
@@ -17,12 +17,35 @@ Implemented fields:
 - `root_path TEXT NOT NULL`
 - `root_path_key TEXT NOT NULL`
 - `location_revision INTEGER NOT NULL DEFAULT 0 CHECK >= 0`
+- `root_path_dialect TEXT NULL` (added by V5)
+- `bound_location_context_id TEXT NULL` (added by V5)
+- `binding_evidence_json TEXT NULL` (added by V5)
 - `created_at_ms INTEGER NOT NULL`
 - `updated_at_ms INTEGER NOT NULL`
 
 Source has a durable database identity. `root_path` and `root_path_key` are location/configuration data, not Source identity. `root_path_key` is an application lookup aid; neither path field is unique. Matching a path or path key must not automatically establish that a previously registered Source is the same Source that has returned. Relocation and remount recognition are deferred. Platform-specific volume or filesystem identifiers may later assist as optional hints only; they cannot be required cross-platform identity.
 
 Initial Source registration sets `root_path_key` equal to the supplied `root_path`. The registration service preserves that supplied string and uses `Path.of(...)` only to require host-platform syntax and an absolute path. It does not require the path to exist or be a directory and does not perform filesystem canonicalization, case conversion, Unicode normalization, symlink resolution, or `toRealPath()`. Duplicate names, root paths, and root-path keys are intentionally allowed; each registration receives a distinct database identity.
+
+V5 does not reinterpret or rewrite the existing `root_path_key`. `root_path_dialect = NULL` means the Source root/key has not been established under the future resolver contract. `bound_location_context_id` restrictively references `location_context(id)`, and `idx_source_bound_location_context` supports reference lookup. All three fields remain null for migrated and newly registered Sources; no current workflow requires or interprets them.
+
+### `location_context` (added by V5)
+
+Implemented fields:
+
+- `id TEXT COLLATE BINARY PRIMARY KEY` (application-issued UUID stored as canonical text)
+- `anchor_location_path TEXT NOT NULL`
+- `anchor_location_key TEXT COLLATE BINARY NOT NULL`
+- `lifecycle_status TEXT NOT NULL`
+- `continuity_status TEXT NOT NULL`
+- `revision INTEGER NOT NULL DEFAULT 0 CHECK >= 0`
+- `continuity_evidence_json TEXT NULL`
+- `created_at_ms INTEGER NOT NULL`
+- `updated_at_ms INTEGER NOT NULL`
+
+The table requires non-null continuity evidence when `continuity_status = ACCEPTED`. Java domain values are limited to lifecycle `ACTIVE`/`RETIRED` and continuity `ACCEPTED`/`REVIEW_REQUIRED`; the record also rejects blank identity/path/key, negative revision, invalid timestamp order, and accepted state without evidence. V5 does not validate evidence contents against a production continuity profile. The partial unique index `uq_location_context_active_anchor` enforces one exact binary `anchor_location_key` among `ACTIVE` rows while allowing a retired row with the same key. It does not detect path-prefix or structural-domain overlap.
+
+`LocationContextRepository` inserts a caller-supplied context, finds by exact canonical UUID text ID, and finds the active row for an exact binary anchor key. It performs no filesystem probing, automatic ID/context creation, lifecycle transition, continuity acceptance, structural-overlap resolution, or Source binding.
 
 ### `content_record`
 
@@ -238,9 +261,9 @@ Occurrence filters use `file_entry.extension_key` to select complete exact group
 
 Application lifecycle timestamps use epoch milliseconds stored as SQLite integers. Filesystem modification times preserve available Java `FileTime` precision with an epoch-second value and nanosecond component. The two values are both present or both absent; nanoseconds are constrained to `0..999999999`. Filesystems that provide less precision remain valid.
 
-## Approved Target Model (Not Yet Migrated)
+## Approved Target Model (Partially Migrated)
 
-The preceding sections describe the implemented eleven-table schema. This target model is approved architecture, not existing SQL, Java records, constraints, or APIs. Exact migration SQL and the location-resolver contract remain unfinalized.
+The preceding sections describe the implemented twelve-table schema, including the dormant V5 LocationContext/Source binding foundation. The wider target model below remains approved architecture, not implemented SourceMembership, FileEntry identity/presence authority, resolver, binding workflow, or scan behavior.
 
 ```text
 Catalog
@@ -252,9 +275,9 @@ Catalog
 FileEntry ──→ LocationContext
 ```
 
-Each independent Catalog will eventually use a separate SQLite file and immutable internal `catalog_uuid`. `LocationContext` will be a planned durable entity representing one accepted continuity period for one address/binding domain. It is not the entire catalog, necessarily one Source, or a physical-volume identifier. A New Catalog starts with zero contexts; Sources bind explicitly to applicable contexts, and FileEntries retain the context in which their location resolved.
+Each independent Catalog will eventually use a separate SQLite file and immutable internal `catalog_uuid`. The implemented LocationContext foundation is intended to represent one accepted continuity period for one address/binding domain; it is not the entire catalog, necessarily one Source, or a physical-volume identifier. Production Sources do not bind yet, and current FileEntries do not reference LocationContext.
 
-Planned `LocationContext` fields are an application UUID, structured anchor `location_path`, anchor `location_key`, `ACTIVE`/`RETIRED` lifecycle, `ACCEPTED`/`REVIEW_REQUIRED` continuity status, revision, versioned continuity evidence, and timestamps. The context baseline protects a shared address domain; a separate Source binding baseline protects each recursive Source root. The exact provider-specific evidence JSON remains open and must be established by platform acceptance tests.
+V5 implements the LocationContext fields described above but not their production semantics. The future context baseline will protect a shared address domain, while a separate Source binding baseline will protect each recursive Source root. Resolver key encoding, supported path dialects, provider-specific evidence validation, transition rules, and structural-domain overlap enforcement remain open.
 
 `SourceMembership` will be a current durable relationship, not a row per Source revision. Conceptual fields are Source/FileEntry IDs, Source-relative portable path/key, `ACTIVE`/`RETIRED` applicability, `PRESENT`/`MISSING` membership presence, membership revision, observed FileEntry revision, positive-observation timestamps, and traversal/reconciliation evidence. Intended uniqueness is `UNIQUE(source_id, file_entry_id)` plus active-path uniqueness equivalent to `UNIQUE(source_id, path_key) WHERE applicability_status = 'ACTIVE'`. A rebind retains the Source ID, changes its binding revision, retires active memberships, and makes no missing claim or filesystem observation. It never retargets a membership merely because a relative path matches.
 
@@ -276,12 +299,15 @@ The conceptual relationship is:
 
 ```text
 Source -> FileEntry -> ContentRecord -> AnalysisRecord -> specialized results
+Source -> LocationContext (nullable dormant V5 reference)
 WorkingSet -> ContentRecord membership
 ScanRun -> ScanRunSource -> Source
 ScanRun -> Job -> JobStage
 ```
 
 Historical catalog evidence must not disappear accidentally when a Source, ContentRecord, scan record, or related parent is removed. The migration uses restrictive deletion for durable catalog identities and reusable analysis relationships. WorkingSet membership cascades from WorkingSet deletion, JobStage cascades from Job deletion, and ContentHash cascades from AnalysisRecord deletion. `file_entry.last_seen_scan_run_source_id` uses `ON DELETE SET NULL`, allowing execution history to be removed later without deleting FileEntry history.
+
+V5 uses `ON DELETE RESTRICT` from nullable `source.bound_location_context_id` to `location_context.id`. This protects a referenced context but does not establish a production binding workflow.
 
 SQLite foreign-key enforcement is enabled for every physical datasource connection with the `foreign_keys=on` SQLite JDBC URL property.
 
@@ -296,6 +322,7 @@ Beyond primary keys and uniqueness constraints, the reviewed initial useful inde
 - `scan_run_source(source_id, status)`
 - `job(scan_run_id)`
 - `content_hash(algorithm, digest_hex)`
+- `source(bound_location_context_id)` (added by V5)
 
 V3 additionally creates these partial unique indexes:
 
@@ -303,11 +330,13 @@ V3 additionally creates these partial unique indexes:
 - `job(scan_run_id) WHERE job_type = 'SCAN' AND execution_version = 2`
 - `job(execution_version) WHERE job_type = 'SCAN' AND execution_version = 2 AND status IN ('PENDING', 'RUNNING')`
 
+V5 additionally creates `UNIQUE location_context(anchor_location_key) WHERE lifecycle_status = 'ACTIVE'` with binary anchor-key comparison.
+
 Do not add indexes for hypothetical queries before measuring actual access patterns.
 
 ## Lifecycle and Type Validation
 
-Evolving status and type values are not locked into rigid SQLite `CHECK (... IN (...))` lists in V1. SQL constraints enforce structural invariants such as nullability, foreign keys, uniqueness, ranges, and numeric validity. Exact lifecycle values will be validated in Java when the corresponding workflows are implemented.
+Evolving status and type values are not locked into rigid SQLite `CHECK (... IN (...))` lists. SQL constraints enforce structural invariants such as nullability, foreign keys, uniqueness, ranges, and numeric validity. V5 maps LocationContext lifecycle and continuity values through strict Java enums; other exact lifecycle values are validated by their corresponding Java workflows.
 
 With exclusive catalog ownership, startup recovery atomically fails each interrupted active v2 SCAN Job, clears its current stage, fails its nonterminal ScanRun, and fails only its current `RUNNING` stage. Never-started stages remain `PENDING`; completed stage results are preserved. Active `DISCOVERING` ScanRunSource rows become `FAILED` with completion time and null completed generation. `DISCOVERED` rows retain successful traversal evidence without authorizing an automatic missing sweep, and `COMPLETED` rows retain committed reconciliation state. All observations, content associations, and published analysis/hash artifacts survive. Impossible state aborts startup instead of being repaired. Terminal and version-1 Jobs are unchanged; no automatic resume/retry is implemented.
 
@@ -315,14 +344,14 @@ The independent `MEDIA_METADATA` execution version 1 has a null `scan_run_id` an
 
 ## Java Persistence Foundation
 
-Immutable records representing all eleven table row shapes, including the V3 `requestKey`, `executionVersion`, and `resultJson` fields, and concrete Spring JDBC repositories are organized under the persistence-related feature packages:
+Immutable records representing the implemented table row shapes, including V3 execution fields, V4 result storage, and V5 LocationContext/Source binding fields, and concrete Spring JDBC repositories are organized under the persistence-related feature packages:
 
 - `catalog`
 - `scan`
 - `job`
 - `analysis`
 
-`CatalogRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` provide focused insert, read, and workflow-specific update operations. They use `JdbcTemplate` directly without a generic repository superclass or ORM. `CatalogRepository` includes Source lookup/listing, extension-maintaining FileEntry observation, an explicit Source-scoped missing update, bounded assignment/hashing candidate reads, and guarded publication checks. `AnalysisRepository` reads exact provenance keys and persists AnalysisRecord/ContentHash artifacts. `ExactDuplicateRepository` performs read-only integrity, filtered grouped-summary, match-context, filter-option, member, and occurrence queries. Dedicated Spring beans give discovery start/batches/finalization/failure, reconciliation start/finalization, each Source's atomic missing-sweep/completed-generation boundary, each ContentRecord insert/FileEntry publication, and each guarded AnalysisRecord/ContentHash publication a real transaction. Exact grouping uses no transaction spanning its live read view. Filesystem traversal and hashing remain outside database transactions; reconciliation, ContentRecord assignment, and exact grouping/filtering perform no filesystem work.
+`CatalogRepository`, `LocationContextRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` provide focused insert, read, and workflow-specific update operations. They use `JdbcTemplate` directly without a generic repository superclass or ORM. `LocationContextRepository` is inert persistence infrastructure; no current workflow calls it. `CatalogRepository` includes Source lookup/listing, extension-maintaining FileEntry observation, an explicit Source-scoped missing update, bounded assignment/hashing candidate reads, and guarded publication checks. `AnalysisRepository` reads exact provenance keys and persists AnalysisRecord/ContentHash artifacts. `ExactDuplicateRepository` performs read-only integrity, filtered grouped-summary, match-context, filter-option, member, and occurrence queries. Dedicated Spring beans give discovery start/batches/finalization/failure, reconciliation start/finalization, each Source's atomic missing-sweep/completed-generation boundary, each ContentRecord insert/FileEntry publication, and each guarded AnalysisRecord/ContentHash publication a real transaction. Exact grouping uses no transaction spanning its live read view. Filesystem traversal and hashing remain outside database transactions; reconciliation, ContentRecord assignment, and exact grouping/filtering perform no filesystem work.
 
 ## Explicitly Deferred
 

@@ -50,7 +50,8 @@ class PersistenceFoundationTests {
             "job",
             "job_stage",
             "analysis_record",
-            "content_hash");
+            "content_hash",
+            "location_context");
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -83,10 +84,11 @@ class PersistenceFoundationTests {
         jdbcTemplate.update("DELETE FROM working_set");
         jdbcTemplate.update("DELETE FROM content_record");
         jdbcTemplate.update("DELETE FROM source");
+        jdbcTemplate.update("DELETE FROM location_context");
     }
 
     @Test
-    void flywayCreatesExactlyTheElevenApplicationTables() {
+    void flywayCreatesExactlyTheTwelveApplicationTables() {
         Set<String> actualTables = Set.copyOf(jdbcTemplate.queryForList("""
                 SELECT name
                 FROM sqlite_schema

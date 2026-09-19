@@ -19,7 +19,7 @@ The repository currently contains a working full-stack scaffold:
 - Read-only APIs that derive exact duplicate groups and retained occurrences from trusted SHA-256 artifacts, with catalog-correct file-category and extension filtering.
 - Frontend `/sources`, `/duplicates`, and `/duplicates/:digestHex` routes for Source registration/indexing and derived exact-group browsing, in addition to the `/` health route.
 
-The reviewed persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the eleven application tables, structural constraints, foreign keys, and initial indexes. Java migration `V2__add_file_entry_extension_key` adds and backfills normalized FileEntry extension metadata plus its lookup index without adding a table. SQL migration `V3__add_durable_indexing_foundation.sql` adds durable indexing fields and constraints, and V4 adds nullable `analysis_record.result_json`; the schema still has eleven tables. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, `analysis`, and `matching` feature packages. Source registration/read, both execution versions, the four-stage version-2 lifecycle, background execution/recovery, public v2 start/polling APIs, frontend polling, exact analysis, derived duplicate reporting/filtering, reusable media-metadata persistence/safety mechanics, pure ffprobe video-output interpretation, and bounded ffprobe process execution are implemented. Legacy v1 scan APIs remain available but are no longer used by `/sources`.
+The reviewed persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the initial eleven application tables, structural constraints, foreign keys, and indexes. Java migration `V2__add_file_entry_extension_key` adds and backfills normalized FileEntry extension metadata plus its lookup index. SQL migration `V3__add_durable_indexing_foundation.sql` adds durable indexing fields and constraints, V4 adds nullable `analysis_record.result_json`, and V5 adds the dormant `location_context` table plus nullable Source binding storage; the schema now has twelve tables. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, `analysis`, and `matching` feature packages. Source registration/read, both execution versions, the four-stage version-2 lifecycle, background execution/recovery, public v2 start/polling APIs, frontend polling, exact analysis, derived duplicate reporting/filtering, reusable media-metadata persistence/safety mechanics, pure ffprobe video-output interpretation, and bounded ffprobe process execution are implemented. Legacy v1 scan APIs remain available but are no longer used by `/sources`.
 
 ## Architectural Style
 
@@ -34,7 +34,7 @@ Responsibilities remain meaningfully separated inside the applications without c
 
 ## Implemented Persistence Boundaries
 
-The first concrete persistence schema contains exactly these eleven tables:
+The implemented persistence schema contains these twelve application tables:
 
 ```text
 source
@@ -48,6 +48,7 @@ job
 job_stage
 analysis_record
 content_hash
+location_context
 ```
 
 The implemented fields, constraints, indexes, foreign-key direction, and remaining design boundaries are recorded in [`DATA_MODEL.md`](DATA_MODEL.md).
@@ -61,7 +62,7 @@ The initial Java package structure is:
 - `matching` — read-only exact byte-equality grouping and reporting projections.
 - `web` — thin REST controllers and later HTTP/SSE endpoints.
 
-The persistence foundation uses concrete Spring JDBC repositories per feature package: `CatalogRepository`, `ScanRepository`, `JobRepository`, `AnalysisRepository`, and `ExactDuplicateRepository`. The boundaries remain simple. `catalog` does not depend on the job runner; `job` remains generic; and `analysis` owns analysis provenance. Scan-specific orchestration that depends on both ScanRun and Job concepts stays in `scan`, not `job`. The web controllers are thin HTTP boundaries over small feature services, while `HealthController` remains unchanged. No generic repository framework, automatic interface/implementation pairs, or enterprise layering was introduced.
+The persistence foundation uses concrete Spring JDBC repositories per feature package, including `CatalogRepository`, the narrow `LocationContextRepository`, `ScanRepository`, `JobRepository`, `AnalysisRepository`, and `ExactDuplicateRepository`. The boundaries remain simple. `catalog` does not depend on the job runner; `job` remains generic; and `analysis` owns analysis provenance. Scan-specific orchestration that depends on both ScanRun and Job concepts stays in `scan`, not `job`. The web controllers are thin HTTP boundaries over small feature services, while `HealthController` remains unchanged. No generic repository framework, automatic interface/implementation pairs, or enterprise layering was introduced.
 
 ## Catalog and Identity
 
@@ -70,6 +71,8 @@ The catalog represents files generally, including images, video, audio, document
 A `Source` is a persistent registered scan root such as a folder, external drive, whole drive, or other filesystem root. It has a durable database identity. `root_path` and `root_path_key` are location/configuration data, not identity; `root_path_key` is an application lookup aid, and neither field is unique. A matching path or path key must not automatically establish that a previously registered Source is the same Source that has returned. `location_revision` records changes to the configured location. Source relocation and remount recognition remain later concerns. Platform-specific volume, filesystem, file-ID, or inode information may later assist as optional hints only and can never be required cross-platform identity.
 
 The initial Source registration behavior preserves the supplied root-path string and writes the same value to `root_path_key`. It uses Java NIO only to check that the path is syntactically valid and absolute for the backend host. Registration does not inspect filesystem availability, require the path to exist or be a directory, resolve symlinks, or canonicalize the path. Duplicate names and root paths are allowed because database ID, not path, establishes Source identity.
+
+V5 adds an inert LocationContext persistence foundation and nullable `root_path_dialect`, `bound_location_context_id`, and `binding_evidence_json` storage on Source. Existing and newly registered Sources remain unbound, and `root_path_dialect = NULL` means the legacy root/key has not been established under the future resolver contract. The current registration, discovery, reconciliation, hashing, and metadata paths do not query LocationContext or interpret these fields. No context is created automatically.
 
 A `FileEntry` represents one filesystem occurrence within a Source. It stores a Source-relative path, normalized nullable technical `extension_key`, filesystem metadata, current content association, presence, first/last-seen information, observation revision, and the scan traversal that last observed it. Extension extraction uses the basename suffix after the last dot, lowercases with locale-independent rules, and does not alter portable path identity. The uniqueness rule is `UNIQUE(source_id, path_key)`.
 
@@ -195,15 +198,15 @@ Filesystem metadata belongs to FileEntry. Media-derived metadata belongs to Cont
 
 Face analyzer output, detected face instances, and embeddings remain conceptually separate from later human person or group classification. AI analysis follows the same provenance and versioning rules: it is optional and provider-independent, and local and cloud providers may coexist without making the rest of the catalog depend on one provider. Face/person schemas, AI result schemas, provider interfaces, and runtime architecture remain undecided.
 
-## Approved Planned Catalog Architecture (Not Yet Implemented)
+## Approved Target Catalog Architecture (Partially Implemented)
 
-The current schema remains `Source -> FileEntry -> ContentRecord`; its Source-owned FileEntries, FileEntry presence, and version-2 SCAN lifecycle are implemented behavior. The following is the approved target architecture and must not be read as a description of existing tables, APIs, or migrations.
+The current operational model remains `Source -> FileEntry -> ContentRecord`; its Source-owned FileEntries, FileEntry presence, and version-2 SCAN lifecycle are implemented behavior. V5 implements only dormant LocationContext and nullable Source binding persistence. The following wider target must not be read as implemented resolver, binding, SourceMembership, FileEntry-identity, presence-authority, or scan behavior.
 
 ### Catalogs and Location Contexts
 
 A Catalog will be one independent durable collection, initially stored in its own SQLite file with an immutable internal `catalog_uuid`. Many catalogs may be known through settings outside their database files, but exactly one will be active/open at a time initially. Switching should use controlled backend/context restart or reinitialization, not a live routing-DataSource swap. Cross-catalog query/reuse, simultaneous active catalogs, and a catalog manager UI are deferred.
 
-`LocationContext` is a planned durable entity representing one accepted continuity period for one address/binding domain. It is neither the whole catalog, necessarily one Source, nor a physical-volume identifier. Its conceptual fields are application UUID, structured anchor `location_path`, anchor `location_key`, `ACTIVE`/`RETIRED` lifecycle, `ACCEPTED`/`REVIEW_REQUIRED` continuity status, revision, versioned continuity evidence, and timestamps. A New Catalog starts with zero contexts. A foreign restore preserves historical contexts but leaves Sources unbound until explicit binding on the new environment.
+V5 can persist a `LocationContext` representing one continuity period for one address/binding domain. It is neither the whole catalog, necessarily one Source, nor a physical-volume identifier. The table stores an application-issued UUID as canonical text, anchor path/key, `ACTIVE`/`RETIRED` lifecycle, `ACCEPTED`/`REVIEW_REQUIRED` continuity status, revision, nullable continuity evidence, and timestamps. The repository supports supplied-row insertion, ID lookup, and exact active-anchor lookup. These values are not operationally consulted yet: production evidence validation, context transitions, structural-domain overlap checks, resolver keys, and Source binding remain planned. A New Catalog starts with zero contexts.
 
 ### Sources, Memberships, and Location Identity
 
@@ -253,16 +256,16 @@ Exact byte-equality grouping is the first implemented matching behavior and uses
 
 ```text
 Source -> FileEntry -> ContentRecord -> AnalysisRecord -> specialized results
-                           |
-                           -> derived exact duplicate groups
-                           -> future relationships/materialized decisions
+Source -. nullable dormant V5 reference .-> LocationContext
+ContentRecord -> derived exact duplicate groups
+ContentRecord -> future relationships/materialized decisions
 
 WorkingSet -> ContentRecord membership
 
 ScanRun -> Job -> stages/checkpoints
 ```
 
-This shows the current implemented ownership and relationships, not only the V1 tables, foreign keys, packages, or final cardinalities. Of specialized analysis-result structures, only `content_hash` is part of the reviewed V1 schema. The approved planned Catalog/SourceMembership relationship is described above.
+This shows the current implemented ownership and relationships, including V5's non-operational nullable Source reference. Of specialized analysis-result structures, only `content_hash` is part of the reviewed V1 schema. The approved planned Catalog/SourceMembership relationship is described above.
 
 ## Current Development Request Flow
 

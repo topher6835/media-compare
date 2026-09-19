@@ -72,7 +72,7 @@ class DurableIndexingMigrationTests {
                     """);
         }
 
-        migrateLatest(databaseUrl);
+        migrateToV3(databaseUrl);
 
         try (Connection connection = DriverManager.getConnection(databaseUrl)) {
             Set<String> tables = Set.copyOf(queryStrings(connection, """
@@ -137,7 +137,7 @@ class DurableIndexingMigrationTests {
                     """);
         }
 
-        migrateLatest(databaseUrl);
+        migrateToV4(databaseUrl);
 
         try (Connection connection = DriverManager.getConnection(databaseUrl);
                 var rows = connection.createStatement().executeQuery("""
@@ -175,7 +175,7 @@ class DurableIndexingMigrationTests {
     @Test
     void v3EnforcesRequestKeyAndFutureV2AdmissionConstraints() throws Exception {
         String databaseUrl = databaseUrl("constraints.db");
-        migrateLatest(databaseUrl);
+        migrateToV3(databaseUrl);
 
         try (Connection connection = DriverManager.getConnection(databaseUrl)) {
             long firstNullKeyRun = insertScanRun(connection, null);
@@ -240,6 +240,15 @@ class DurableIndexingMigrationTests {
                 .dataSource(databaseUrl, null, null)
                 .locations("classpath:db/migration")
                 .target(MigrationVersion.fromVersion("3"))
+                .load()
+                .migrate();
+    }
+
+    private void migrateToV4(String databaseUrl) {
+        Flyway.configure()
+                .dataSource(databaseUrl, null, null)
+                .locations("classpath:db/migration")
+                .target(MigrationVersion.fromVersion("4"))
                 .load()
                 .migrate();
     }

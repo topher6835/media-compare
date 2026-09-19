@@ -28,20 +28,26 @@ public class CatalogRepository {
         jdbcTemplate.update(connection -> {
             PreparedStatement statement = connection.prepareStatement("""
                     INSERT INTO source (
-                        name, root_path, root_path_key, location_revision, created_at_ms, updated_at_ms
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                        name, root_path, root_path_key, location_revision,
+                        root_path_dialect, bound_location_context_id, binding_evidence_json,
+                        created_at_ms, updated_at_ms
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, Statement.RETURN_GENERATED_KEYS);
             statement.setString(1, source.name());
             statement.setString(2, source.rootPath());
             statement.setString(3, source.rootPathKey());
             statement.setLong(4, source.locationRevision());
-            statement.setLong(5, source.createdAtMs());
-            statement.setLong(6, source.updatedAtMs());
+            statement.setString(5, source.rootPathDialect());
+            statement.setString(6, source.boundLocationContextId());
+            statement.setString(7, source.bindingEvidenceJson());
+            statement.setLong(8, source.createdAtMs());
+            statement.setLong(9, source.updatedAtMs());
             return statement;
         }, keyHolder);
 
         return new Source(generatedId(keyHolder), source.name(), source.rootPath(), source.rootPathKey(),
-                source.locationRevision(), source.createdAtMs(), source.updatedAtMs());
+                source.locationRevision(), source.rootPathDialect(), source.boundLocationContextId(),
+                source.bindingEvidenceJson(), source.createdAtMs(), source.updatedAtMs());
     }
 
     public Optional<Source> findSourceById(long id) {
@@ -395,6 +401,9 @@ public class CatalogRepository {
                 resultSet.getString("root_path"),
                 resultSet.getString("root_path_key"),
                 resultSet.getLong("location_revision"),
+                resultSet.getString("root_path_dialect"),
+                resultSet.getString("bound_location_context_id"),
+                resultSet.getString("binding_evidence_json"),
                 resultSet.getLong("created_at_ms"),
                 resultSet.getLong("updated_at_ms"));
     }
