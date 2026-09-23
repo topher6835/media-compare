@@ -17,9 +17,25 @@ public class LocationContextRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    /** Reserve SQLite's writer before reading active anchors. Call inside the short creation transaction. */
+    /** Reserve SQLite's writer before LocationContext authority reads in a short transaction. */
     public void reserveWrite() {
         jdbcTemplate.update("UPDATE location_context SET id = id WHERE 0");
+    }
+
+    public boolean hasBoundSources(String contextId) {
+        return jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1 FROM source WHERE bound_location_context_id = ?
+                )
+                """, Integer.class, contextId) == 1;
+    }
+
+    public int retireActive(String contextId, long expectedRevision, long retiredAtMs) {
+        return jdbcTemplate.update("""
+                UPDATE location_context
+                SET lifecycle_status = 'RETIRED', revision = revision + 1, updated_at_ms = ?
+                WHERE id = ? AND lifecycle_status = 'ACTIVE' AND revision = ?
+                """, retiredAtMs, contextId, expectedRevision);
     }
 
     public List<LocationContext> findActive() {
