@@ -2,6 +2,7 @@ package io.github.topher6835.mediacompare.catalog;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -14,6 +15,19 @@ public class LocationContextRepository {
 
     public LocationContextRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
+    }
+
+    /** Reserve SQLite's writer before reading active anchors. Call inside the short creation transaction. */
+    public void reserveWrite() {
+        jdbcTemplate.update("UPDATE location_context SET id = id WHERE 0");
+    }
+
+    public List<LocationContext> findActive() {
+        return jdbcTemplate.query("""
+                SELECT * FROM location_context
+                WHERE lifecycle_status = 'ACTIVE'
+                ORDER BY id ASC
+                """, LocationContextRepository::map);
     }
 
     public LocationContext insert(LocationContext context) {
