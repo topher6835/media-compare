@@ -297,6 +297,8 @@ Application lifecycle timestamps use epoch milliseconds stored as SQLite integer
 
 The preceding sections describe the implemented twelve-table schema, including V5 LocationContext persistence and first-time Source binding storage. The wider target model below remains approved architecture, not implemented SourceMembership, FileEntry identity/presence authority, probe orchestration, rebinding, or scan behavior.
 
+The new `scan.authority` records are transient pure values, not database rows or a migration. A trusted `ResolvedFileCandidate` carries current Source/context IDs and revisions, exact absolute structured file path/key, a component-derived Source-relative portable path/key, regular non-link and same-volume APFS classification, size, and exact mtime. Its future FileEntry identity portion is `(location_context_id, file_location_key)`; the Source-relative portion belongs to a future membership. The typed start/end snapshots and traversal-completion result can authorize a future missing sweep only for an unchanged, completely covered scope. No current FileEntry is converted to resolved status by reconstruction from Source root and relative path; no V6 schema or operational indexing change has occurred.
+
 ```text
 Catalog
   ├─ LocationContext
