@@ -2,7 +2,7 @@ package io.github.topher6835.mediacompare.location;
 
 import java.util.Objects;
 
-/** Catalog-independent expected relationship used during pure Source-root comparison. */
+/** Catalog-independent expected relationship for Source-root validation and comparison. */
 public record MacOsApfsSourceRootComparisonContext(
         String locationContextId,
         long locationContextRevision,

@@ -65,6 +65,69 @@ class MacOsApfsContinuityVerifierTests {
     }
 
     @Test
+    void acceptsOneInitialSourceRootCandidateWithoutHistoricalBaseline() {
+        assertAccepted(MacOsApfsContinuityVerifier.validateInitialSourceRoot(
+                EvidenceTestFixtures.comparisonContext(), EvidenceTestFixtures.sourceRoot()));
+    }
+
+    @Test
+    void initialCandidateRequiresCurrentContextAndPostBindSourceRevisions() {
+        MacOsApfsSourceRootComparisonContext expected = EvidenceTestFixtures.comparisonContext();
+        MacOsApfsSourceRootEvidence valid = EvidenceTestFixtures.sourceRoot();
+
+        assertResult(ContinuityOutcome.MISMATCH, ContinuityReason.SOURCE_CONTEXT_ID_MISMATCH,
+                MacOsApfsContinuityVerifier.validateInitialSourceRoot(expected,
+                        initialCandidate("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", 3, 7,
+                                EvidenceTestFixtures.ROOT, EvidenceTestFixtures.VOLUME_UUID, true, false)));
+        assertResult(ContinuityOutcome.MISMATCH, ContinuityReason.CONTEXT_REVISION_MISMATCH,
+                MacOsApfsContinuityVerifier.validateInitialSourceRoot(expected,
+                        initialCandidate(valid.locationContextId(), 4, 7,
+                                EvidenceTestFixtures.ROOT, EvidenceTestFixtures.VOLUME_UUID, true, false)));
+        assertResult(ContinuityOutcome.MISMATCH, ContinuityReason.SOURCE_LOCATION_REVISION_MISMATCH,
+                MacOsApfsContinuityVerifier.validateInitialSourceRoot(expected,
+                        initialCandidate(valid.locationContextId(), 3, 6,
+                                EvidenceTestFixtures.ROOT, EvidenceTestFixtures.VOLUME_UUID, true, false)));
+    }
+
+    @Test
+    void initialCandidateRequiresContainmentVolumeAndDirectoryClassification() {
+        MacOsApfsSourceRootComparisonContext expected = EvidenceTestFixtures.comparisonContext();
+        String contextId = EvidenceTestFixtures.CONTEXT_ID;
+
+        assertResult(ContinuityOutcome.UNCERTAIN, ContinuityReason.SOURCE_ROOT_OUTSIDE_CONTEXT,
+                MacOsApfsContinuityVerifier.validateInitialSourceRoot(expected,
+                        initialCandidate(contextId, 3, 7, unix("/Volumes/Other"),
+                                EvidenceTestFixtures.VOLUME_UUID, true, false)));
+        assertResult(ContinuityOutcome.MISMATCH, ContinuityReason.SOURCE_ROOT_VOLUME_UUID_MISMATCH,
+                MacOsApfsContinuityVerifier.validateInitialSourceRoot(expected,
+                        initialCandidate(contextId, 3, 7, EvidenceTestFixtures.ROOT,
+                                "22222222-2222-2222-2222-222222222222", true, false)));
+        assertResult(ContinuityOutcome.MISMATCH, ContinuityReason.SOURCE_ROOT_DIRECTORY_MISMATCH,
+                MacOsApfsContinuityVerifier.validateInitialSourceRoot(expected,
+                        initialCandidate(contextId, 3, 7, EvidenceTestFixtures.ROOT,
+                                EvidenceTestFixtures.VOLUME_UUID, false, false)));
+        assertResult(ContinuityOutcome.MISMATCH, ContinuityReason.SOURCE_ROOT_SYMBOLIC_LINK_MISMATCH,
+                MacOsApfsContinuityVerifier.validateInitialSourceRoot(expected,
+                        initialCandidate(contextId, 3, 7, EvidenceTestFixtures.ROOT,
+                                EvidenceTestFixtures.VOLUME_UUID, true, true)));
+    }
+
+    @Test
+    void initialCandidateRetainsTypedProfileAndCanonicalPathKeyRules() {
+        MacOsApfsSourceRootEvidence valid = EvidenceTestFixtures.sourceRoot();
+        assertThrows(IllegalArgumentException.class, () -> new MacOsApfsSourceRootEvidence(
+                valid.version(), "other-profile", valid.profileVersion(), valid.locationContextId(),
+                valid.locationContextRevision(), valid.sourceLocationRevision(), valid.rootLocationPath(),
+                valid.rootLocationKey(), valid.volumeUuid(), valid.rootInode(), valid.rootBirthTime(),
+                true, false, valid.acceptedAtMs()));
+        assertThrows(IllegalArgumentException.class, () -> new MacOsApfsSourceRootEvidence(
+                valid.version(), valid.profile(), valid.profileVersion(), valid.locationContextId(),
+                valid.locationContextRevision(), valid.sourceLocationRevision(), valid.rootLocationPath(),
+                LocationKeyCodec.encode(unix("/Volumes/Archive/Other")), valid.volumeUuid(),
+                valid.rootInode(), valid.rootBirthTime(), true, false, valid.acceptedAtMs()));
+    }
+
+    @Test
     void rejectsSourceContextAndRevisionContradictions() {
         MacOsApfsSourceRootEvidence baseline = EvidenceTestFixtures.sourceRoot();
 
@@ -238,6 +301,12 @@ class MacOsApfsContinuityVerifierTests {
         return EvidenceTestFixtures.sourceRoot(
                 contextId, contextRevision, sourceRevision, root, volumeUuid, inode,
                 birthTime, directory, symbolicLink, 0);
+    }
+
+    private static MacOsApfsSourceRootEvidence initialCandidate(String contextId, long contextRevision,
+            long sourceRevision, LocationPath root, String volumeUuid, boolean directory, boolean symbolicLink) {
+        return EvidenceTestFixtures.sourceRoot(contextId, contextRevision, sourceRevision, root, volumeUuid,
+                "123456", EvidenceTestFixtures.sourceRoot().rootBirthTime(), directory, symbolicLink, 0);
     }
 
     private static LocationPath unix(String value) {
