@@ -182,4 +182,4 @@ The durable documentation baseline is:
 
 ## Next Recommended Step
 
-Plan the coordinated V6 membership/FileEntry authority cutover using the pure scan contract. The host traversal adapter still needs exact child mount/provider classification and transactional publication wiring; indexing admission for unbound/unsupported Sources must be decided explicitly. Unbinding/rebinding remains after membership authority, and same-anchor replacement remains usable only for unbound contexts. Video durable integration remains deferred.
+Plan the coordinated V6 membership/FileEntry authority cutover using the pure scan contract. Before the cutover, decide the operational policy for unbound/unsupported Sources under the new scan authority and which SCAN execution version owns the SourceMembership/FileEntry authority semantics. The host traversal adapter still needs exact child mount/provider classification and transactional publication wiring. Unbinding/rebinding remains after membership authority, and same-anchor replacement remains usable only for unbound contexts. Video durable integration remains deferred.
