@@ -38,6 +38,17 @@ public class LocationContextRepository {
                 """, retiredAtMs, contextId, expectedRevision);
     }
 
+    public int acceptReviewRequired(String contextId, long expectedRevision, long acceptedAtMs,
+            String acceptanceEvidenceJson) {
+        return jdbcTemplate.update("""
+                UPDATE location_context
+                SET continuity_status = 'ACCEPTED', continuity_evidence_json = ?,
+                    revision = ?, updated_at_ms = ?
+                WHERE id = ? AND lifecycle_status = 'ACTIVE'
+                    AND continuity_status = 'REVIEW_REQUIRED' AND revision = ?
+                """, acceptanceEvidenceJson, expectedRevision + 1, acceptedAtMs, contextId, expectedRevision);
+    }
+
     public List<LocationContext> findActive() {
         return jdbcTemplate.query("""
                 SELECT * FROM location_context

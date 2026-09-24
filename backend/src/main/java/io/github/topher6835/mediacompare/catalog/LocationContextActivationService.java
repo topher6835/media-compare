@@ -22,6 +22,10 @@ public class LocationContextActivationService {
         if (requested.lifecycleStatus() != LocationContext.LifecycleStatus.ACTIVE) {
             throw new IllegalArgumentException("Requested LocationContext must be ACTIVE");
         }
+        if (requested.continuityStatus() != LocationContext.ContinuityStatus.REVIEW_REQUIRED
+                || requested.continuityEvidenceJson() != null) {
+            throw new IllegalArgumentException("New ACTIVE LocationContext requires review without evidence");
+        }
         LocationPath requestedAnchor = LocationAnchorPolicy.validateAnchor(
                 requested.anchorLocationPath(), requested.anchorLocationKey());
 

@@ -74,6 +74,24 @@ class LocationContextActivationServiceTests {
     }
 
     @Test
+    void rejectsCallerSuppliedAcceptedContext() {
+        LocationContext requested = new LocationContext(UUID.randomUUID().toString(),
+                path(unix("/Archive")), key(unix("/Archive")), LifecycleStatus.ACTIVE,
+                ContinuityStatus.ACCEPTED, 7, "{}", 11, 15);
+        assertThrows(IllegalArgumentException.class, () -> activation.createActive(requested));
+        assertTrue(contexts.findById(requested.id()).isEmpty());
+    }
+
+    @Test
+    void rejectsReviewRequiredContextWithEvidence() {
+        LocationContext requested = new LocationContext(UUID.randomUUID().toString(),
+                path(unix("/Archive")), key(unix("/Archive")), LifecycleStatus.ACTIVE,
+                ContinuityStatus.REVIEW_REQUIRED, 7, "{}", 11, 15);
+        assertThrows(IllegalArgumentException.class, () -> activation.createActive(requested));
+        assertTrue(contexts.findById(requested.id()).isEmpty());
+    }
+
+    @Test
     void rejectsExactActiveAnchorWithoutChangingRows() {
         assertConflict(unix("/Archive"), unix("/Archive"));
     }
