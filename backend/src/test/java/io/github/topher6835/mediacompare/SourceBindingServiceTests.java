@@ -50,6 +50,8 @@ import io.github.topher6835.mediacompare.catalog.SourceMembership;
 import io.github.topher6835.mediacompare.catalog.SourceMembershipRepository;
 import io.github.topher6835.mediacompare.catalog.SourceRebindingConflictException;
 import io.github.topher6835.mediacompare.catalog.SourceRebindingService;
+import io.github.topher6835.mediacompare.catalog.SourceRelocationConflictException;
+import io.github.topher6835.mediacompare.catalog.SourceRelocationService;
 import io.github.topher6835.mediacompare.catalog.SourceUnbindingService;
 import io.github.topher6835.mediacompare.location.ContinuityProbeResult;
 import io.github.topher6835.mediacompare.location.LocationContextAcceptanceEvidence;
@@ -91,6 +93,7 @@ class SourceBindingServiceTests {
     @Autowired private SourceBindingPeriodRepository periods;
     @Autowired private SourceUnbindingService unbinding;
     @Autowired private SourceRebindingService rebinding;
+    @Autowired private SourceRelocationService relocation;
     @Autowired private SourceMembershipRepository memberships;
     @Autowired private SourceMembershipPublicationService publisher;
     @Autowired private Version3ScanExecutionService admission;
@@ -110,6 +113,7 @@ class SourceBindingServiceTests {
         coordinator.gate = null;
         coordinator.forceGuardMiss = false;
         coordinator.forceRebindGuardMiss = false;
+        coordinator.forceRelocateGuardMiss = false;
         coordinator.forcePeriodInsertFailure = false;
         jdbc.update("DELETE FROM content_hash");
         jdbc.update("DELETE FROM analysis_record");
@@ -820,6 +824,396 @@ class SourceBindingServiceTests {
         assertEquals(3, admission.create(80).job().executionVersion());
     }
 
+    @Test
+    void relocationChangesOnlyCurrentSourceRootAndOpensNewPeriod() {
+        LocationContext context = acceptedContext(anchor());
+        Source unbound = structuredUnbound(context);
+        SourceBindingPeriod closed = periods.findLatestBySourceId(unbound.id()).orElseThrow();
+
+        Source relocated = relocate(unbound, otherInside(), context);
+
+        assertEquals(new Source(unbound.id(), unbound.name(), "/Volumes/Archive/Other", key(otherInside()),
+                7, unbound.rootPathDialect(), context.id(), relocated.bindingEvidenceJson(),
+                unbound.createdAtMs(), 35), relocated);
+        assertEquals(relocated, sources.findSourceById(unbound.id()).orElseThrow());
+        var evidence = SourceBindingAuthority.requireCurrentBound(relocated).macOsApfsSourceRootEvidence();
+        assertEquals(7, evidence.sourceLocationRevision());
+        assertEquals(context.id(), evidence.locationContextId());
+        assertEquals(8, evidence.locationContextRevision());
+        assertEquals(otherInside(), evidence.rootLocationPath());
+        assertEquals(closed, periods.findBySourceId(unbound.id()).getFirst());
+        assertEquals(java.util.List.of(closed, expectedPeriod(relocated)), periods.findBySourceId(unbound.id()));
+        assertThrows(SourceRelocationConflictException.class,
+                () -> relocate(unbound, thirdInside(), context));
+        assertThrows(SourceRebindingConflictException.class, () -> rebind(unbound, context));
+    }
+
+    @Test
+    void relocationRejectsIneligibleStateAndContradictoryHistory() {
+        LocationContext context = acceptedContext(anchor());
+        Source legacy = legacySource("/Volumes/Archive/Photos");
+        assertThrows(SourceRelocationConflictException.class,
+                () -> relocation.relocateAndBind(legacy.id(), 4, "/Volumes/Archive/Other",
+                        context.id(), 8, 35, relocationCapture(legacy, context, otherInside(), 5)));
+        Source bound = bind(legacy, context, capture(legacy, context, photos()));
+        assertThrows(SourceRelocationConflictException.class,
+                () -> relocation.relocateAndBind(bound.id(), 5, "/Volumes/Archive/Other",
+                        context.id(), 8, 35, relocationCapture(bound, context, otherInside(), 6)));
+        Source unbound = unbinding.unbind(bound.id(), 5, 30);
+        assertRelocationFailureUnchanged(SourceRelocationConflictException.class, unbound,
+                context, "/Volumes/Archive/Photos",
+                relocationCapture(unbound, context, photos(), 7));
+        SourceBindingPeriod closed = periods.findLatestBySourceId(unbound.id()).orElseThrow();
+        jdbc.update("DELETE FROM source_binding_period WHERE source_id = ?", unbound.id());
+        assertRelocationFailureUnchanged(IllegalStateException.class, unbound, context,
+                "/Volumes/Archive/Other", relocationCapture(unbound, context, otherInside(), 7));
+        periods.insertOpen(new SourceBindingPeriod(null, closed.sourceId(), closed.boundSourceLocationRevision(),
+                closed.locationContextId(), closed.rootPathDialect(), closed.rootPath(), closed.rootPathKey(),
+                closed.bindingEvidenceJson(), closed.boundAtMs(), null, null));
+        assertRelocationFailureUnchanged(IllegalStateException.class, unbound, context,
+                "/Volumes/Archive/Other", relocationCapture(unbound, context, otherInside(), 7));
+        jdbc.update("DELETE FROM source_binding_period WHERE source_id = ?", unbound.id());
+        jdbc.update("""
+                INSERT INTO source_binding_period (source_id, bound_source_location_revision,
+                    location_context_id, root_path_dialect, root_path, root_path_key,
+                    binding_evidence_json, bound_at_ms, unbound_source_location_revision, unbound_at_ms)
+                VALUES (?, 5, ?, 'unix', ?, 'wrong-key', ?, 25, 6, 30)
+                """, unbound.id(), context.id(), unbound.rootPath(), closed.bindingEvidenceJson());
+        assertRelocationFailureUnchanged(IllegalStateException.class, unbound, context,
+                "/Volumes/Archive/Other", relocationCapture(unbound, context, otherInside(), 7));
+        jdbc.update("DELETE FROM source_binding_period WHERE source_id = ?", unbound.id());
+        jdbc.update("""
+                INSERT INTO source_binding_period (source_id, bound_source_location_revision,
+                    location_context_id, root_path_dialect, root_path, root_path_key,
+                    binding_evidence_json, bound_at_ms, unbound_source_location_revision, unbound_at_ms)
+                VALUES (?, 5, ?, 'unix', ?, ?, ?, 25, 6, 31)
+                """, unbound.id(), context.id(), unbound.rootPath(), unbound.rootPathKey(),
+                closed.bindingEvidenceJson());
+        assertRelocationFailureUnchanged(IllegalStateException.class, unbound, context,
+                "/Volumes/Archive/Other", relocationCapture(unbound, context, otherInside(), 7));
+        jdbc.update("UPDATE source_binding_period SET unbound_at_ms = 30 WHERE source_id = ?", unbound.id());
+        jdbc.update("UPDATE source_binding_period SET unbound_source_location_revision = 7 WHERE source_id = ?",
+                unbound.id());
+        assertRelocationFailureUnchanged(IllegalStateException.class, unbound, context,
+                "/Volumes/Archive/Other", relocationCapture(unbound, context, otherInside(), 7));
+        jdbc.update("UPDATE source_binding_period SET unbound_source_location_revision = 6 WHERE source_id = ?",
+                unbound.id());
+        FileEntry file = sources.insert(new FileEntry(null, "UNRESOLVED", null, null,
+                null, null, 12, null, null, null, 0, 10, 12));
+        memberships.insert(new SourceMembership(null, unbound.id(), file.id(), "a.jpg", "a.jpg",
+                "ACTIVE", "PRESENT", 0, 0, 10, 12, null, null, null, null));
+        assertRelocationFailureUnchanged(IllegalStateException.class, unbound, context,
+                "/Volumes/Archive/Other", relocationCapture(unbound, context, otherInside(), 7));
+    }
+
+    @Test
+    void relocationRejectsStaleRevisionsTimeOverflowAndMalformedOldRoot() {
+        LocationContext context = acceptedContext(anchor());
+        Source unbound = structuredUnbound(context);
+        SourceBindingCapture valid = relocationCapture(unbound, context, otherInside(), 7);
+        assertThrows(SourceRelocationConflictException.class,
+                () -> relocation.relocateAndBind(unbound.id(), 5, "/Volumes/Archive/Other",
+                        context.id(), 8, 35, valid));
+        assertThrows(SourceRelocationConflictException.class,
+                () -> relocation.relocateAndBind(unbound.id(), 6, "/Volumes/Archive/Other",
+                        context.id(), 7, 35, valid));
+        assertThrows(SourceRelocationConflictException.class,
+                () -> relocation.relocateAndBind(unbound.id(), 6, "/Volumes/Archive/Other",
+                        context.id(), 8, 29, valid));
+        assertRelocationFailureUnchanged(IllegalArgumentException.class, unbound, context,
+                "relative/root", valid);
+        jdbc.update("UPDATE source SET root_path_key = 'wrong-key' WHERE id = ?", unbound.id());
+        assertThrows(IllegalStateException.class,
+                () -> relocation.relocateAndBind(unbound.id(), 6, "/Volumes/Archive/Other",
+                        context.id(), 8, 35, valid));
+        jdbc.update("UPDATE source SET root_path_key = ? WHERE id = ?", unbound.rootPathKey(), unbound.id());
+        jdbc.update("UPDATE source SET root_path_dialect = NULL WHERE id = ?", unbound.id());
+        assertThrows(IllegalStateException.class,
+                () -> relocation.relocateAndBind(unbound.id(), 6, "/Volumes/Archive/Other",
+                        context.id(), 8, 35, valid));
+        jdbc.update("UPDATE source SET root_path_dialect = 'unix' WHERE id = ?", unbound.id());
+        jdbc.update("UPDATE source SET location_revision = ? WHERE id = ?", Long.MAX_VALUE, unbound.id());
+        jdbc.update("UPDATE source_binding_period SET unbound_source_location_revision = ? WHERE source_id = ?",
+                Long.MAX_VALUE, unbound.id());
+        assertThrows(SourceRelocationConflictException.class,
+                () -> relocation.relocateAndBind(unbound.id(), Long.MAX_VALUE, "/Volumes/Archive/Other",
+                        context.id(), 8, 35, valid));
+        assertTrue(periods.findOpenBySourceId(unbound.id()).isEmpty());
+    }
+
+    @Test
+    void relocationRequiresCurrentContextAndExactFreshNewRootCapture() {
+        LocationContext context = acceptedContext(anchor());
+        Source unbound = structuredUnbound(context);
+        SourceBindingCapture valid = relocationCapture(unbound, context, otherInside(), 7);
+        assertRelocationFailureUnchanged(IllegalArgumentException.class, unbound, context,
+                "/Volumes/Archive/Other", new SourceBindingCapture(unbound.id(), "/Volumes/Archive/Other",
+                        ContinuityProbeResult.unavailable(), valid.sourceRootProbeResult()));
+        assertRelocationFailureUnchanged(IllegalArgumentException.class, unbound, context,
+                "/Volumes/Archive/Other", new SourceBindingCapture(unbound.id(), "/Volumes/Archive/Other",
+                        ContinuityProbeResult.accepted(contextEvidence(anchor(), VOLUME_UUID, "3", true, false)),
+                        valid.sourceRootProbeResult()));
+        assertRelocationFailureUnchanged(IllegalArgumentException.class, unbound, context,
+                "/Volumes/Archive/Other", new SourceBindingCapture(unbound.id(), "/Volumes/Archive/Other",
+                        valid.contextProbeResult(), ContinuityProbeResult.unavailable()));
+        assertRelocationFailureUnchanged(IllegalArgumentException.class, unbound, context,
+                "/Volumes/Archive/Other", new SourceBindingCapture(unbound.id() + 1, "/Volumes/Archive/Other",
+                        valid.contextProbeResult(), valid.sourceRootProbeResult()));
+        assertRelocationFailureUnchanged(IllegalArgumentException.class, unbound, context,
+                "/Volumes/Archive/Other", new SourceBindingCapture(unbound.id(), unbound.rootPath(),
+                        valid.contextProbeResult(), valid.sourceRootProbeResult()));
+        assertRelocationFailureUnchanged(IllegalArgumentException.class, unbound, context,
+                "/Volumes/Archive/Other", new SourceBindingCapture(unbound.id(), "/Volumes/Archive/Other",
+                        valid.contextProbeResult(), ContinuityProbeResult.accepted(
+                                rootEvidence(context.id(), 8, 7, thirdInside(), VOLUME_UUID, true, false))));
+        assertRelocationFailureUnchanged(IllegalArgumentException.class, unbound, context,
+                "/Volumes/Archive/Other", relocationCapture(unbound, context, otherInside(), 6));
+        assertRelocationFailureUnchanged(IllegalArgumentException.class, unbound, context,
+                "/Volumes/Other", relocationCapture(unbound, context, otherAnchor(), 7));
+        jdbc.update("UPDATE location_context SET continuity_status = 'REVIEW_REQUIRED' WHERE id = ?", context.id());
+        assertThrows(SourceRelocationConflictException.class,
+                () -> relocation.relocateAndBind(unbound.id(), 6, "/Volumes/Archive/Other",
+                        context.id(), 8, 35, valid));
+        jdbc.update("UPDATE location_context SET continuity_status = 'ACCEPTED', continuity_evidence_json = ? WHERE id = ?",
+                new MacOsApfsLocationContextEvidenceCodec().encode(contextEvidence(anchor(),
+                        VOLUME_UUID, "2", true, false)), context.id());
+        assertThrows(SourceRelocationConflictException.class,
+                () -> relocation.relocateAndBind(unbound.id(), 6, "/Volumes/Archive/Other",
+                        context.id(), 8, 35, valid));
+        jdbc.update("UPDATE location_context SET continuity_evidence_json = '{' WHERE id = ?", context.id());
+        assertThrows(IllegalStateException.class,
+                () -> relocation.relocateAndBind(unbound.id(), 6, "/Volumes/Archive/Other",
+                        context.id(), 8, 35, valid));
+        jdbc.update("UPDATE location_context SET lifecycle_status = 'RETIRED', revision = 9 WHERE id = ?",
+                context.id());
+        assertThrows(SourceRelocationConflictException.class,
+                () -> relocation.relocateAndBind(unbound.id(), 6, "/Volumes/Archive/Other",
+                        context.id(), 9, 35, valid));
+        assertEquals(unbound, sources.findSourceById(unbound.id()).orElseThrow());
+    }
+
+    @Test
+    void relocationWriteAndPeriodFailuresLeaveOldRootUnbound() {
+        LocationContext context = acceptedContext(anchor());
+        Source unbound = structuredUnbound(context);
+        SourceBindingPeriod closed = periods.findLatestBySourceId(unbound.id()).orElseThrow();
+        coordinator.forceRelocateGuardMiss = true;
+        assertThrows(SourceRelocationConflictException.class, () -> relocate(unbound, otherInside(), context));
+        coordinator.forceRelocateGuardMiss = false;
+        assertEquals(unbound, sources.findSourceById(unbound.id()).orElseThrow());
+        assertEquals(java.util.List.of(closed), periods.findBySourceId(unbound.id()));
+        coordinator.forcePeriodInsertFailure = true;
+        assertThrows(IllegalStateException.class, () -> relocate(unbound, otherInside(), context));
+        coordinator.forcePeriodInsertFailure = false;
+        assertEquals(unbound, sources.findSourceById(unbound.id()).orElseThrow());
+        assertEquals(java.util.List.of(closed), periods.findBySourceId(unbound.id()));
+    }
+
+    @Test
+    void relocationPreservesRetiredHistoryAndNewContextObservationCreatesNewFileEntry() {
+        LocationContext oldContext = acceptedContext(anchor());
+        Source legacy = legacySource("/Volumes/Archive/Photos");
+        Source bound = bind(legacy, oldContext, capture(legacy, oldContext, photos()));
+        LocationPath oldFile = LocationPathParser.parse(LocationDialect.UNIX,
+                "/Volumes/Archive/Photos/a.jpg");
+        jdbc.update("INSERT INTO content_record (id, size_bytes, created_at_ms) VALUES (100, 12, 1)");
+        jdbc.update("""
+                INSERT INTO file_entry (id, location_identity_status, location_context_id,
+                    location_path, location_key, current_content_id, size_bytes,
+                    modified_time_epoch_second, modified_time_nano, observation_revision,
+                    first_seen_at_ms, last_seen_at_ms)
+                VALUES (40, 'RESOLVED', ?, ?, ?, 100, 12, 123, 456, 2, 10, 12)
+                """, oldContext.id(), pathCodec.encode(oldFile), key(oldFile));
+        jdbc.update("""
+                INSERT INTO source_membership (id, source_id, file_entry_id, relative_path,
+                    path_key, applicability_status, presence_status, membership_revision,
+                    observed_file_entry_revision, first_seen_at_ms, last_seen_at_ms,
+                    observed_source_location_revision, observed_location_context_revision)
+                VALUES (50, ?, 40, 'a.jpg', 'a.jpg', 'ACTIVE', 'PRESENT', 2, 2, 10, 12, 5, 8)
+                """, bound.id());
+        jdbc.update("""
+                INSERT INTO analysis_record (id, content_record_id, analysis_type, analyzer_id,
+                    analyzer_version, configuration_version, configuration_hash,
+                    configuration_json, status, created_at_ms)
+                VALUES (60, 100, 'CONTENT_HASH', 'builtin.sha256', '1', 1,
+                    'hash', '{}', 'COMPLETED', 1)
+                """);
+        jdbc.update("INSERT INTO content_hash (analysis_record_id, algorithm, digest_hex) VALUES (60, 'SHA-256', 'abcd')");
+        Source unbound = unbinding.unbind(bound.id(), 5, 30);
+        SourceMembership retired = memberships.findMembershipById(50).orElseThrow();
+        FileEntry oldFileEntry = sources.findFileEntryById(40).orElseThrow();
+        SourceBindingPeriod closed = periods.findLatestBySourceId(unbound.id()).orElseThrow();
+        LocationContext newContext = acceptedContext(otherAnchor());
+        LocationPath newRoot = LocationPathParser.parse(LocationDialect.UNIX, "/Volumes/Other/Photos");
+        LocationPath newFile = LocationPathParser.parse(LocationDialect.UNIX, "/Volumes/Other/Photos/a.jpg");
+
+        Source relocated = relocate(unbound, newRoot, newContext);
+
+        assertEquals(newContext.id(), relocated.boundLocationContextId());
+        assertEquals(closed, periods.findBySourceId(unbound.id()).getFirst());
+        assertEquals(retired, memberships.findMembershipById(50).orElseThrow());
+        assertEquals(oldFileEntry, sources.findFileEntryById(40).orElseThrow());
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM content_record", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM analysis_record", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM content_hash", Integer.class));
+
+        insertScanRunSource(unbound.id(), 30, 6, "DISCOVERING");
+        assertThrows(IllegalStateException.class,
+                () -> publisher.publish(resolvedCandidate(unbound.id(), 5, oldContext, oldFile), 30, 1, 41));
+        jdbc.update("UPDATE scan_run_source SET status = 'DISCOVERED' WHERE id = 30");
+        assertThrows(IllegalStateException.class, () -> publisher.reconcile(
+                new MissingClaimAuthority(unbound.id(), 5, oldContext.id(), 8, photos()),
+                scans.findScanRunSourceById(30).orElseThrow(), 41));
+        jdbc.update("UPDATE scan_run_source SET source_location_revision = 7, status = 'DISCOVERING' WHERE id = 30");
+        SourceMembership current = publisher.publish(resolvedCandidate(unbound.id(), 7, newContext, newFile),
+                30, 1, 42);
+        assertTrue(current.id() != retired.id());
+        assertTrue(current.fileEntryId() != oldFileEntry.id());
+        assertEquals(7L, current.observedSourceLocationRevision());
+        assertEquals(newContext.revision(), current.observedLocationContextRevision());
+        assertEquals(retired, memberships.findMembershipById(50).orElseThrow());
+        assertEquals(oldFileEntry, sources.findFileEntryById(40).orElseThrow());
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM content_record", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM analysis_record", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM content_hash", Integer.class));
+    }
+
+    @Test
+    void oldScanSnapshotCannotGainV3AuthorityAfterRelocation() {
+        LocationContext context = acceptedContext(anchor());
+        Source unbound = structuredUnbound(context);
+        jdbc.update("""
+                INSERT INTO scan_run (id, request_type, status, options_version,
+                    options_json, created_at_ms)
+                VALUES (80, 'INDEX', 'PENDING', 1, '{}', 1)
+                """);
+        jdbc.update("""
+                INSERT INTO scan_run_source (id, scan_run_id, source_id, status,
+                    source_location_revision, traversal_generation)
+                VALUES (81, 80, ?, 'PENDING', 6, 0)
+                """, unbound.id());
+        relocate(unbound, otherInside(), context);
+        assertThrows(Version2ExecutionConflictException.class, () -> admission.create(80));
+        jdbc.update("UPDATE scan_run_source SET source_location_revision = 7 WHERE id = 81");
+        assertEquals(3, admission.create(80).job().executionVersion());
+    }
+
+    @Test
+    void relocationRacesSerializeWithOtherLifecycleTransitions() throws Exception {
+        {
+            LocationContext context = acceptedContext(anchor());
+            Source unbound = structuredUnbound(context);
+            RaceResults results = race(() -> relocate(unbound, otherInside(), context),
+                    () -> relocate(unbound, thirdInside(), context));
+            assertTrue(results.first() instanceof Source);
+            assertTrue(results.second() instanceof SourceRelocationConflictException);
+            assertEquals("/Volumes/Archive/Other", sources.findSourceById(unbound.id()).orElseThrow().rootPath());
+            assertEquals(2, periods.findBySourceId(unbound.id()).size());
+            assertEquals(1, periods.findBySourceId(unbound.id()).stream()
+                    .filter(period -> period.unboundAtMs() == null).count());
+        }
+        clear();
+        {
+            LocationContext context = acceptedContext(anchor());
+            Source unbound = structuredUnbound(context);
+            RaceResults results = race(() -> rebind(unbound, context),
+                    () -> relocate(unbound, otherInside(), context));
+            assertTrue(results.first() instanceof Source);
+            assertTrue(results.second() instanceof SourceRelocationConflictException);
+            assertEquals(unbound.rootPath(), sources.findSourceById(unbound.id()).orElseThrow().rootPath());
+            assertEquals(2, periods.findBySourceId(unbound.id()).size());
+        }
+        clear();
+        {
+            LocationContext context = acceptedContext(anchor());
+            Source unbound = structuredUnbound(context);
+            RaceResults results = race(() -> relocate(unbound, otherInside(), context),
+                    () -> rebind(unbound, context));
+            assertTrue(results.first() instanceof Source);
+            assertTrue(results.second() instanceof SourceRebindingConflictException);
+            assertEquals("/Volumes/Archive/Other", sources.findSourceById(unbound.id()).orElseThrow().rootPath());
+            assertEquals(2, periods.findBySourceId(unbound.id()).size());
+        }
+        clear();
+        {
+            LocationContext context = acceptedContext(anchor());
+            Source unbound = structuredUnbound(context);
+            RaceResults results = race(() -> relocate(unbound, otherInside(), context),
+                    () -> retirement.retireActive(context.id(), 8, 40));
+            assertTrue(results.first() instanceof Source);
+            assertTrue(results.second() instanceof LocationContextRetirementConflictException);
+        }
+        clear();
+        {
+            LocationContext context = acceptedContext(anchor());
+            Source unbound = structuredUnbound(context);
+            RaceResults results = race(() -> retirement.retireActive(context.id(), 8, 40),
+                    () -> relocate(unbound, otherInside(), context));
+            assertTrue(results.first() instanceof LocationContext);
+            assertTrue(results.second() instanceof SourceRelocationConflictException);
+            assertEquals(unbound, sources.findSourceById(unbound.id()).orElseThrow());
+            assertTrue(periods.findOpenBySourceId(unbound.id()).isEmpty());
+        }
+        clear();
+        {
+            LocationContext context = acceptedContext(anchor());
+            Source unbound = structuredUnbound(context);
+            LocationContext next = new LocationContext(UUID.randomUUID().toString(),
+                    pathCodec.encode(anchor()), key(anchor()), LifecycleStatus.ACTIVE,
+                    ContinuityStatus.REVIEW_REQUIRED, 19, null, 40, 40);
+            RaceResults results = race(() -> relocate(unbound, otherInside(), context),
+                    () -> replacement.replaceActive(context.id(), 8, 40, next));
+            assertTrue(results.first() instanceof Source);
+            assertTrue(results.second() instanceof LocationContextReplacementConflictException);
+        }
+        clear();
+        {
+            LocationContext context = acceptedContext(anchor());
+            Source unbound = structuredUnbound(context);
+            LocationContext next = new LocationContext(UUID.randomUUID().toString(),
+                    pathCodec.encode(anchor()), key(anchor()), LifecycleStatus.ACTIVE,
+                    ContinuityStatus.REVIEW_REQUIRED, 19, null, 40, 40);
+            RaceResults results = race(() -> replacement.replaceActive(context.id(), 8, 40, next),
+                    () -> relocate(unbound, otherInside(), context));
+            assertEquals(next, results.first());
+            assertTrue(results.second() instanceof SourceRelocationConflictException);
+            assertEquals(unbound, sources.findSourceById(unbound.id()).orElseThrow());
+            assertTrue(periods.findOpenBySourceId(unbound.id()).isEmpty());
+            jdbc.update("UPDATE location_context SET continuity_status = 'ACCEPTED', continuity_evidence_json = ? WHERE id = ?",
+                    acceptanceJson(next.id(), next.revision(), anchor()), next.id());
+            assertEquals("/Volumes/Archive/Other", relocate(unbound, otherInside(),
+                    contexts.findById(next.id()).orElseThrow()).rootPath());
+        }
+    }
+
+    private Source relocate(Source unbound, LocationPath newRoot, LocationContext context) {
+        String newRootText = unixPath(newRoot);
+        return relocation.relocateAndBind(unbound.id(), 6, newRootText, context.id(),
+                context.revision(), 35, relocationCapture(unbound, context, newRoot, 7));
+    }
+
+    private SourceBindingCapture relocationCapture(Source source, LocationContext context,
+            LocationPath newRoot, long rootRevision) {
+        return new SourceBindingCapture(source.id(), unixPath(newRoot),
+                ContinuityProbeResult.accepted(contextEvidence(
+                        pathCodec.decode(context.anchorLocationPath()), VOLUME_UUID, "2", true, false)),
+                ContinuityProbeResult.accepted(rootEvidence(context.id(), context.revision(),
+                        rootRevision, newRoot, VOLUME_UUID, true, false)));
+    }
+
+    private <T extends Throwable> void assertRelocationFailureUnchanged(Class<T> expected, Source unbound,
+            LocationContext context, String requestedRoot, SourceBindingCapture capture) {
+        java.util.List<SourceBindingPeriod> history = periods.findBySourceId(unbound.id());
+        assertThrows(expected, () -> relocation.relocateAndBind(unbound.id(), 6, requestedRoot,
+                context.id(), context.revision(), 35, capture));
+        assertEquals(unbound, sources.findSourceById(unbound.id()).orElseThrow());
+        assertEquals(history, periods.findBySourceId(unbound.id()));
+    }
+
+    private static String unixPath(LocationPath path) {
+        return path.components().isEmpty() ? "/" : "/" + String.join("/", path.components());
+    }
+
     private Source structuredUnbound(LocationContext context) {
         Source legacy = legacySource("/Volumes/Archive/Photos");
         Source bound = bind(legacy, context, capture(legacy, context, photos()));
@@ -888,7 +1282,8 @@ class SourceBindingServiceTests {
         try {
             return attempt.run();
         } catch (SourceBindingConflictException | LocationContextRetirementConflictException
-                | LocationContextReplacementConflictException | SourceRebindingConflictException exception) {
+                | LocationContextReplacementConflictException | SourceRebindingConflictException
+                | SourceRelocationConflictException exception) {
             return exception;
         }
     }
@@ -1056,6 +1451,7 @@ class SourceBindingServiceTests {
         volatile ReservationGate gate;
         volatile boolean forceGuardMiss;
         volatile boolean forceRebindGuardMiss;
+        volatile boolean forceRelocateGuardMiss;
         volatile boolean forcePeriodInsertFailure;
     }
 
@@ -1131,6 +1527,16 @@ class SourceBindingServiceTests {
                 return 0;
             }
             return super.rebindStructuredSource(source, contextId, evidenceJson, reboundAtMs);
+        }
+
+        @Override
+        public int relocateAndBindStructuredSource(Source source, String newRootPath, String newRootKey,
+                String contextId, String evidenceJson, long relocatedAtMs) {
+            if (coordinator.forceRelocateGuardMiss) {
+                return 0;
+            }
+            return super.relocateAndBindStructuredSource(source, newRootPath, newRootKey,
+                    contextId, evidenceJson, relocatedAtMs);
         }
     }
 

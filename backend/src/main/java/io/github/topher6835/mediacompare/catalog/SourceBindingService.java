@@ -80,7 +80,7 @@ public class SourceBindingService {
             throw exception;
         }
         long boundRevision = expectedSourceRevision + 1;
-        var validated = validation.validate(source, context, acceptance, capture, boundRevision);
+        var validated = validation.validate(source, source.rootPath(), context, acceptance, capture, boundRevision);
         if (sources.bindUnboundSource(sourceId, expectedSourceRevision, source.rootPath(),
                 validated.rootKey(), contextId, validated.evidenceJson(), boundAtMs) != 1) {
             throw new SourceBindingConflictException(sourceId, "Source binding state changed");

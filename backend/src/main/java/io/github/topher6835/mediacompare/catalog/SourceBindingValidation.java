@@ -13,11 +13,11 @@ import io.github.topher6835.mediacompare.location.MacOsApfsSourceRootEvidence;
 import io.github.topher6835.mediacompare.location.SourceBindingEvidence;
 import io.github.topher6835.mediacompare.location.SourceBindingEvidenceCodec;
 
-/** Shared APFS evidence checks for first binding and explicit rebinding. */
+/** Shared APFS evidence checks for binding, rebinding, and explicit relocation. */
 final class SourceBindingValidation {
     private final SourceBindingEvidenceCodec bindingCodec = new SourceBindingEvidenceCodec();
 
-    ValidatedBinding validate(Source source, LocationContext context,
+    ValidatedBinding validate(Source source, String intendedRootPath, LocationContext context,
             LocationContextAcceptanceEvidence acceptance, SourceBindingCapture capture,
             long boundRevision) {
         if (capture.contextProbeResult().outcome() != ContinuityOutcome.ACCEPTED) {
@@ -34,10 +34,10 @@ final class SourceBindingValidation {
         }
         MacOsApfsSourceRootEvidence rootEvidence = capture.sourceRootProbeResult().evidence().orElseThrow();
         if (capture.sourceId() != source.id()
-                || !capture.configuredRootPathSnapshot().equals(source.rootPath())) {
+                || !capture.configuredRootPathSnapshot().equals(intendedRootPath)) {
             throw new IllegalArgumentException("Source binding capture does not match current Source");
         }
-        LocationPath configuredRoot = LocationPathParser.parse(LocationDialect.UNIX, source.rootPath());
+        LocationPath configuredRoot = LocationPathParser.parse(LocationDialect.UNIX, intendedRootPath);
         if (!configuredRoot.equals(rootEvidence.rootLocationPath())) {
             throw new IllegalArgumentException("Configured Source root differs from exact observed spelling");
         }
