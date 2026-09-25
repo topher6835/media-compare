@@ -275,6 +275,11 @@ The V5-only behavior below records the sequence that preceded the V6 cutover. Th
 - Backfill exactly one open period for each currently bound Source from its exact current root, context, revision, binding evidence, and `updated_at_ms`; leave unbound Sources without a period. Reject partial persisted binding shapes and verify foreign keys. Do not probe or synthesize evidence during migration.
 - Insert the first open period in the same writer-reserved transaction as the guarded first Source binding. Enforce unique bound revisions and one open period per Source; closing fields are paired and must advance revision and time. Future unbinding can close a period before or while withdrawing Source authority. Unbinding/rebinding and SourceMembership retirement on unbind are not implemented by V7.
 
+## Explicit Source Unbinding
+
+- Withdraw current Source authority in one short writer-reserved transaction. Require the current bound Source and its exact matching open period, then close the period at revision N+1, retire all ACTIVE SourceMemberships, and clear the Source context/evidence while preserving its structured root path, dialect, and canonical key. Advance Source revision once and use a caller-supplied non-regressing timestamp. Missing or contradictory history is an integrity failure; failed writes roll back the whole transition.
+- Unbinding makes no filesystem observation or missing claim. Retired memberships keep presence, provenance, observed revisions, FileEntry association, and timestamps; FileEntry, ContentRecord, and analysis artifacts survive. Closed binding periods do not grant v3 authority. The former LocationContext can be retired or replaced when no other Source remains bound. Rebinding and automatic membership reactivation remain future work.
+
 ## Approved Future Catalog Boundaries
 
 - Use one independent SQLite file per Catalog, with an immutable internal catalog UUID and a rebuildable known-catalog registry/settings store outside individual catalog databases. Initially allow exactly one active/open catalog; use controlled backend/context restart or reinitialization rather than hot DataSource switching. Do not silently query or reuse data across catalogs.
@@ -295,7 +300,7 @@ The V5-only behavior below records the sequence that preceded the V6 cutover. Th
 - Migrate conservatively: create one membership from every existing FileEntry without changing FileEntry, ContentRecord, or AnalysisRecord identity. Do not merge pre-existing overlapping duplicates or ambiguous collisions solely because paths or hashes match; actual consolidation evidence is a later operation.
 - Pair SourceMembership trusted-authority provenance in `observed_source_location_revision` and `observed_location_context_revision`: both are NULL for migrated or otherwise unproven historical memberships, or both are non-NULL for observations made under established Source and LocationContext authority. V6 enforces this with a database CHECK constraint. Do not impose a paired-null constraint on `last_positive_scan_run_source_id` and `last_positive_traversal_generation`; V5 did not enforce that relationship, so V6 preserves those historical values conservatively.
 
-V5 implements LocationContext/Source binding storage, and V6/v3 use the pure scan authority contract, mount-aware local APFS traversal, guarded membership publication, and conservative legacy collision retirement. Source unbinding/rebinding, Windows junction/reparse-point support, and other provider profiles remain future work.
+V5 implements LocationContext/Source binding storage, and V6/v3 use the pure scan authority contract, mount-aware local APFS traversal, guarded membership publication, and conservative legacy collision retirement. Explicit Source unbinding is implemented; rebinding, Windows junction/reparse-point support, and other provider profiles remain future work.
 
 ## Development
 

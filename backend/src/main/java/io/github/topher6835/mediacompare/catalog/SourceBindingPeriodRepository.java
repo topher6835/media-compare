@@ -55,6 +55,21 @@ public class SourceBindingPeriodRepository {
                 """, SourceBindingPeriodRepository::map, sourceId).stream().findFirst();
     }
 
+    public int closeOpen(SourceBindingPeriod period, long unboundRevision, long unboundAtMs) {
+        return jdbcTemplate.update("""
+                UPDATE source_binding_period
+                SET unbound_source_location_revision = ?, unbound_at_ms = ?
+                WHERE id = ? AND source_id = ? AND bound_source_location_revision = ?
+                  AND unbound_source_location_revision IS NULL AND unbound_at_ms IS NULL
+                  AND location_context_id = ? AND root_path_dialect = ?
+                  AND root_path = ? AND root_path_key = ? AND binding_evidence_json = ?
+                  AND bound_at_ms = ?
+                """, unboundRevision, unboundAtMs, period.id(), period.sourceId(),
+                period.boundSourceLocationRevision(), period.locationContextId(),
+                period.rootPathDialect(), period.rootPath(), period.rootPathKey(),
+                period.bindingEvidenceJson(), period.boundAtMs());
+    }
+
     public List<SourceBindingPeriod> findBySourceId(long sourceId) {
         return jdbcTemplate.query("""
                 SELECT * FROM source_binding_period WHERE source_id = ?

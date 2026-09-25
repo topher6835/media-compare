@@ -73,6 +73,20 @@ public class CatalogRepository {
                 configuredRootPath, configuredRootPath);
     }
 
+    public int unbindSource(Source source, long unboundAtMs) {
+        return jdbcTemplate.update("""
+                UPDATE source
+                SET bound_location_context_id = NULL, binding_evidence_json = NULL,
+                    location_revision = ?, updated_at_ms = ?
+                WHERE id = ? AND location_revision = ? AND updated_at_ms = ?
+                  AND bound_location_context_id = ? AND binding_evidence_json = ?
+                  AND root_path_dialect = ? AND root_path = ? AND root_path_key = ?
+                """, source.locationRevision() + 1, unboundAtMs, source.id(),
+                source.locationRevision(), source.updatedAtMs(), source.boundLocationContextId(),
+                source.bindingEvidenceJson(), source.rootPathDialect(), source.rootPath(),
+                source.rootPathKey());
+    }
+
     public List<Source> findAllSources() {
         return jdbcTemplate.query("SELECT * FROM source ORDER BY id", CatalogRepository::mapSource);
     }

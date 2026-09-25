@@ -100,6 +100,22 @@ public class SourceMembershipRepository {
                 membership.membershipRevision());
     }
 
+    public int countActiveBySourceId(long sourceId) {
+        return jdbc.queryForObject("""
+                SELECT COUNT(*) FROM source_membership
+                WHERE source_id = ? AND applicability_status = 'ACTIVE'
+                """, Integer.class, sourceId);
+    }
+
+    public int retireActiveBySourceId(long sourceId) {
+        return jdbc.update("""
+                UPDATE source_membership
+                SET applicability_status = 'RETIRED', membership_revision = membership_revision + 1
+                WHERE source_id = ? AND applicability_status = 'ACTIVE'
+                  AND membership_revision < 9223372036854775807
+                """, sourceId);
+    }
+
     public SourceMembership insert(SourceMembership membership) {
         var keys = new GeneratedKeyHolder();
         jdbc.update(connection -> {
