@@ -250,6 +250,8 @@ Initial context domains are one per Windows drive root, one per supported UNC se
 
 V6 FileEntry identity is source-independent: a surrogate ID plus `location_identity_status`, `location_context_id`, lossless `location_path`, and versioned equality `location_key`. Resolved identity is unique by `(location_context_id, location_key)`. Every migrated V5 row stays distinct and UNRESOLVED, with its ContentRecord and analyses preserved; no historical path or hash merge occurs. Trusted parent-first and child-first scans of overlapping roots converge to one resolved FileEntry with different Source-relative memberships. Strict structured path/key decoding, context/source containment, and current authority are checked before publication. FileEntry byte revision and content association change only when size or exact mtime changes, not when a membership returns from MISSING to PRESENT.
 
+The original nested/overlapping Source milestone is complete for the supported local macOS/APFS profile. End-to-end v3 acceptance covers parent and nested child Sources in both processing orders, repeat scans, parent-local reconciliation, and duplicate/storage counting. Each Source keeps its own membership and relative path while shared physical files use one FileEntry. Reconciliation changes only the scanned Source's memberships, and physical duplicate/storage counts use FileEntries rather than membership rows. Automatic remount recognition is not part of this milestone and remains deferred; additional provider/platform profiles remain future work.
+
 The pure `scan.authority` layer qualifies candidates from durable Source/context authority plus fresh context/root observations. V3 supplies a local macOS/APFS host adapter: structured `df` mount-point inspection and `diskutil` APFS identity reject child mounts even when UUIDs match. Per-directory checks, link rejection, and start/end probes fail closed on incomplete or uncertain coverage. Unsupported, unbound, or legacy-raw acceptance Sources are ineligible for new v3 admission. Windows has no supported binding profile in this slice.
 
 ### Presence, Revisions, and Filesystem Trust
@@ -384,7 +386,7 @@ macOS and Windows are both required. Filesystem handling uses Java NIO and must 
 The following remain open after the V1 review:
 
 - Additional status, request-type, classification, and stage values beyond the initial ScanRun `INDEX`/`PENDING` creation state.
-- Source remount/relocation recognition and filesystem volume hints.
+- Automatic Source remount recognition and filesystem volume hints.
 - Final symlink and Windows junction traversal behavior.
 - Detailed path equivalence beyond the V1 lossless key policy.
 - ContentRecord reconciliation/merge behavior.

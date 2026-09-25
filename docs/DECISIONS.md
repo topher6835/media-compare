@@ -292,6 +292,12 @@ The V5-only behavior below records the sequence that preceded the V6 cutover. Th
 - Reuse the APFS binding evidence validator with an explicit intended root. Require fresh accepted context/root evidence and the post-transition Source and context revisions. In one writer-reserved transaction, a dedicated guarded Source update changes root path/key and current context/evidence, advances Source revision once, verifies the bound result, and inserts a new open binding period for the new root. Closed periods remain historical; no V8 migration is needed.
 - Leave retired memberships and FileEntry/content/analysis history unchanged. A later trusted scan may publish current membership under the new root, but neither old relative paths nor old-context FileEntries imply equivalence. Stale old-root/context work fails current Source authority checks. Automatic remount recognition and context selection remain future work.
 
+## Nested and Overlapping Source Acceptance
+
+- Treat source-independent FileEntry identity plus per-Source SourceMembership as the implemented solution for nested and overlapping Source roots. Separate memberships may legitimately reference the same physical FileEntry and retain each Source-relative path.
+- The end-to-end production v3 path has acceptance coverage for the supported local macOS/APFS profile, including both parent/child scan orders, repeat scan stability, Source-local reconciliation, and duplicate/storage counting by distinct FileEntries. The original nested-folder fix is complete for this supported profile.
+- Keep missing reconciliation scoped to the Source whose trusted complete traversal produced the claim. Automatic remount recognition is explicitly deferred and is not part of this milestone; additional provider/platform support remains future work.
+
 ## Approved Future Catalog Boundaries
 
 - Use one independent SQLite file per Catalog, with an immutable internal catalog UUID and a rebuildable known-catalog registry/settings store outside individual catalog databases. Initially allow exactly one active/open catalog; use controlled backend/context restart or reinitialization rather than hot DataSource switching. Do not silently query or reuse data across catalogs.
@@ -312,7 +318,7 @@ The V5-only behavior below records the sequence that preceded the V6 cutover. Th
 - Migrate conservatively: create one membership from every existing FileEntry without changing FileEntry, ContentRecord, or AnalysisRecord identity. Do not merge pre-existing overlapping duplicates or ambiguous collisions solely because paths or hashes match; actual consolidation evidence is a later operation.
 - Pair SourceMembership trusted-authority provenance in `observed_source_location_revision` and `observed_location_context_revision`: both are NULL for migrated or otherwise unproven historical memberships, or both are non-NULL for observations made under established Source and LocationContext authority. V6 enforces this with a database CHECK constraint. Do not impose a paired-null constraint on `last_positive_scan_run_source_id` and `last_positive_traversal_generation`; V5 did not enforce that relationship, so V6 preserves those historical values conservatively.
 
-V5 implements LocationContext/Source binding storage, and V6/v3 use the pure scan authority contract, mount-aware local APFS traversal, guarded membership publication, and conservative legacy collision retirement. Explicit Source unbinding, fixed-root rebinding, and relocate-and-bind are implemented; automatic remount recognition, Windows junction/reparse-point support, and other provider profiles remain future work.
+V5 implements LocationContext/Source binding storage, and V6/v3 use the pure scan authority contract, mount-aware local APFS traversal, guarded membership publication, and conservative legacy collision retirement. Nested/overlapping Source behavior has end-to-end acceptance coverage and is complete for supported local macOS/APFS. Explicit Source unbinding, fixed-root rebinding, and relocate-and-bind are implemented; automatic remount recognition, Windows junction/reparse-point support, and other provider profiles remain future work.
 
 ## Development
 
@@ -334,7 +340,7 @@ V5 implements LocationContext/Source binding storage, and V6/v3 use the pure sca
 ## Still Open
 
 - Additional status, request-type, classification, and stage values beyond the implemented ScanRun request and initial execution-handoff values.
-- Source remount/relocation recognition and filesystem volume hints.
+- Automatic Source remount recognition and filesystem volume hints.
 - Final symlink/junction traversal behavior and detailed path equivalence.
 - ContentRecord merge/reconciliation behavior.
 - Scheduling beyond the bounded v2 worker, public cancellation/retry, and future resume.

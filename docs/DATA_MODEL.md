@@ -115,6 +115,8 @@ A ContentRecord permanently represents one byte-version. Its identity is an inte
 
 V6 removes Source ID, relative path/key, presence, and Source traversal provenance from FileEntry. All migrated V5 FileEntries are unresolved; their historical ContentRecords and analyses stay attached without inferred absolute identity. A trusted v3 observation resolves or inserts by `(location_context_id, location_key)` and reuses the same FileEntry across overlapping Sources. Size or exact mtime change increments `observation_revision` and clears `current_content_id`; a membership becoming present again without changed byte evidence does neither. `extension_key` remains the V2 lowercase technical suffix convention and is updated for newly resolved locations.
 
+The end-to-end nested/overlapping Source acceptance confirms the model for the supported local macOS/APFS profile: a parent and nested child Source publish separate SourceMembership rows, with their own relative paths, that can point to the same physical FileEntry. The behavior is stable across scan order and repeat scans. V3 reconciliation remains scoped to the Source whose complete traversal produced the missing claim.
+
 ### `source_membership` (V6)
 
 Each membership stores `id`, `source_id`, `file_entry_id`, Source-relative `relative_path` and `path_key`, `ACTIVE`/`RETIRED` applicability, `PRESENT`/`MISSING` presence, nonnegative `membership_revision`, `observed_file_entry_revision`, first/last positive timestamps, nullable last-positive ScanRunSource/generation, and nullable observed Source/context revisions. Foreign keys protect Source and FileEntry identity. `UNIQUE(source_id, file_entry_id)` prevents duplicate relationships; a partial unique index permits only one ACTIVE membership at a `(source_id, path_key)`.
@@ -285,7 +287,7 @@ Implemented fields:
 
 This is the specialized exact-hash artifact. The implemented built-in artifact uses algorithm `SHA-256` and a structurally validated lowercase 64-character hexadecimal digest. AnalysisRecord and ContentHash are inserted atomically after database evidence is revalidated. Index `(algorithm, digest_hex)`, but do not make that pair unique: separate ContentRecords with identical bytes retain separate artifacts with equal digests. The hash is never the ContentRecord primary key.
 
-The exact duplicate view uses exact built-in AnalysisRecord provenance to derive groups with at least two distinct ContentRecords. It stores no group identity. Member counts are calculated independently of FileEntry joins; distinct physical FileEntries supply present/missing occurrence counts, while memberships supply Source counts and relative-path details. A ContentRecord without a FileEntry remains a member. Potential storage savings is estimated as `max(present physical FileEntry count - 1, 0) * size_bytes`; missing entries contribute no current savings, and this is not a measurement of allocated disk blocks.
+The exact duplicate view uses exact built-in AnalysisRecord provenance to derive groups with at least two distinct ContentRecords. It stores no group identity. Member counts are calculated independently of FileEntry joins; distinct physical FileEntries supply present/missing occurrence counts, while memberships supply Source counts and relative-path details. A ContentRecord without a FileEntry remains a member. Potential storage savings is estimated as `max(present physical FileEntry count - 1, 0) * size_bytes`; missing entries contribute no current savings, and this is not a measurement of allocated disk blocks. Thus, overlapping Source memberships do not inflate physical-copy or storage-savings counts.
 
 Occurrence filters use `file_entry.extension_key` to select complete exact groups. Both `PRESENT` and `MISSING` retained occurrences can select a group; a ContentRecord without an occurrence remains a full member after another occurrence selects that group. Summary counts and savings remain whole-group values, while `filterMatch` counts only matching retained occurrences. Detail responses return the whole group and mark each occurrence against the filter. Filter options aggregate distinct digest-group and retained-occurrence counts by non-null extension across valid exact groups.
 
@@ -357,6 +359,6 @@ V1 does not include:
 - Final FFmpeg/ffprobe discovery strategy.
 - WAL-specific architecture.
 - Final symlink/junction traversal behavior.
-- Source remount/relocation detection algorithms.
+- Automatic Source remount recognition and filesystem volume hints.
 
 Temporary duplicate ContentRecords are acceptable until the concrete merge/reconciliation operation is designed and tested.
