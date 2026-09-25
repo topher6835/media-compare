@@ -278,7 +278,13 @@ The V5-only behavior below records the sequence that preceded the V6 cutover. Th
 ## Explicit Source Unbinding
 
 - Withdraw current Source authority in one short writer-reserved transaction. Require the current bound Source and its exact matching open period, then close the period at revision N+1, retire all ACTIVE SourceMemberships, and clear the Source context/evidence while preserving its structured root path, dialect, and canonical key. Advance Source revision once and use a caller-supplied non-regressing timestamp. Missing or contradictory history is an integrity failure; failed writes roll back the whole transition.
-- Unbinding makes no filesystem observation or missing claim. Retired memberships keep presence, provenance, observed revisions, FileEntry association, and timestamps; FileEntry, ContentRecord, and analysis artifacts survive. Closed binding periods do not grant v3 authority. The former LocationContext can be retired or replaced when no other Source remains bound. Rebinding and automatic membership reactivation remain future work.
+- Unbinding makes no filesystem observation or missing claim. Retired memberships keep presence, provenance, observed revisions, FileEntry association, and timestamps; FileEntry, ContentRecord, and analysis artifacts survive. Closed binding periods do not grant v3 authority. The former LocationContext can be retired or replaced when no other Source remains bound. Rebinding was a separate lifecycle slice; unbinding does not reactivate memberships.
+
+## Explicit Source Rebinding
+
+- Allow rebinding only from structured-unbound Source state with no open period, matching latest closed period, and zero ACTIVE memberships. Never-bound Sources retain the first-binding path. Preserve Source ID and exact configured root path, dialect, and canonical key; root relocation and automatic context selection are separate work.
+- Share first-binding APFS context/root capture validation and strict evidence construction through `SourceBindingValidation`. Rebinding requires fresh accepted evidence for a current ACTIVE + ACCEPTED target context, which may be the previous context or a different accepted replacement. Capture happens before the writer-reserved transaction. A guarded Source update advances revision once and atomically inserts the new open binding period; prior closed periods remain unchanged.
+- Rebinding grants Source authority but makes no membership observation or missing claim. All retired SourceMemberships remain retired until later trusted positive publication. That publication may reactivate the same membership for the same resolved FileEntry and refresh observed authority revisions. A different context does not imply historical FileEntry or content equivalence. Binding history alone never grants v3 authority.
 
 ## Approved Future Catalog Boundaries
 
@@ -300,7 +306,7 @@ The V5-only behavior below records the sequence that preceded the V6 cutover. Th
 - Migrate conservatively: create one membership from every existing FileEntry without changing FileEntry, ContentRecord, or AnalysisRecord identity. Do not merge pre-existing overlapping duplicates or ambiguous collisions solely because paths or hashes match; actual consolidation evidence is a later operation.
 - Pair SourceMembership trusted-authority provenance in `observed_source_location_revision` and `observed_location_context_revision`: both are NULL for migrated or otherwise unproven historical memberships, or both are non-NULL for observations made under established Source and LocationContext authority. V6 enforces this with a database CHECK constraint. Do not impose a paired-null constraint on `last_positive_scan_run_source_id` and `last_positive_traversal_generation`; V5 did not enforce that relationship, so V6 preserves those historical values conservatively.
 
-V5 implements LocationContext/Source binding storage, and V6/v3 use the pure scan authority contract, mount-aware local APFS traversal, guarded membership publication, and conservative legacy collision retirement. Explicit Source unbinding is implemented; rebinding, Windows junction/reparse-point support, and other provider profiles remain future work.
+V5 implements LocationContext/Source binding storage, and V6/v3 use the pure scan authority contract, mount-aware local APFS traversal, guarded membership publication, and conservative legacy collision retirement. Explicit Source unbinding and structured-Source rebinding are implemented; root relocation, Windows junction/reparse-point support, and other provider profiles remain future work.
 
 ## Development
 

@@ -7,19 +7,8 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import io.github.topher6835.mediacompare.location.ContinuityOutcome;
-import io.github.topher6835.mediacompare.location.LocationDialect;
-import io.github.topher6835.mediacompare.location.LocationKeyCodec;
-import io.github.topher6835.mediacompare.location.LocationPath;
-import io.github.topher6835.mediacompare.location.LocationPathParser;
 import io.github.topher6835.mediacompare.location.LocationContextAcceptanceEvidence;
-import io.github.topher6835.mediacompare.location.MacOsApfsContinuityVerifier;
-import io.github.topher6835.mediacompare.location.MacOsApfsLocationContextEvidence;
 import io.github.topher6835.mediacompare.location.MacOsApfsLocationContextEvidenceCodec;
-import io.github.topher6835.mediacompare.location.MacOsApfsSourceRootComparisonContext;
-import io.github.topher6835.mediacompare.location.MacOsApfsSourceRootEvidence;
-import io.github.topher6835.mediacompare.location.SourceBindingEvidence;
-import io.github.topher6835.mediacompare.location.SourceBindingEvidenceCodec;
 
 /** First-time binding of an existing legacy Source to current accepted APFS context authority. */
 @Service
@@ -27,7 +16,7 @@ public class SourceBindingService {
     private final CatalogRepository sources;
     private final LocationContextRepository contexts;
     private final SourceBindingPeriodRepository periods;
-    private final SourceBindingEvidenceCodec bindingCodec = new SourceBindingEvidenceCodec();
+    private final SourceBindingValidation validation = new SourceBindingValidation();
     private final MacOsApfsLocationContextEvidenceCodec legacyContextCodec =
             new MacOsApfsLocationContextEvidenceCodec();
 
@@ -90,40 +79,10 @@ public class SourceBindingService {
             }
             throw exception;
         }
-        if (capture.contextProbeResult().outcome() != ContinuityOutcome.ACCEPTED) {
-            throw new IllegalArgumentException("Fresh context probe must be accepted");
-        }
-        MacOsApfsLocationContextEvidence freshContext = capture.contextProbeResult().evidence().orElseThrow();
-        MacOsApfsLocationContextEvidence baseline = acceptance.macOsApfsEvidence();
-        if (MacOsApfsContinuityVerifier.verifyLocationContext(baseline, freshContext).outcome()
-                != ContinuityOutcome.ACCEPTED) {
-            throw new IllegalArgumentException("Fresh context observation does not match accepted baseline");
-        }
-        if (capture.sourceRootProbeResult().outcome() != ContinuityOutcome.ACCEPTED) {
-            throw new IllegalArgumentException("Source-root probe must be accepted");
-        }
-        MacOsApfsSourceRootEvidence rootEvidence = capture.sourceRootProbeResult().evidence().orElseThrow();
         long boundRevision = expectedSourceRevision + 1;
-        if (capture.sourceId() != sourceId
-                || !capture.configuredRootPathSnapshot().equals(source.rootPath())) {
-            throw new IllegalArgumentException("Source binding capture does not match current Source");
-        }
-        LocationPath configuredRoot = LocationPathParser.parse(LocationDialect.UNIX, source.rootPath());
-        if (!configuredRoot.equals(rootEvidence.rootLocationPath())) {
-            throw new IllegalArgumentException("Configured Source root differs from exact observed spelling");
-        }
-        var comparison = new MacOsApfsSourceRootComparisonContext(
-                contextId, context.revision(), boundRevision, baseline);
-        if (MacOsApfsContinuityVerifier.validateInitialSourceRoot(comparison, rootEvidence).outcome()
-                != ContinuityOutcome.ACCEPTED) {
-            throw new IllegalArgumentException("Source-root evidence does not match accepted APFS context");
-        }
-
-        String rootKey = LocationKeyCodec.encode(rootEvidence.rootLocationPath()).value();
-        String encoded = bindingCodec.encode(new SourceBindingEvidence(
-                SourceBindingEvidence.VERSION, sourceId, rootEvidence));
+        var validated = validation.validate(source, context, acceptance, capture, boundRevision);
         if (sources.bindUnboundSource(sourceId, expectedSourceRevision, source.rootPath(),
-                rootKey, contextId, encoded, boundAtMs) != 1) {
+                validated.rootKey(), contextId, validated.evidenceJson(), boundAtMs) != 1) {
             throw new SourceBindingConflictException(sourceId, "Source binding state changed");
         }
         Source bound = sources.findSourceById(sourceId)

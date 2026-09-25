@@ -77,6 +77,13 @@ public class SourceBindingPeriodRepository {
                 """, SourceBindingPeriodRepository::map, sourceId);
     }
 
+    public Optional<SourceBindingPeriod> findLatestBySourceId(long sourceId) {
+        return jdbcTemplate.query("""
+                SELECT * FROM source_binding_period WHERE source_id = ?
+                ORDER BY bound_source_location_revision DESC, id DESC LIMIT 1
+                """, SourceBindingPeriodRepository::map, sourceId).stream().findFirst();
+    }
+
     private static SourceBindingPeriod map(ResultSet resultSet, int rowNumber) throws SQLException {
         long closingRevision = resultSet.getLong("unbound_source_location_revision");
         Long nullableClosingRevision = resultSet.wasNull() ? null : closingRevision;

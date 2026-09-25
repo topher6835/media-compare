@@ -46,6 +46,11 @@ import io.github.topher6835.mediacompare.catalog.SourceBindingConflictException;
 import io.github.topher6835.mediacompare.catalog.SourceBindingService;
 import io.github.topher6835.mediacompare.catalog.SourceBindingPeriod;
 import io.github.topher6835.mediacompare.catalog.SourceBindingPeriodRepository;
+import io.github.topher6835.mediacompare.catalog.SourceMembership;
+import io.github.topher6835.mediacompare.catalog.SourceMembershipRepository;
+import io.github.topher6835.mediacompare.catalog.SourceRebindingConflictException;
+import io.github.topher6835.mediacompare.catalog.SourceRebindingService;
+import io.github.topher6835.mediacompare.catalog.SourceUnbindingService;
 import io.github.topher6835.mediacompare.location.ContinuityProbeResult;
 import io.github.topher6835.mediacompare.location.LocationContextAcceptanceEvidence;
 import io.github.topher6835.mediacompare.location.LocationContextAcceptanceEvidenceCodec;
@@ -59,6 +64,13 @@ import io.github.topher6835.mediacompare.location.MacOsApfsLocationContextEviden
 import io.github.topher6835.mediacompare.location.MacOsApfsSourceRootEvidence;
 import io.github.topher6835.mediacompare.location.SourceBindingEvidence;
 import io.github.topher6835.mediacompare.location.SourceBindingEvidenceCodec;
+import io.github.topher6835.mediacompare.scan.SourceMembershipPublicationService;
+import io.github.topher6835.mediacompare.scan.ScanRepository;
+import io.github.topher6835.mediacompare.scan.Version2ExecutionConflictException;
+import io.github.topher6835.mediacompare.scan.Version3ScanExecutionService;
+import io.github.topher6835.mediacompare.scan.authority.ChildStorageBoundary;
+import io.github.topher6835.mediacompare.scan.authority.MissingClaimAuthority;
+import io.github.topher6835.mediacompare.scan.authority.ResolvedFileCandidate;
 
 @SpringBootTest
 @Import(SourceBindingServiceTests.ReservationHooks.class)
@@ -77,6 +89,12 @@ class SourceBindingServiceTests {
     @Autowired private LocationContextRepository contexts;
     @Autowired private SourceBindingService binding;
     @Autowired private SourceBindingPeriodRepository periods;
+    @Autowired private SourceUnbindingService unbinding;
+    @Autowired private SourceRebindingService rebinding;
+    @Autowired private SourceMembershipRepository memberships;
+    @Autowired private SourceMembershipPublicationService publisher;
+    @Autowired private Version3ScanExecutionService admission;
+    @Autowired private ScanRepository scans;
     @Autowired private LocationContextRetirementService retirement;
     @Autowired private LocationContextReplacementService replacement;
     @Autowired private ReservationCoordinator coordinator;
@@ -91,8 +109,17 @@ class SourceBindingServiceTests {
     void clear() {
         coordinator.gate = null;
         coordinator.forceGuardMiss = false;
+        coordinator.forceRebindGuardMiss = false;
+        coordinator.forcePeriodInsertFailure = false;
+        jdbc.update("DELETE FROM content_hash");
+        jdbc.update("DELETE FROM analysis_record");
         jdbc.update("DELETE FROM source_membership");
         jdbc.update("DELETE FROM file_entry");
+        jdbc.update("DELETE FROM scan_run_source");
+        jdbc.update("DELETE FROM job_stage");
+        jdbc.update("DELETE FROM job");
+        jdbc.update("DELETE FROM scan_run");
+        jdbc.update("DELETE FROM content_record");
         jdbc.update("DELETE FROM source_binding_period");
         jdbc.update("DELETE FROM source");
         jdbc.update("DELETE FROM location_context");
@@ -410,6 +437,429 @@ class SourceBindingServiceTests {
         assertTrue(periods.findBySourceId(source.id()).isEmpty());
     }
 
+    @Test
+    void structuredUnboundSourceRebindsToSameContextWithoutChangingRootOrHistory() {
+        LocationContext context = acceptedContext(anchor());
+        Source unbound = structuredUnbound(context);
+        SourceBindingPeriod closed = periods.findLatestBySourceId(unbound.id()).orElseThrow();
+
+        Source rebound = rebind(unbound, context);
+
+        assertEquals(new Source(unbound.id(), unbound.name(), unbound.rootPath(), unbound.rootPathKey(),
+                7, unbound.rootPathDialect(), context.id(), rebound.bindingEvidenceJson(),
+                unbound.createdAtMs(), 35), rebound);
+        assertEquals(rebound, sources.findSourceById(unbound.id()).orElseThrow());
+        assertEquals(7, SourceBindingAuthority.requireCurrentBound(rebound)
+                .macOsApfsSourceRootEvidence().sourceLocationRevision());
+        assertEquals(context.id(), SourceBindingAuthority.requireCurrentBound(rebound)
+                .macOsApfsSourceRootEvidence().locationContextId());
+        assertEquals(closed, periods.findBySourceId(unbound.id()).getFirst());
+        assertEquals(java.util.List.of(closed, expectedPeriod(rebound)), periods.findBySourceId(unbound.id()));
+        assertEquals(35, periods.findOpenBySourceId(unbound.id()).orElseThrow().boundAtMs());
+        assertThrows(SourceRebindingConflictException.class, () -> rebind(unbound, context));
+        assertEquals(2, periods.findBySourceId(unbound.id()).size());
+    }
+
+    @Test
+    void rebindToAcceptedReplacementContextKeepsOldClosedHistory() {
+        LocationContext oldContext = acceptedContext(anchor());
+        Source unbound = structuredUnbound(oldContext);
+        SourceBindingPeriod closed = periods.findLatestBySourceId(unbound.id()).orElseThrow();
+        LocationPath filePath = LocationPathParser.parse(LocationDialect.UNIX,
+                "/Volumes/Archive/Photos/a.jpg");
+        jdbc.update("INSERT INTO content_record (id, size_bytes, created_at_ms) VALUES (100, 12, 1)");
+        jdbc.update("""
+                INSERT INTO file_entry (id, location_identity_status, location_context_id,
+                    location_path, location_key, current_content_id, size_bytes,
+                    modified_time_epoch_second, modified_time_nano, first_seen_at_ms, last_seen_at_ms)
+                VALUES (40, 'RESOLVED', ?, ?, ?, 100, 12, 123, 456, 1, 2)
+                """, oldContext.id(), pathCodec.encode(filePath), key(filePath));
+        jdbc.update("""
+                INSERT INTO source_membership (id, source_id, file_entry_id, relative_path,
+                    path_key, applicability_status, presence_status, observed_file_entry_revision,
+                    first_seen_at_ms, last_seen_at_ms)
+                VALUES (50, ?, 40, 'a.jpg', 'a.jpg', 'RETIRED', 'PRESENT', 0, 1, 2)
+                """, unbound.id());
+        retirement.retireActive(oldContext.id(), 8, 31);
+        String newId = UUID.randomUUID().toString();
+        LocationContext replacementContext = contexts.insert(context(newId, anchor(),
+                LifecycleStatus.ACTIVE, ContinuityStatus.ACCEPTED, 19,
+                acceptanceJson(newId, 19, anchor())));
+
+        Source rebound = rebind(unbound, replacementContext);
+
+        assertEquals(replacementContext.id(), rebound.boundLocationContextId());
+        assertEquals(closed, periods.findBySourceId(unbound.id()).getFirst());
+        assertEquals(oldContext.id(), closed.locationContextId());
+        assertEquals(replacementContext.id(), periods.findOpenBySourceId(unbound.id())
+                .orElseThrow().locationContextId());
+        assertEquals("RETIRED", memberships.findMembershipById(50).orElseThrow().applicabilityStatus());
+        assertEquals(100L, sources.findFileEntryById(40).orElseThrow().currentContentId());
+        insertScanRunSource(unbound.id(), 30, 7, "DISCOVERING");
+        SourceMembership newMember = publisher.publish(
+                resolvedCandidate(unbound.id(), 7, replacementContext, filePath), 30, 1, 42);
+        assertTrue(newMember.fileEntryId() != 40);
+        assertTrue(newMember.id() != 50);
+        assertEquals("RETIRED", memberships.findMembershipById(50).orElseThrow().applicabilityStatus());
+        assertEquals(100L, sources.findFileEntryById(40).orElseThrow().currentContentId());
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM pragma_foreign_key_check", Integer.class));
+    }
+
+    @Test
+    void neverBoundAndCurrentlyBoundSourcesCannotRebind() {
+        LocationContext context = acceptedContext(anchor());
+        Source legacy = legacySource("/Volumes/Archive/Photos");
+        assertThrows(SourceRebindingConflictException.class,
+                () -> rebinding.rebind(legacy.id(), 4, context.id(), 8, 35,
+                        capture(legacy, context, photos(), 5)));
+        Source bound = bind(legacy, context, capture(legacy, context, photos()));
+        assertThrows(SourceRebindingConflictException.class,
+                () -> rebinding.rebind(bound.id(), 5, context.id(), 8, 35,
+                        capture(bound, context, photos(), 6)));
+        assertEquals(bound, sources.findSourceById(bound.id()).orElseThrow());
+        assertEquals(1, periods.findBySourceId(bound.id()).size());
+        Source unbound = unbinding.unbind(bound.id(), 5, 30);
+        java.util.List<SourceBindingPeriod> history = periods.findBySourceId(unbound.id());
+        assertThrows(SourceBindingConflictException.class,
+                () -> binding.bindUnboundSource(unbound.id(), 6, context.id(), 8, 35,
+                        capture(unbound, context, photos(), 7)));
+        assertEquals(unbound, sources.findSourceById(unbound.id()).orElseThrow());
+        assertEquals(history, periods.findBySourceId(unbound.id()));
+    }
+
+    @Test
+    void missingOrContradictoryClosedHistoryAndActiveMembershipFailIntegrity() {
+        LocationContext context = acceptedContext(anchor());
+        Source unbound = structuredUnbound(context);
+        SourceBindingPeriod closed = periods.findLatestBySourceId(unbound.id()).orElseThrow();
+        jdbc.update("DELETE FROM source_binding_period WHERE source_id = ?", unbound.id());
+        assertRebindFailureUnchanged(IllegalStateException.class, unbound, context,
+                capture(unbound, context, photos(), 7));
+        periods.insertOpen(new SourceBindingPeriod(null, closed.sourceId(),
+                closed.boundSourceLocationRevision(), closed.locationContextId(),
+                closed.rootPathDialect(), closed.rootPath(), closed.rootPathKey(),
+                closed.bindingEvidenceJson(), closed.boundAtMs(), null, null));
+        assertRebindFailureUnchanged(IllegalStateException.class, unbound, context,
+                capture(unbound, context, photos(), 7));
+        jdbc.update("DELETE FROM source_binding_period WHERE source_id = ?", unbound.id());
+        jdbc.update("""
+                INSERT INTO source_binding_period (source_id, bound_source_location_revision,
+                    location_context_id, root_path_dialect, root_path, root_path_key,
+                    binding_evidence_json, bound_at_ms, unbound_source_location_revision, unbound_at_ms)
+                VALUES (?, 5, ?, 'unix', ?, 'wrong-key', ?, 25, 6, 30)
+                """, unbound.id(), context.id(), unbound.rootPath(), closed.bindingEvidenceJson());
+        assertRebindFailureUnchanged(IllegalStateException.class, unbound, context,
+                capture(unbound, context, photos(), 7));
+        jdbc.update("DELETE FROM source_binding_period WHERE source_id = ?", unbound.id());
+        jdbc.update("""
+                INSERT INTO source_binding_period (source_id, bound_source_location_revision,
+                    location_context_id, root_path_dialect, root_path, root_path_key,
+                    binding_evidence_json, bound_at_ms, unbound_source_location_revision, unbound_at_ms)
+                VALUES (?, 5, ?, 'unix', ?, ?, ?, 25, 6, 30)
+                """, unbound.id(), context.id(), closed.rootPath(), closed.rootPathKey(),
+                closed.bindingEvidenceJson());
+        jdbc.update("UPDATE source_binding_period SET unbound_at_ms = 31 WHERE source_id = ?", unbound.id());
+        assertRebindFailureUnchanged(IllegalStateException.class, unbound, context,
+                capture(unbound, context, photos(), 7));
+        jdbc.update("UPDATE source_binding_period SET unbound_at_ms = 30 WHERE source_id = ?", unbound.id());
+        FileEntry file = sources.insert(new FileEntry(null, "UNRESOLVED", null, null,
+                null, null, 12, null, null, null, 0, 10, 12));
+        memberships.insert(new SourceMembership(null, unbound.id(), file.id(), "a.jpg", "a.jpg",
+                "ACTIVE", "PRESENT", 0, 0, 10, 12, null, null, null, null));
+        assertRebindFailureUnchanged(IllegalStateException.class, unbound, context,
+                capture(unbound, context, photos(), 7));
+    }
+
+    @Test
+    void staleRevisionsTimestampAndRevisionOverflowConflict() {
+        LocationContext context = acceptedContext(anchor());
+        Source unbound = structuredUnbound(context);
+        SourceBindingCapture valid = capture(unbound, context, photos(), 7);
+        assertThrows(SourceRebindingConflictException.class,
+                () -> rebinding.rebind(unbound.id(), 5, context.id(), 8, 35, valid));
+        assertThrows(SourceRebindingConflictException.class,
+                () -> rebinding.rebind(unbound.id(), 6, context.id(), 7, 35, valid));
+        assertThrows(SourceRebindingConflictException.class,
+                () -> rebinding.rebind(unbound.id(), 6, context.id(), 8, 29, valid));
+        assertEquals(unbound, sources.findSourceById(unbound.id()).orElseThrow());
+        jdbc.update("UPDATE source SET location_revision = ? WHERE id = ?", Long.MAX_VALUE, unbound.id());
+        jdbc.update("UPDATE source_binding_period SET unbound_source_location_revision = ? WHERE source_id = ?",
+                Long.MAX_VALUE, unbound.id());
+        assertThrows(SourceRebindingConflictException.class,
+                () -> rebinding.rebind(unbound.id(), Long.MAX_VALUE, context.id(), 8, 35, valid));
+        assertTrue(periods.findOpenBySourceId(unbound.id()).isEmpty());
+    }
+
+    @Test
+    void partialStructuredUnboundStateIsAnIntegrityFailure() {
+        LocationContext context = acceptedContext(anchor());
+        Source unbound = structuredUnbound(context);
+        jdbc.update("UPDATE source SET root_path_dialect = NULL WHERE id = ?", unbound.id());
+        assertThrows(IllegalStateException.class,
+                () -> rebinding.rebind(unbound.id(), 6, context.id(), 8, 35,
+                        capture(unbound, context, photos(), 7)));
+        assertTrue(periods.findOpenBySourceId(unbound.id()).isEmpty());
+    }
+
+    @Test
+    void invalidContextAuthorityAndFreshContextCaptureCannotRebind() {
+        LocationContext context = acceptedContext(anchor());
+        Source unbound = structuredUnbound(context);
+        SourceBindingCapture valid = capture(unbound, context, photos(), 7);
+        jdbc.update("UPDATE location_context SET continuity_status = 'REVIEW_REQUIRED' WHERE id = ?", context.id());
+        assertThrows(SourceRebindingConflictException.class,
+                () -> rebinding.rebind(unbound.id(), 6, context.id(), 8, 35, valid));
+        jdbc.update("UPDATE location_context SET continuity_status = 'ACCEPTED', continuity_evidence_json = ? WHERE id = ?",
+                new MacOsApfsLocationContextEvidenceCodec().encode(contextEvidence(anchor(),
+                        VOLUME_UUID, "2", true, false)), context.id());
+        assertThrows(SourceRebindingConflictException.class,
+                () -> rebinding.rebind(unbound.id(), 6, context.id(), 8, 35, valid));
+        jdbc.update("UPDATE location_context SET continuity_evidence_json = '{' WHERE id = ?", context.id());
+        assertThrows(IllegalStateException.class,
+                () -> rebinding.rebind(unbound.id(), 6, context.id(), 8, 35, valid));
+        jdbc.update("UPDATE location_context SET continuity_evidence_json = ? WHERE id = ?",
+                context.continuityEvidenceJson(), context.id());
+        SourceBindingCapture changedContext = new SourceBindingCapture(unbound.id(), unbound.rootPath(),
+                ContinuityProbeResult.accepted(contextEvidence(anchor(), VOLUME_UUID, "3", true, false)),
+                valid.sourceRootProbeResult());
+        assertRebindFailureUnchanged(IllegalArgumentException.class, unbound, context, changedContext);
+        SourceBindingCapture unavailable = new SourceBindingCapture(unbound.id(), unbound.rootPath(),
+                ContinuityProbeResult.unavailable(), valid.sourceRootProbeResult());
+        assertRebindFailureUnchanged(IllegalArgumentException.class, unbound, context, unavailable);
+        jdbc.update("UPDATE location_context SET lifecycle_status = 'RETIRED', revision = 9 WHERE id = ?",
+                context.id());
+        assertThrows(SourceRebindingConflictException.class,
+                () -> rebinding.rebind(unbound.id(), 6, context.id(), 9, 35, valid));
+    }
+
+    @Test
+    void invalidRootCaptureAndRelocationCannotRebind() {
+        LocationContext context = acceptedContext(anchor());
+        Source unbound = structuredUnbound(context);
+        SourceBindingCapture valid = capture(unbound, context, photos(), 7);
+        assertRebindFailureUnchanged(IllegalArgumentException.class, unbound, context,
+                new SourceBindingCapture(unbound.id(), unbound.rootPath(),
+                        valid.contextProbeResult(), ContinuityProbeResult.unavailable()));
+        assertRebindFailureUnchanged(IllegalArgumentException.class, unbound, context,
+                capture(unbound, context, photos(), 6));
+        assertRebindFailureUnchanged(IllegalArgumentException.class, unbound, context,
+                new SourceBindingCapture(unbound.id(), unbound.rootPath(),
+                        valid.contextProbeResult(), ContinuityProbeResult.accepted(
+                                rootEvidence(context.id(), 8, 7, otherInside(),
+                                        VOLUME_UUID, true, false))));
+        assertRebindFailureUnchanged(IllegalArgumentException.class, unbound, context,
+                new SourceBindingCapture(unbound.id(), "/Volumes/Archive/Other",
+                        valid.contextProbeResult(), valid.sourceRootProbeResult()));
+        jdbc.update("UPDATE source SET root_path_key = ? WHERE id = ?", key(otherInside()), unbound.id());
+        assertThrows(IllegalStateException.class,
+                () -> rebinding.rebind(unbound.id(), 6, context.id(), 8, 35, valid));
+        assertTrue(periods.findOpenBySourceId(unbound.id()).isEmpty());
+    }
+
+    @Test
+    void failedPeriodInsertOrGuardedSourceUpdateRollsBackRebind() {
+        LocationContext context = acceptedContext(anchor());
+        Source unbound = structuredUnbound(context);
+        SourceBindingPeriod closed = periods.findLatestBySourceId(unbound.id()).orElseThrow();
+        coordinator.forcePeriodInsertFailure = true;
+        assertThrows(IllegalStateException.class, () -> rebind(unbound, context));
+        coordinator.forcePeriodInsertFailure = false;
+        assertEquals(unbound, sources.findSourceById(unbound.id()).orElseThrow());
+        assertEquals(java.util.List.of(closed), periods.findBySourceId(unbound.id()));
+        coordinator.forceRebindGuardMiss = true;
+        assertThrows(SourceRebindingConflictException.class, () -> rebind(unbound, context));
+        coordinator.forceRebindGuardMiss = false;
+        assertEquals(unbound, sources.findSourceById(unbound.id()).orElseThrow());
+        assertEquals(java.util.List.of(closed), periods.findBySourceId(unbound.id()));
+    }
+
+    @Test
+    void rebindRacesHaveOneWinnerAndSerializeWithContextRetirementAndReplacement() throws Exception {
+        {
+            LocationContext context = acceptedContext(anchor());
+            Source unbound = structuredUnbound(context);
+            RaceResults results = race(() -> rebind(unbound, context), () -> rebind(unbound, context));
+            assertTrue(results.first() instanceof Source);
+            assertTrue(results.second() instanceof SourceRebindingConflictException);
+            assertEquals(7, sources.findSourceById(unbound.id()).orElseThrow().locationRevision());
+            assertEquals(2, periods.findBySourceId(unbound.id()).size());
+            assertEquals(1, periods.findBySourceId(unbound.id()).stream()
+                    .filter(period -> period.unboundAtMs() == null).count());
+        }
+        clear();
+
+        {
+            LocationContext context = acceptedContext(anchor());
+            Source unbound = structuredUnbound(context);
+            RaceResults results = race(() -> rebind(unbound, context),
+                    () -> retirement.retireActive(context.id(), 8, 40));
+            assertTrue(results.first() instanceof Source);
+            assertTrue(results.second() instanceof LocationContextRetirementConflictException);
+        }
+        clear();
+
+        {
+            LocationContext context = acceptedContext(anchor());
+            Source unbound = structuredUnbound(context);
+            RaceResults results = race(() -> retirement.retireActive(context.id(), 8, 40),
+                    () -> rebind(unbound, context));
+            assertTrue(results.first() instanceof LocationContext);
+            assertTrue(results.second() instanceof SourceRebindingConflictException);
+            assertEquals(unbound, sources.findSourceById(unbound.id()).orElseThrow());
+            assertTrue(periods.findOpenBySourceId(unbound.id()).isEmpty());
+        }
+        clear();
+
+        {
+            LocationContext context = acceptedContext(anchor());
+            Source unbound = structuredUnbound(context);
+            LocationContext next = new LocationContext(UUID.randomUUID().toString(),
+                    pathCodec.encode(anchor()), key(anchor()), LifecycleStatus.ACTIVE,
+                    ContinuityStatus.REVIEW_REQUIRED, 19, null, 40, 40);
+            RaceResults results = race(() -> rebind(unbound, context),
+                    () -> replacement.replaceActive(context.id(), 8, 40, next));
+            assertTrue(results.first() instanceof Source);
+            assertTrue(results.second() instanceof LocationContextReplacementConflictException);
+        }
+        clear();
+
+        {
+            LocationContext context = acceptedContext(anchor());
+            Source unbound = structuredUnbound(context);
+            LocationContext successor = new LocationContext(UUID.randomUUID().toString(),
+                    pathCodec.encode(anchor()), key(anchor()), LifecycleStatus.ACTIVE,
+                    ContinuityStatus.REVIEW_REQUIRED, 19, null, 40, 40);
+            RaceResults results = race(() -> replacement.replaceActive(context.id(), 8, 40, successor),
+                    () -> rebind(unbound, context));
+            assertEquals(successor, results.first());
+            assertTrue(results.second() instanceof SourceRebindingConflictException);
+            assertEquals(unbound, sources.findSourceById(unbound.id()).orElseThrow());
+            assertTrue(periods.findOpenBySourceId(unbound.id()).isEmpty());
+        }
+    }
+
+    @Test
+    void rebindPreservesRetiredMembershipAndArtifactsUntilFreshPositiveReactivatesSameRow() {
+        LocationContext context = acceptedContext(anchor());
+        Source legacy = legacySource("/Volumes/Archive/Photos");
+        Source bound = bind(legacy, context, capture(legacy, context, photos()));
+        LocationPath filePath = LocationPathParser.parse(LocationDialect.UNIX,
+                "/Volumes/Archive/Photos/a.jpg");
+        jdbc.update("INSERT INTO content_record (id, size_bytes, created_at_ms) VALUES (100, 12, 1)");
+        jdbc.update("""
+                INSERT INTO file_entry (id, location_identity_status, location_context_id,
+                    location_path, location_key, current_content_id, size_bytes,
+                    modified_time_epoch_second, modified_time_nano, observation_revision,
+                    first_seen_at_ms, last_seen_at_ms)
+                VALUES (40, 'RESOLVED', ?, ?, ?, 100, 12, 123, 456, 2, 10, 12)
+                """, context.id(), pathCodec.encode(filePath), key(filePath));
+        jdbc.update("""
+                INSERT INTO source_membership (id, source_id, file_entry_id, relative_path,
+                    path_key, applicability_status, presence_status, membership_revision,
+                    observed_file_entry_revision, first_seen_at_ms, last_seen_at_ms,
+                    observed_source_location_revision, observed_location_context_revision)
+                VALUES (50, ?, 40, 'a.jpg', 'a.jpg', 'ACTIVE', 'MISSING', 2, 2, 10, 12, 5, 8)
+                """, bound.id());
+        jdbc.update("""
+                INSERT INTO analysis_record (id, content_record_id, analysis_type, analyzer_id,
+                    analyzer_version, configuration_version, configuration_hash,
+                    configuration_json, status, created_at_ms)
+                VALUES (60, 100, 'CONTENT_HASH', 'builtin.sha256', '1', 1,
+                    'hash', '{}', 'COMPLETED', 1)
+                """);
+        jdbc.update("INSERT INTO content_hash (analysis_record_id, algorithm, digest_hex) VALUES (60, 'SHA-256', 'abcd')");
+        FileEntry fileBefore = sources.findFileEntryById(40).orElseThrow();
+        Source unbound = unbinding.unbind(bound.id(), 5, 30);
+        SourceMembership retired = memberships.findMembershipById(50).orElseThrow();
+
+        Source rebound = rebind(unbound, context);
+        assertEquals("RETIRED", memberships.findMembershipById(50).orElseThrow().applicabilityStatus());
+        assertEquals(retired, memberships.findMembershipById(50).orElseThrow());
+        assertEquals(fileBefore, sources.findFileEntryById(40).orElseThrow());
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM content_record", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM analysis_record", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM content_hash", Integer.class));
+
+        insertScanRunSource(bound.id(), 30, 5, "DISCOVERING");
+        var candidate = resolvedCandidate(bound.id(), 5, context, filePath);
+        assertThrows(IllegalStateException.class, () -> publisher.publish(candidate, 30, 1, 41));
+        jdbc.update("UPDATE scan_run_source SET status = 'DISCOVERED' WHERE id = 30");
+        assertThrows(IllegalStateException.class, () -> publisher.reconcile(
+                new MissingClaimAuthority(bound.id(), 5, context.id(), 8, photos()),
+                scans.findScanRunSourceById(30).orElseThrow(), 41));
+        jdbc.update("UPDATE scan_run_source SET source_location_revision = 7, status = 'DISCOVERING' WHERE id = 30");
+        SourceMembership active = publisher.publish(resolvedCandidate(bound.id(), 7, context, filePath),
+                30, 1, 42);
+        assertEquals(retired.id(), active.id());
+        assertEquals("ACTIVE", active.applicabilityStatus());
+        assertEquals("PRESENT", active.presenceStatus());
+        assertEquals(retired.membershipRevision() + 1, active.membershipRevision());
+        assertEquals(7L, active.observedSourceLocationRevision());
+        assertEquals(8L, active.observedLocationContextRevision());
+        assertEquals(fileBefore.currentContentId(), sources.findFileEntryById(40).orElseThrow().currentContentId());
+        assertEquals(rebound, sources.findSourceById(bound.id()).orElseThrow());
+    }
+
+    @Test
+    void oldScanSnapshotCannotGainV3AdmissionAfterRebind() {
+        LocationContext context = acceptedContext(anchor());
+        Source unbound = structuredUnbound(context);
+        jdbc.update("""
+                INSERT INTO scan_run (id, request_type, status, options_version,
+                    options_json, created_at_ms)
+                VALUES (80, 'INDEX', 'PENDING', 1, '{}', 1)
+                """);
+        jdbc.update("""
+                INSERT INTO scan_run_source (id, scan_run_id, source_id, status,
+                    source_location_revision, traversal_generation)
+                VALUES (81, 80, ?, 'PENDING', 6, 0)
+                """, unbound.id());
+        rebind(unbound, context);
+        assertThrows(Version2ExecutionConflictException.class, () -> admission.create(80));
+        jdbc.update("UPDATE scan_run_source SET source_location_revision = 7 WHERE id = 81");
+        assertEquals(3, admission.create(80).job().executionVersion());
+    }
+
+    private Source structuredUnbound(LocationContext context) {
+        Source legacy = legacySource("/Volumes/Archive/Photos");
+        Source bound = bind(legacy, context, capture(legacy, context, photos()));
+        return unbinding.unbind(bound.id(), 5, 30);
+    }
+
+    private Source rebind(Source unbound, LocationContext context) {
+        return rebinding.rebind(unbound.id(), 6, context.id(), context.revision(), 35,
+                capture(unbound, context, photos(), 7));
+    }
+
+    private <T extends Throwable> void assertRebindFailureUnchanged(Class<T> expected, Source unbound,
+            LocationContext context, SourceBindingCapture capture) {
+        java.util.List<SourceBindingPeriod> history = periods.findBySourceId(unbound.id());
+        assertThrows(expected, () -> rebinding.rebind(unbound.id(), 6, context.id(),
+                context.revision(), 35, capture));
+        assertEquals(unbound, sources.findSourceById(unbound.id()).orElseThrow());
+        assertEquals(history, periods.findBySourceId(unbound.id()));
+    }
+
+    private void insertScanRunSource(long sourceId, long id, long revision, String status) {
+        jdbc.update("""
+                INSERT INTO scan_run (id, request_type, status, options_version, options_json,
+                    created_at_ms, started_at_ms)
+                VALUES (?, 'INDEX', 'RUNNING', 1, '{}', 1, 2)
+                """, id);
+        jdbc.update("""
+                INSERT INTO scan_run_source (id, scan_run_id, source_id, status,
+                    source_location_revision, traversal_generation, started_at_ms)
+                VALUES (?, ?, ?, ?, ?, 1, 2)
+                """, id, id, sourceId, status, revision);
+    }
+
+    private ResolvedFileCandidate resolvedCandidate(long sourceId, long sourceRevision,
+            LocationContext context, LocationPath file) {
+        return new ResolvedFileCandidate(sourceId, sourceRevision, context.id(), context.revision(),
+                file, LocationKeyCodec.encode(file), "a.jpg", "a.jpg", "apfs", VOLUME_UUID,
+                ChildStorageBoundary.SAME_ACCEPTED_VOLUME, true, false, 12, 123, 456);
+    }
+
     private RaceResults race(Attempt firstAttempt, Attempt secondAttempt) throws Exception {
         ReservationGate gate = new ReservationGate();
         coordinator.gate = gate;
@@ -438,7 +888,7 @@ class SourceBindingServiceTests {
         try {
             return attempt.run();
         } catch (SourceBindingConflictException | LocationContextRetirementConflictException
-                | LocationContextReplacementConflictException exception) {
+                | LocationContextReplacementConflictException | SourceRebindingConflictException exception) {
             return exception;
         }
     }
@@ -593,11 +1043,20 @@ class SourceBindingServiceTests {
                 ReservationCoordinator coordinator) {
             return new CoordinatedCatalogRepository(jdbc, coordinator);
         }
+
+        @Bean
+        @Primary
+        CoordinatedPeriodRepository coordinatedPeriodRepository(JdbcTemplate jdbc,
+                ReservationCoordinator coordinator) {
+            return new CoordinatedPeriodRepository(jdbc, coordinator);
+        }
     }
 
     static class ReservationCoordinator {
         volatile ReservationGate gate;
         volatile boolean forceGuardMiss;
+        volatile boolean forceRebindGuardMiss;
+        volatile boolean forcePeriodInsertFailure;
     }
 
     static class CoordinatedLocationContextRepository extends LocationContextRepository {
@@ -663,6 +1122,32 @@ class SourceBindingServiceTests {
             }
             return super.bindUnboundSource(sourceId, revision, configuredRootPath,
                     rootLocationKey, contextId, evidenceJson, boundAtMs);
+        }
+
+        @Override
+        public int rebindStructuredSource(Source source, String contextId,
+                String evidenceJson, long reboundAtMs) {
+            if (coordinator.forceRebindGuardMiss) {
+                return 0;
+            }
+            return super.rebindStructuredSource(source, contextId, evidenceJson, reboundAtMs);
+        }
+    }
+
+    static class CoordinatedPeriodRepository extends SourceBindingPeriodRepository {
+        private final ReservationCoordinator coordinator;
+
+        CoordinatedPeriodRepository(JdbcTemplate jdbc, ReservationCoordinator coordinator) {
+            super(jdbc);
+            this.coordinator = coordinator;
+        }
+
+        @Override
+        public SourceBindingPeriod insertOpen(SourceBindingPeriod period) {
+            if (coordinator.forcePeriodInsertFailure) {
+                throw new IllegalStateException("Period insert failed");
+            }
+            return super.insertOpen(period);
         }
     }
 

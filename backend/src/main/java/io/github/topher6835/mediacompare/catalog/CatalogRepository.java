@@ -87,6 +87,20 @@ public class CatalogRepository {
                 source.rootPathKey());
     }
 
+    public int rebindStructuredSource(Source source, String targetContextId,
+            String bindingEvidenceJson, long reboundAtMs) {
+        return jdbcTemplate.update("""
+                UPDATE source
+                SET bound_location_context_id = ?, binding_evidence_json = ?,
+                    location_revision = ?, updated_at_ms = ?
+                WHERE id = ? AND location_revision = ? AND updated_at_ms = ?
+                  AND bound_location_context_id IS NULL AND binding_evidence_json IS NULL
+                  AND root_path_dialect = ? AND root_path = ? AND root_path_key = ?
+                """, targetContextId, bindingEvidenceJson, source.locationRevision() + 1,
+                reboundAtMs, source.id(), source.locationRevision(), source.updatedAtMs(),
+                source.rootPathDialect(), source.rootPath(), source.rootPathKey());
+    }
+
     public List<Source> findAllSources() {
         return jdbcTemplate.query("SELECT * FROM source ORDER BY id", CatalogRepository::mapSource);
     }
