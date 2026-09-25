@@ -38,7 +38,7 @@ public final class MacOsApfsContinuityProbe {
                 dependencies.resolver()::resolve,
                 dependencies.resolver()::toHostPath,
                 new NioFileEvidenceReader(),
-                new DiskutilVolumeInspector(new MacOsDiskutilRunner(), new MacOsDiskutilPlistParser()),
+                new MountVolumeInspector(new MacOsApfsMountInspector()),
                 Clock.systemUTC(),
                 MacOsApfsContinuityProbe::isMacOsHost);
     }
@@ -313,32 +313,22 @@ public final class MacOsApfsContinuityProbe {
         }
     }
 
-    private static final class DiskutilVolumeInspector implements VolumeInspector {
-        private final MacOsDiskutilRunner runner;
-        private final MacOsDiskutilPlistParser parser;
+    private static final class MountVolumeInspector implements VolumeInspector {
+        private final MacOsApfsMountInspector inspector;
 
-        private DiskutilVolumeInspector(
-                MacOsDiskutilRunner runner, MacOsDiskutilPlistParser parser) {
-            this.runner = runner;
-            this.parser = parser;
+        private MountVolumeInspector(MacOsApfsMountInspector inspector) {
+            this.inspector = inspector;
         }
 
         @Override
         public ContinuityProbeResult<DiskutilInfo> inspect(Path path) {
-            MacOsDiskutilRunner.Result result = runner.inspect(path);
-            if (result instanceof MacOsDiskutilRunner.Failure failure) {
-                return failure.reason() == MacOsDiskutilRunner.FailureReason.EXECUTABLE_UNAVAILABLE
-                        ? ContinuityProbeResult.unavailable()
-                        : ContinuityProbeResult.error();
+            ContinuityProbeResult<MacOsApfsMountInspector.MountObservation> result = inspector.inspect(path);
+            if (result.outcome() != ContinuityOutcome.ACCEPTED) {
+                return copyFailure(result);
             }
-            try {
-                return ContinuityProbeResult.accepted(
-                        parser.parse(((MacOsDiskutilRunner.Output) result).plist()));
-            } catch (MacOsDiskutilPlistParser.UnsupportedFileSystemException exception) {
-                return ContinuityProbeResult.unsupported();
-            } catch (IllegalArgumentException exception) {
-                return ContinuityProbeResult.error();
-            }
+            var mount = result.evidence().orElseThrow();
+            return ContinuityProbeResult.accepted(
+                    new DiskutilInfo(mount.fileSystemType(), mount.volumeUuid()));
         }
     }
 

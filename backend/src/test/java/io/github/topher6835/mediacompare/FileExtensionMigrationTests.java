@@ -82,6 +82,7 @@ class FileExtensionMigrationTests {
         Flyway.configure()
                 .dataSource(databaseUrl, null, null)
                 .locations("classpath:db/migration")
+                .target("2")
                 .load()
                 .migrate();
 

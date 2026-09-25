@@ -103,66 +103,128 @@ public class CatalogRepository {
     public List<ContentAssignmentCandidate> findContentAssignmentCandidates(
             long scanRunSourceId, long completedGeneration, long afterFileEntryId, int limit) {
         return jdbcTemplate.query("""
-                SELECT file_entry.id, file_entry.observation_revision, file_entry.size_bytes
+                SELECT file_entry.id, membership.id AS membership_id,
+                       membership.source_id, file_entry.location_context_id,
+                       membership.observed_source_location_revision,
+                       membership.observed_location_context_revision,
+                       membership.membership_revision,
+                       file_entry.observation_revision, file_entry.size_bytes
                 FROM file_entry
-                JOIN scan_run_source
-                  ON scan_run_source.id = ?
-                 AND scan_run_source.source_id = file_entry.source_id
-                WHERE file_entry.presence_status = 'PRESENT'
+                JOIN source_membership AS membership ON membership.file_entry_id = file_entry.id
+                JOIN scan_run_source ON scan_run_source.id = ?
+                    AND scan_run_source.source_id = membership.source_id
+                JOIN source ON source.id = membership.source_id
+                JOIN location_context AS context ON context.id = file_entry.location_context_id
+                WHERE file_entry.location_identity_status = 'RESOLVED'
+                  AND membership.applicability_status = 'ACTIVE'
+                  AND membership.presence_status = 'PRESENT'
+                  AND membership.observed_file_entry_revision = file_entry.observation_revision
+                  AND membership.observed_source_location_revision = source.location_revision
+                  AND membership.observed_location_context_revision = context.revision
+                  AND source.bound_location_context_id = context.id
+                  AND context.lifecycle_status = 'ACTIVE'
+                  AND context.continuity_status = 'ACCEPTED'
                   AND file_entry.current_content_id IS NULL
-                  AND file_entry.last_seen_scan_run_source_id = scan_run_source.id
-                  AND file_entry.last_seen_traversal_generation = ?
+                  AND membership.last_positive_scan_run_source_id = scan_run_source.id
+                  AND membership.last_positive_traversal_generation = ?
                   AND file_entry.id > ?
                 ORDER BY file_entry.id
                 LIMIT ?
                 """, (resultSet, rowNumber) -> new ContentAssignmentCandidate(
                         resultSet.getLong("id"),
+                        resultSet.getLong("membership_id"),
+                        resultSet.getLong("source_id"),
+                        resultSet.getString("location_context_id"),
+                        resultSet.getLong("observed_source_location_revision"),
+                        resultSet.getLong("observed_location_context_revision"),
+                        resultSet.getLong("membership_revision"),
                         resultSet.getLong("observation_revision"),
                         resultSet.getLong("size_bytes")),
                 scanRunSourceId, completedGeneration, afterFileEntryId, limit);
     }
 
-    public int attachContentIfCurrent(long fileEntryId, long expectedObservationRevision,
-            long expectedSizeBytes, long contentRecordId) {
+    public int attachContentIfCurrent(ContentAssignmentCandidate candidate, long contentRecordId) {
         return jdbcTemplate.update("""
                 UPDATE file_entry
                 SET current_content_id = ?
-                WHERE id = ?
-                  AND presence_status = 'PRESENT'
+                  WHERE id = ?
+                  AND location_identity_status = 'RESOLVED'
+                  AND location_context_id = ?
                   AND current_content_id IS NULL
                   AND observation_revision = ?
                   AND size_bytes = ?
-                """, contentRecordId, fileEntryId, expectedObservationRevision, expectedSizeBytes);
+                  AND EXISTS (
+                      SELECT 1 FROM source_membership AS membership
+                      JOIN source ON source.id = membership.source_id
+                      JOIN location_context AS context ON context.id = file_entry.location_context_id
+                      WHERE membership.id = ? AND membership.file_entry_id = file_entry.id
+                        AND membership.source_id = ?
+                        AND membership.applicability_status = 'ACTIVE'
+                        AND membership.presence_status = 'PRESENT'
+                        AND membership.membership_revision = ?
+                        AND membership.observed_file_entry_revision = file_entry.observation_revision
+                        AND membership.observed_source_location_revision = ?
+                        AND membership.observed_location_context_revision = ?
+                        AND source.location_revision = membership.observed_source_location_revision
+                        AND source.bound_location_context_id = context.id
+                        AND context.revision = membership.observed_location_context_revision
+                        AND context.lifecycle_status = 'ACTIVE'
+                        AND context.continuity_status = 'ACCEPTED'
+                  )
+                """, contentRecordId, candidate.fileEntryId(), candidate.contextId(),
+                candidate.observationRevision(), candidate.sizeBytes(), candidate.membershipId(),
+                candidate.sourceId(), candidate.membershipRevision(),
+                candidate.sourceLocationRevision(), candidate.contextRevision());
     }
 
     public List<ContentHashCandidate> findContentHashCandidates(
             long scanRunSourceId, long completedGeneration, long afterFileEntryId, int limit) {
         return jdbcTemplate.query("""
-                SELECT file_entry.id, file_entry.current_content_id, file_entry.source_id,
-                       file_entry.relative_path, file_entry.observation_revision,
-                       file_entry.size_bytes, file_entry.modified_time_epoch_second,
-                       file_entry.modified_time_nano, scan_run_source.source_location_revision
+                SELECT file_entry.id, file_entry.current_content_id,
+                       membership.id AS membership_id, membership.source_id,
+                       file_entry.location_context_id,
+                       membership.observed_location_context_revision,
+                       membership.membership_revision,
+                       file_entry.location_path, file_entry.location_key,
+                       file_entry.observation_revision, file_entry.size_bytes,
+                       file_entry.modified_time_epoch_second, file_entry.modified_time_nano,
+                       membership.observed_source_location_revision
                 FROM file_entry
-                JOIN scan_run_source
-                  ON scan_run_source.id = ?
-                 AND scan_run_source.source_id = file_entry.source_id
-                WHERE file_entry.presence_status = 'PRESENT'
+                JOIN source_membership AS membership ON membership.file_entry_id = file_entry.id
+                JOIN scan_run_source ON scan_run_source.id = ?
+                    AND scan_run_source.source_id = membership.source_id
+                JOIN source ON source.id = membership.source_id
+                JOIN location_context AS context ON context.id = file_entry.location_context_id
+                WHERE file_entry.location_identity_status = 'RESOLVED'
+                  AND membership.applicability_status = 'ACTIVE'
+                  AND membership.presence_status = 'PRESENT'
+                  AND membership.observed_file_entry_revision = file_entry.observation_revision
+                  AND membership.observed_source_location_revision = source.location_revision
+                  AND membership.observed_location_context_revision = context.revision
+                  AND source.bound_location_context_id = context.id
+                  AND context.lifecycle_status = 'ACTIVE'
+                  AND context.continuity_status = 'ACCEPTED'
                   AND file_entry.current_content_id IS NOT NULL
-                  AND file_entry.last_seen_scan_run_source_id = scan_run_source.id
-                  AND file_entry.last_seen_traversal_generation = ?
+                  AND membership.last_positive_scan_run_source_id = scan_run_source.id
+                  AND membership.last_positive_traversal_generation = ?
                   AND file_entry.id > ?
                 ORDER BY file_entry.id
                 LIMIT ?
                 """, (resultSet, rowNumber) -> new ContentHashCandidate(
                         resultSet.getLong("id"),
                         resultSet.getLong("current_content_id"),
+                        resultSet.getLong("membership_id"),
                         resultSet.getLong("source_id"),
-                        resultSet.getString("relative_path"),
+                        resultSet.getString("location_context_id"),
+                        resultSet.getLong("observed_location_context_revision"),
+                        resultSet.getLong("membership_revision"),
+                        resultSet.getString("location_path"),
+                        resultSet.getString("location_key"),
                         resultSet.getLong("observation_revision"),
                         resultSet.getLong("size_bytes"),
                         nullableLong(resultSet, "modified_time_epoch_second"),
                         nullableInteger(resultSet, "modified_time_nano"),
-                        resultSet.getLong("source_location_revision")),
+                        resultSet.getLong("observed_source_location_revision")),
                 scanRunSourceId, completedGeneration, afterFileEntryId, limit);
     }
 
@@ -171,196 +233,100 @@ public class CatalogRepository {
                 UPDATE file_entry
                 SET current_content_id = current_content_id
                 WHERE id = ?
-                  AND source_id = ?
-                  AND presence_status = 'PRESENT'
+                  AND location_identity_status = 'RESOLVED'
+                  AND location_context_id = ?
+                  AND location_path = ? AND location_key = ?
                   AND current_content_id = ?
                   AND observation_revision = ?
                   AND size_bytes = ?
                   AND modified_time_epoch_second IS ?
                   AND modified_time_nano IS ?
                   AND EXISTS (
-                      SELECT 1
-                      FROM source
-                      WHERE source.id = ? AND source.location_revision = ?
+                      SELECT 1 FROM source_membership AS membership
+                      JOIN source ON source.id = membership.source_id
+                      JOIN location_context AS context ON context.id = file_entry.location_context_id
+                      WHERE membership.id = ? AND membership.file_entry_id = file_entry.id
+                        AND membership.source_id = ?
+                        AND membership.applicability_status = 'ACTIVE'
+                        AND membership.presence_status = 'PRESENT'
+                        AND membership.membership_revision = ?
+                        AND membership.observed_file_entry_revision = file_entry.observation_revision
+                        AND membership.observed_source_location_revision = ?
+                        AND membership.observed_location_context_revision = ?
+                        AND source.location_revision = membership.observed_source_location_revision
+                        AND source.bound_location_context_id = context.id
+                        AND context.revision = membership.observed_location_context_revision
+                        AND context.lifecycle_status = 'ACTIVE'
+                        AND context.continuity_status = 'ACCEPTED'
                   )
                 """,
                 candidate.fileEntryId(),
-                candidate.sourceId(),
+                candidate.contextId(),
+                candidate.locationPath(),
+                candidate.locationKey(),
                 candidate.contentRecordId(),
                 candidate.observationRevision(),
                 candidate.sizeBytes(),
                 candidate.modifiedTimeEpochSecond(),
                 candidate.modifiedTimeNano(),
-                candidate.sourceId(),
-                candidate.sourceLocationRevision());
+                candidate.membershipId(), candidate.sourceId(), candidate.membershipRevision(),
+                candidate.sourceLocationRevision(), candidate.contextRevision());
     }
 
-    @Transactional
     public FileEntry insert(FileEntry fileEntry) {
-        validateLastSeenSource(fileEntry);
-
-        return insertFileEntry(fileEntry);
-    }
-
-    public FileEntry observeFile(FileObservation observation) {
-        validateLastSeenSource(observation.sourceId(), observation.scanRunSourceId());
-
-        Optional<FileEntry> existingEntry = findFileEntryBySourceIdAndPathKey(
-                observation.sourceId(), observation.pathKey());
-        if (existingEntry.isEmpty()) {
-            return insertFileEntry(new FileEntry(
-                    null,
-                    observation.sourceId(),
-                    observation.relativePath(),
-                    observation.pathKey(),
-                    FileExtensionNormalizer.fromRelativePath(observation.relativePath()),
-                    null,
-                    "PRESENT",
-                    observation.sizeBytes(),
-                    observation.modifiedTimeEpochSecond(),
-                    observation.modifiedTimeNano(),
-                    0,
-                    observation.observedAtMs(),
-                    observation.observedAtMs(),
-                    observation.scanRunSourceId(),
-                    observation.traversalGeneration()));
-        }
-
-        FileEntry existing = existingEntry.orElseThrow();
-        boolean bytesMayHaveChanged = existing.sizeBytes() != observation.sizeBytes()
-                || !Objects.equals(existing.modifiedTimeEpochSecond(), observation.modifiedTimeEpochSecond())
-                || !Objects.equals(existing.modifiedTimeNano(), observation.modifiedTimeNano())
-                || !"PRESENT".equals(existing.presenceStatus());
-
-        FileEntry updated = new FileEntry(
-                existing.id(),
-                existing.sourceId(),
-                observation.relativePath(),
-                existing.pathKey(),
-                FileExtensionNormalizer.fromRelativePath(observation.relativePath()),
-                bytesMayHaveChanged ? null : existing.currentContentId(),
-                "PRESENT",
-                observation.sizeBytes(),
-                observation.modifiedTimeEpochSecond(),
-                observation.modifiedTimeNano(),
-                bytesMayHaveChanged ? existing.observationRevision() + 1 : existing.observationRevision(),
-                existing.firstSeenAtMs(),
-                observation.observedAtMs(),
-                observation.scanRunSourceId(),
-                observation.traversalGeneration());
-        updateObservedFileEntry(updated);
-        return updated;
-    }
-
-    private FileEntry insertFileEntry(FileEntry fileEntry) {
-        String extensionKey = FileExtensionNormalizer.fromRelativePath(fileEntry.relativePath());
         var keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             PreparedStatement statement = connection.prepareStatement("""
                     INSERT INTO file_entry (
-                        source_id, relative_path, path_key, extension_key, current_content_id,
-                        presence_status, size_bytes,
-                        modified_time_epoch_second, modified_time_nano, observation_revision,
-                        first_seen_at_ms, last_seen_at_ms, last_seen_scan_run_source_id,
-                        last_seen_traversal_generation
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        location_identity_status, location_context_id, location_path, location_key,
+                        current_content_id, size_bytes, modified_time_epoch_second,
+                        modified_time_nano, extension_key, observation_revision,
+                        first_seen_at_ms, last_seen_at_ms
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, Statement.RETURN_GENERATED_KEYS);
-            statement.setLong(1, fileEntry.sourceId());
-            statement.setString(2, fileEntry.relativePath());
-            statement.setString(3, fileEntry.pathKey());
-            statement.setString(4, extensionKey);
+            statement.setString(1, fileEntry.locationIdentityStatus());
+            statement.setString(2, fileEntry.locationContextId());
+            statement.setString(3, fileEntry.locationPath());
+            statement.setString(4, fileEntry.locationKey());
             setNullableLong(statement, 5, fileEntry.currentContentId());
-            statement.setString(6, fileEntry.presenceStatus());
-            statement.setLong(7, fileEntry.sizeBytes());
-            setNullableLong(statement, 8, fileEntry.modifiedTimeEpochSecond());
-            setNullableInteger(statement, 9, fileEntry.modifiedTimeNano());
+            statement.setLong(6, fileEntry.sizeBytes());
+            setNullableLong(statement, 7, fileEntry.modifiedTimeEpochSecond());
+            setNullableInteger(statement, 8, fileEntry.modifiedTimeNano());
+            statement.setString(9, fileEntry.extensionKey());
             statement.setLong(10, fileEntry.observationRevision());
             statement.setLong(11, fileEntry.firstSeenAtMs());
             statement.setLong(12, fileEntry.lastSeenAtMs());
-            setNullableLong(statement, 13, fileEntry.lastSeenScanRunSourceId());
-            setNullableLong(statement, 14, fileEntry.lastSeenTraversalGeneration());
             return statement;
         }, keyHolder);
-
-        return new FileEntry(generatedId(keyHolder), fileEntry.sourceId(), fileEntry.relativePath(),
-                fileEntry.pathKey(), extensionKey, fileEntry.currentContentId(),
-                fileEntry.presenceStatus(), fileEntry.sizeBytes(),
-                fileEntry.modifiedTimeEpochSecond(), fileEntry.modifiedTimeNano(), fileEntry.observationRevision(),
-                fileEntry.firstSeenAtMs(), fileEntry.lastSeenAtMs(), fileEntry.lastSeenScanRunSourceId(),
-                fileEntry.lastSeenTraversalGeneration());
+        return new FileEntry(generatedId(keyHolder), fileEntry.locationIdentityStatus(),
+                fileEntry.locationContextId(), fileEntry.locationPath(), fileEntry.locationKey(),
+                fileEntry.currentContentId(), fileEntry.sizeBytes(), fileEntry.modifiedTimeEpochSecond(),
+                fileEntry.modifiedTimeNano(), fileEntry.extensionKey(), fileEntry.observationRevision(),
+                fileEntry.firstSeenAtMs(), fileEntry.lastSeenAtMs());
     }
 
-    private void validateLastSeenSource(FileEntry fileEntry) {
-        if (fileEntry.lastSeenScanRunSourceId() == null) {
-            return;
-        }
-
-        validateLastSeenSource(fileEntry.sourceId(), fileEntry.lastSeenScanRunSourceId());
-    }
-
-    private void validateLastSeenSource(long sourceId, long scanRunSourceId) {
-
-        Integer matchingRows = jdbcTemplate.queryForObject("""
-                SELECT COUNT(*)
-                FROM scan_run_source
-                WHERE id = ? AND source_id = ?
-                """, Integer.class, scanRunSourceId, sourceId);
-
-        if (matchingRows == null || matchingRows != 1) {
-            throw new DataIntegrityViolationException(
-                    "FileEntry Source " + sourceId
-                            + " does not match ScanRunSource " + scanRunSourceId);
-        }
+    /** Historical discovery is incompatible with the V6 authority model. */
+    public FileEntry observeFile(FileObservation observation) {
+        throw new UnsupportedOperationException("Legacy Source-owned discovery cannot run after V6");
     }
 
     public Optional<FileEntry> findFileEntryById(long id) {
         return jdbcTemplate.query("SELECT * FROM file_entry WHERE id = ?", CatalogRepository::mapFileEntry, id)
-                .stream()
-                .findFirst();
+                .stream().findFirst();
     }
 
     public Optional<FileEntry> findFileEntryBySourceIdAndPathKey(long sourceId, String pathKey) {
         return jdbcTemplate.query("""
-                SELECT * FROM file_entry
-                WHERE source_id = ? AND path_key = ?
+                SELECT file_entry.* FROM file_entry
+                JOIN source_membership AS membership ON membership.file_entry_id = file_entry.id
+                WHERE membership.source_id = ? AND membership.path_key = ?
+                  AND membership.applicability_status = 'ACTIVE'
                 """, CatalogRepository::mapFileEntry, sourceId, pathKey).stream().findFirst();
     }
 
+    /** Historical missing sweeps have no trusted V6 traversal authority. */
     public int markUnseenPresentFilesMissing(long sourceId, long scanRunSourceId, long traversalGeneration) {
-        return jdbcTemplate.update("""
-                UPDATE file_entry
-                SET presence_status = 'MISSING'
-                WHERE source_id = ?
-                  AND presence_status = 'PRESENT'
-                  AND (
-                      last_seen_scan_run_source_id IS NULL
-                      OR last_seen_traversal_generation IS NULL
-                      OR last_seen_scan_run_source_id <> ?
-                      OR last_seen_traversal_generation <> ?
-                  )
-                """, sourceId, scanRunSourceId, traversalGeneration);
-    }
-
-    private void updateObservedFileEntry(FileEntry fileEntry) {
-        jdbcTemplate.update("""
-                UPDATE file_entry
-                SET relative_path = ?, extension_key = ?, current_content_id = ?, presence_status = ?, size_bytes = ?,
-                    modified_time_epoch_second = ?, modified_time_nano = ?, observation_revision = ?,
-                    last_seen_at_ms = ?, last_seen_scan_run_source_id = ?, last_seen_traversal_generation = ?
-                WHERE id = ?
-                """,
-                fileEntry.relativePath(),
-                FileExtensionNormalizer.fromRelativePath(fileEntry.relativePath()),
-                fileEntry.currentContentId(),
-                fileEntry.presenceStatus(),
-                fileEntry.sizeBytes(),
-                fileEntry.modifiedTimeEpochSecond(),
-                fileEntry.modifiedTimeNano(),
-                fileEntry.observationRevision(),
-                fileEntry.lastSeenAtMs(),
-                fileEntry.lastSeenScanRunSourceId(),
-                fileEntry.lastSeenTraversalGeneration(),
-                fileEntry.id());
+        throw new UnsupportedOperationException("Legacy missing sweep cannot run after V6");
     }
 
     public WorkingSet insert(WorkingSet workingSet) {
@@ -428,20 +394,18 @@ public class CatalogRepository {
     private static FileEntry mapFileEntry(ResultSet resultSet, int rowNumber) throws SQLException {
         return new FileEntry(
                 resultSet.getLong("id"),
-                resultSet.getLong("source_id"),
-                resultSet.getString("relative_path"),
-                resultSet.getString("path_key"),
-                resultSet.getString("extension_key"),
+                resultSet.getString("location_identity_status"),
+                resultSet.getString("location_context_id"),
+                resultSet.getString("location_path"),
+                resultSet.getString("location_key"),
                 nullableLong(resultSet, "current_content_id"),
-                resultSet.getString("presence_status"),
                 resultSet.getLong("size_bytes"),
                 nullableLong(resultSet, "modified_time_epoch_second"),
                 nullableInteger(resultSet, "modified_time_nano"),
+                resultSet.getString("extension_key"),
                 resultSet.getLong("observation_revision"),
                 resultSet.getLong("first_seen_at_ms"),
-                resultSet.getLong("last_seen_at_ms"),
-                nullableLong(resultSet, "last_seen_scan_run_source_id"),
-                nullableLong(resultSet, "last_seen_traversal_generation"));
+                resultSet.getLong("last_seen_at_ms"));
     }
 
     private static Long nullableLong(ResultSet resultSet, String columnName) throws SQLException {

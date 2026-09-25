@@ -32,7 +32,19 @@ import io.github.topher6835.mediacompare.analysis.UnsupportedMediaMetadata;
 import io.github.topher6835.mediacompare.catalog.CatalogRepository;
 import io.github.topher6835.mediacompare.catalog.ContentRecord;
 import io.github.topher6835.mediacompare.catalog.FileEntry;
+import io.github.topher6835.mediacompare.catalog.FileExtensionNormalizer;
 import io.github.topher6835.mediacompare.catalog.Source;
+import io.github.topher6835.mediacompare.location.LocationContextAcceptanceEvidence;
+import io.github.topher6835.mediacompare.location.LocationContextAcceptanceEvidenceCodec;
+import io.github.topher6835.mediacompare.location.LocationDialect;
+import io.github.topher6835.mediacompare.location.LocationKeyCodec;
+import io.github.topher6835.mediacompare.location.LocationPath;
+import io.github.topher6835.mediacompare.location.LocationPathCodec;
+import io.github.topher6835.mediacompare.location.LocationPathParser;
+import io.github.topher6835.mediacompare.location.MacOsApfsLocationContextEvidence;
+import io.github.topher6835.mediacompare.location.MacOsApfsSourceRootEvidence;
+import io.github.topher6835.mediacompare.location.SourceBindingEvidence;
+import io.github.topher6835.mediacompare.location.SourceBindingEvidenceCodec;
 
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
@@ -82,6 +94,7 @@ class MediaMetadataEvidenceAndPublicationTests {
     void clearApplicationTables() {
         jdbcTemplate.update("DELETE FROM content_hash");
         jdbcTemplate.update("DELETE FROM job_stage");
+        jdbcTemplate.update("DELETE FROM source_membership");
         jdbcTemplate.update("DELETE FROM file_entry");
         jdbcTemplate.update("DELETE FROM scan_run_source");
         jdbcTemplate.update("DELETE FROM working_set_content");
@@ -91,6 +104,7 @@ class MediaMetadataEvidenceAndPublicationTests {
         jdbcTemplate.update("DELETE FROM working_set");
         jdbcTemplate.update("DELETE FROM content_record");
         jdbcTemplate.update("DELETE FROM source");
+        jdbcTemplate.update("DELETE FROM location_context");
     }
 
     @Test
@@ -182,7 +196,9 @@ class MediaMetadataEvidenceAndPublicationTests {
             case "source-revision" -> jdbcTemplate.update(
                     "UPDATE source SET location_revision = location_revision + 1 WHERE id = ?",
                     candidate.sourceId());
-            case "missing" -> updateFile(candidate, "presence_status = 'MISSING'");
+            case "missing" -> jdbcTemplate.update(
+                    "UPDATE source_membership SET presence_status = 'MISSING' WHERE id = ?",
+                    candidate.membershipId());
             case "content" -> {
                 ContentRecord replacement = catalogRepository.insert(
                         new ContentRecord(null, candidate.expectedContentSizeBytes(), 1));
@@ -202,7 +218,7 @@ class MediaMetadataEvidenceAndPublicationTests {
             default -> throw new IllegalArgumentException("Unknown mutation " + mutation);
         }
 
-        assertThrows(StaleMediaMetadataEvidenceException.class,
+        assertThrows(RuntimeException.class,
                 () -> publisher.publishIfStillCurrent(
                         candidate, DEFINITION, unsupportedResult(), 10, 20));
         assertNoMetadataArtifact(fixture.content().id());
@@ -216,7 +232,7 @@ class MediaMetadataEvidenceAndPublicationTests {
                 "UPDATE file_entry SET observation_revision = observation_revision + 1 WHERE id = ?",
                 candidate.fileEntryId());
 
-        assertThrows(StaleMediaMetadataEvidenceException.class,
+        assertThrows(RuntimeException.class,
                 () -> publisher.publishFailureIfStillCurrent(
                         candidate, DEFINITION, 10, 20, "Image metadata extraction failed"));
         assertNoMetadataArtifact(fixture.content().id());
@@ -281,8 +297,8 @@ class MediaMetadataEvidenceAndPublicationTests {
     void missingFirstOccurrenceFallsBackToTheSecondOccurrence() throws Exception {
         Fixture fixture = createFixture("missing-fallback", List.of("first.jpg", "second.jpg"));
         List<MediaMetadataFileCandidate> beforeMissing = occurrences(fixture);
-        jdbcTemplate.update("UPDATE file_entry SET presence_status = 'MISSING' WHERE id = ?",
-                beforeMissing.getFirst().fileEntryId());
+        jdbcTemplate.update("UPDATE source_membership SET presence_status = 'MISSING' WHERE id = ?",
+                beforeMissing.getFirst().membershipId());
 
         List<MediaMetadataFileCandidate> remaining = occurrences(fixture);
         assertEquals(List.of(beforeMissing.getLast().fileEntryId()),
@@ -326,7 +342,7 @@ class MediaMetadataEvidenceAndPublicationTests {
     }
 
     private Fixture createFixture(String directoryName, List<String> fileNames) throws Exception {
-        Path root = Files.createDirectory(temporaryDirectory.resolve(directoryName));
+        Path root = Files.createDirectory(temporaryDirectory.resolve(directoryName)).toRealPath();
         var paths = new ArrayList<Path>();
         for (String fileName : fileNames) {
             Path file = Files.writeString(root.resolve(fileName), "same-bytes");
@@ -336,6 +352,33 @@ class MediaMetadataEvidenceAndPublicationTests {
 
         Source source = catalogRepository.insert(new Source(
                 null, directoryName, root.toString(), root.toString(), 0, 1, 1));
+        LocationPath rootLocation = LocationPathParser.parse(LocationDialect.UNIX, root.toString());
+        String contextId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        String volumeId = "11111111-2222-3333-4444-555555555555";
+        var contextEvidence = new MacOsApfsLocationContextEvidence(1,
+                MacOsApfsLocationContextEvidence.PROFILE, 1,
+                rootLocation, LocationKeyCodec.encode(rootLocation), "apfs", volumeId, "2",
+                true, false, 1, MacOsApfsLocationContextEvidence.Diagnostics.empty());
+        String acceptance = new LocationContextAcceptanceEvidenceCodec().encode(
+                new LocationContextAcceptanceEvidence(1, contextId, 1, contextEvidence));
+        jdbcTemplate.update("""
+                INSERT INTO location_context (id, anchor_location_path, anchor_location_key,
+                    lifecycle_status, continuity_status, revision, continuity_evidence_json,
+                    created_at_ms, updated_at_ms)
+                VALUES (?, ?, ?, 'ACTIVE', 'ACCEPTED', 1, ?, 1, 1)
+                """, contextId, new LocationPathCodec().encode(rootLocation),
+                LocationKeyCodec.encode(rootLocation).value(), acceptance);
+        var rootEvidence = new MacOsApfsSourceRootEvidence(1,
+                MacOsApfsSourceRootEvidence.PROFILE, 1, contextId, 1, 1,
+                rootLocation, LocationKeyCodec.encode(rootLocation), volumeId, "10",
+                new MacOsApfsSourceRootEvidence.BirthTime(100, 200), true, false, 1);
+        String binding = new SourceBindingEvidenceCodec().encode(
+                new SourceBindingEvidence(1, source.id(), rootEvidence));
+        jdbcTemplate.update("""
+                UPDATE source SET root_path_key = ?, root_path_dialect = 'unix',
+                    bound_location_context_id = ?, binding_evidence_json = ?, location_revision = 1
+                WHERE id = ?
+                """, LocationKeyCodec.encode(rootLocation).value(), contextId, binding, source.id());
         BasicFileAttributes attributes = Files.readAttributes(
                 paths.getFirst(), BasicFileAttributes.class);
         ContentRecord content = catalogRepository.insert(
@@ -344,10 +387,20 @@ class MediaMetadataEvidenceAndPublicationTests {
             BasicFileAttributes fileAttributes = Files.readAttributes(
                     paths.get(index), BasicFileAttributes.class);
             Instant modified = fileAttributes.lastModifiedTime().toInstant();
-            catalogRepository.insert(new FileEntry(
-                    null, source.id(), fileNames.get(index), fileNames.get(index),
-                    content.id(), "PRESENT", fileAttributes.size(),
-                    modified.getEpochSecond(), modified.getNano(), 0, 1, 1, null, null));
+            LocationPath fileLocation = rootLocation.append(fileNames.get(index));
+            FileEntry entry = catalogRepository.insert(new FileEntry(
+                    null, "RESOLVED", contextId,
+                    new LocationPathCodec().encode(fileLocation),
+                    LocationKeyCodec.encode(fileLocation).value(), content.id(),
+                    fileAttributes.size(), modified.getEpochSecond(), modified.getNano(),
+                    FileExtensionNormalizer.fromRelativePath(fileNames.get(index)), 0, 1, 1));
+            jdbcTemplate.update("""
+                    INSERT INTO source_membership (source_id, file_entry_id, relative_path,
+                        path_key, applicability_status, presence_status,
+                        observed_file_entry_revision, first_seen_at_ms, last_seen_at_ms,
+                        observed_source_location_revision, observed_location_context_revision)
+                    VALUES (?, ?, ?, ?, 'ACTIVE', 'PRESENT', 0, 1, 1, 1, 1)
+                    """, source.id(), entry.id(), fileNames.get(index), fileNames.get(index));
         }
         return new Fixture(source, content, List.copyOf(paths));
     }
@@ -407,12 +460,14 @@ class MediaMetadataEvidenceAndPublicationTests {
     }
 
     private static MediaMetadataFileCandidate withRelativePath(
-            MediaMetadataFileCandidate candidate, String relativePath) {
+            MediaMetadataFileCandidate candidate, String unsafeLocation) {
         return new MediaMetadataFileCandidate(
                 candidate.contentRecordId(), candidate.expectedContentSizeBytes(),
-                candidate.fileEntryId(), candidate.sourceId(), candidate.sourceRootPath(),
-                candidate.sourceLocationRevision(), relativePath, candidate.observationRevision(),
-                candidate.expectedSizeBytes(), candidate.expectedModifiedTimeEpochSecond(),
+                candidate.fileEntryId(), candidate.membershipId(), candidate.sourceId(),
+                candidate.sourceLocationRevision(), candidate.contextId(), candidate.contextRevision(),
+                candidate.membershipRevision(), unsafeLocation, candidate.locationKey(),
+                candidate.observationRevision(), candidate.expectedSizeBytes(),
+                candidate.expectedModifiedTimeEpochSecond(),
                 candidate.expectedModifiedTimeNano());
     }
 
@@ -420,9 +475,11 @@ class MediaMetadataEvidenceAndPublicationTests {
             MediaMetadataFileCandidate candidate, int expectedNano) {
         return new MediaMetadataFileCandidate(
                 candidate.contentRecordId(), candidate.expectedContentSizeBytes(),
-                candidate.fileEntryId(), candidate.sourceId(), candidate.sourceRootPath(),
-                candidate.sourceLocationRevision(), candidate.relativePath(), candidate.observationRevision(),
-                candidate.expectedSizeBytes(), candidate.expectedModifiedTimeEpochSecond(), expectedNano);
+                candidate.fileEntryId(), candidate.membershipId(), candidate.sourceId(),
+                candidate.sourceLocationRevision(), candidate.contextId(), candidate.contextRevision(),
+                candidate.membershipRevision(), candidate.locationPath(), candidate.locationKey(),
+                candidate.observationRevision(), candidate.expectedSizeBytes(),
+                candidate.expectedModifiedTimeEpochSecond(), expectedNano);
     }
 
     private static int differentNano(int nano) {

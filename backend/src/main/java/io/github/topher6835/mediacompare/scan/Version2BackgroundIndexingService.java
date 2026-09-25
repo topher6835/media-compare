@@ -11,11 +11,11 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class Version2BackgroundIndexingService {
     private static final Logger log = LoggerFactory.getLogger(Version2BackgroundIndexingService.class);
-    private final Version2ScanExecutionService executions;
+    private final Version3ScanExecutionService executions;
     private final Version2IndexingExecutor executor;
     private final Version2InterruptionRecovery recovery;
 
-    public Version2BackgroundIndexingService(Version2ScanExecutionService executions,
+    public Version2BackgroundIndexingService(Version3ScanExecutionService executions,
             Version2IndexingExecutor executor, Version2InterruptionRecovery recovery) {
         this.executions = executions;
         this.executor = executor;
@@ -44,7 +44,7 @@ public class Version2BackgroundIndexingService {
         try {
             executions.run(scanRunId);
         } catch (Exception exception) {
-            log.warn("Version-2 indexing stopped: Job {}, ScanRun {}", jobId, scanRunId, exception);
+            log.warn("Version-3 indexing stopped: Job {}, ScanRun {}", jobId, scanRunId, exception);
             // Some JDBC implementations reject operations on an interrupted thread. Preserve the
             // signal, but let this short failure transaction run without that flag set.
             boolean interrupted = Thread.interrupted();

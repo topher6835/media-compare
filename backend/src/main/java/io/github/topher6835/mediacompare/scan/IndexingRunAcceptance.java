@@ -8,9 +8,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class IndexingRunAcceptance {
     private final ScanRepository scans;
     private final ScanRunService requests;
-    private final Version2ScanExecutionService executions;
+    private final Version3ScanExecutionService executions;
 
-    public IndexingRunAcceptance(ScanRepository scans, ScanRunService requests, Version2ScanExecutionService executions) {
+    public IndexingRunAcceptance(ScanRepository scans, ScanRunService requests, Version3ScanExecutionService executions) {
         this.scans = scans;
         this.requests = requests;
         this.executions = executions;

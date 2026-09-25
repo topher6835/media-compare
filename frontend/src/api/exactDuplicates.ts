@@ -39,10 +39,12 @@ export interface ExactDuplicateMember {
 export interface ExactDuplicateOccurrence {
   fileEntryId: number
   contentRecordId: number
+  membershipId: number
   sourceId: number
   sourceName: string
   relativePath: string
   presenceStatus: 'PRESENT' | 'MISSING'
+  applicabilityStatus: 'ACTIVE' | 'RETIRED'
   extension: string | null
   fileCategory: TechnicalFileCategory | null
   matchesFilter: boolean

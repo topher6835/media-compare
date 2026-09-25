@@ -72,6 +72,19 @@ public class JobRepository {
                 .findFirst();
     }
 
+    public Optional<Job> findJobByScanRunIdAndType(long scanRunId, String jobType) {
+        return jdbcTemplate.query("""
+                SELECT * FROM job WHERE scan_run_id = ? AND job_type = ? ORDER BY id LIMIT 1
+                """, JobRepository::mapJob, scanRunId, jobType).stream().findFirst();
+    }
+
+    public boolean hasActiveScanJob() {
+        return jdbcTemplate.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM job WHERE job_type = 'SCAN'
+                    AND status IN ('PENDING', 'RUNNING'))
+                """, Integer.class) == 1;
+    }
+
     public JobStage insert(JobStage jobStage) {
         var keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
@@ -152,9 +165,11 @@ public class JobRepository {
                 WHERE id = ? AND stage_type = 'DISCOVERY' AND status = 'RUNNING'
                   AND EXISTS (
                       SELECT 1 FROM job
-                      WHERE job.id = job_stage.job_id AND job.execution_version = ?
+                      WHERE job.id = job_stage.job_id AND job.id = ?
+                        AND job.execution_version = ? AND job.status = 'RUNNING'
+                        AND job.current_stage_type = 'DISCOVERY'
                   )
-                """, progressCompleted, jobStageId, executionVersion);
+                """, progressCompleted, jobStageId, jobId, executionVersion);
         int jobRows = jdbcTemplate.update("""
                 UPDATE job SET progress_completed = ?
                 WHERE id = ? AND execution_version = ? AND status = 'RUNNING'
@@ -239,9 +254,11 @@ public class JobRepository {
                 WHERE id = ? AND stage_type = 'RECONCILIATION' AND status = 'RUNNING'
                   AND EXISTS (
                       SELECT 1 FROM job
-                      WHERE job.id = job_stage.job_id AND job.execution_version = ?
+                      WHERE job.id = job_stage.job_id AND job.id = ?
+                        AND job.execution_version = ? AND job.status = 'RUNNING'
+                        AND job.current_stage_type = 'RECONCILIATION'
                   )
-                """, progressCompleted, jobStageId, executionVersion);
+                """, progressCompleted, jobStageId, jobId, executionVersion);
         int jobRows = jdbcTemplate.update("""
                 UPDATE job SET progress_completed = ?
                 WHERE id = ? AND execution_version = ? AND status = 'RUNNING'
@@ -287,7 +304,7 @@ public class JobRepository {
                       WHERE job.id = job_stage.job_id
                         AND job.id = ?
                         AND job.job_type = 'SCAN'
-                        AND job.execution_version = 2
+                        AND job.execution_version IN (2, 3)
                         AND job.status = 'RUNNING'
                         AND job.current_stage_type = ?
                   )
@@ -299,7 +316,7 @@ public class JobRepository {
                 UPDATE job
                 SET progress_completed = 0, progress_total = NULL,
                     finished_at_ms = NULL, error_message = NULL
-                WHERE id = ? AND job_type = 'SCAN' AND execution_version = 2
+                WHERE id = ? AND job_type = 'SCAN' AND execution_version IN (2, 3)
                   AND status = 'RUNNING' AND current_stage_type = ?
                 """, jobId, stageType);
     }
@@ -315,7 +332,7 @@ public class JobRepository {
                       SELECT 1 FROM job
                       WHERE job.id = job_stage.job_id
                         AND job.job_type = 'SCAN'
-                        AND job.execution_version = 2
+                        AND job.execution_version IN (2, 3)
                         AND job.status = 'RUNNING'
                         AND job.current_stage_type = ?
                   )
@@ -329,7 +346,7 @@ public class JobRepository {
                 UPDATE job
                 SET current_stage_type = ?, progress_completed = ?, progress_total = ?,
                     finished_at_ms = NULL, error_message = NULL
-                WHERE id = ? AND job_type = 'SCAN' AND execution_version = 2
+                WHERE id = ? AND job_type = 'SCAN' AND execution_version IN (2, 3)
                   AND status = 'RUNNING' AND current_stage_type = ?
                 """, nextStageType, progressCompleted, progressCompleted, jobId, currentStageType);
     }
@@ -339,7 +356,7 @@ public class JobRepository {
                 UPDATE job
                 SET status = 'COMPLETED', current_stage_type = NULL,
                     progress_completed = ?, progress_total = ?, finished_at_ms = ?, error_message = NULL
-                WHERE id = ? AND job_type = 'SCAN' AND execution_version = 2
+                WHERE id = ? AND job_type = 'SCAN' AND execution_version IN (2, 3)
                   AND status = 'RUNNING' AND current_stage_type = 'CONTENT_HASHING'
                 """, progressCompleted, progressCompleted, finishedAtMs, jobId);
     }
@@ -353,7 +370,7 @@ public class JobRepository {
                   AND EXISTS (
                       SELECT 1 FROM job
                       WHERE job.id = job_stage.job_id
-                        AND job.execution_version = 2
+                        AND job.execution_version IN (2, 3)
                         AND job.status = 'RUNNING'
                         AND job.current_stage_type = ?
                   )
@@ -364,23 +381,39 @@ public class JobRepository {
         return jdbcTemplate.update("""
                 UPDATE job
                 SET status = 'FAILED', current_stage_type = NULL, finished_at_ms = ?, error_message = ?
-                WHERE id = ? AND job_type = 'SCAN' AND execution_version = 2
+                WHERE id = ? AND job_type = 'SCAN' AND execution_version IN (2, 3)
                   AND status = 'RUNNING' AND current_stage_type = ?
                 """, failedAtMs, errorMessage, jobId, stageType);
     }
 
     public List<Job> findActiveVersion2ScanJobs() {
         return jdbcTemplate.query("""
-                SELECT * FROM job WHERE job_type = 'SCAN' AND execution_version = 2
+                SELECT * FROM job WHERE job_type = 'SCAN' AND execution_version IN (1, 2, 3)
                   AND status IN ('PENDING', 'RUNNING') ORDER BY id
                 """, JobRepository::mapJob);
+    }
+
+    public int failActiveVersion1Job(long jobId, long failedAtMs, String message) {
+        return jdbcTemplate.update("""
+                UPDATE job SET status = 'FAILED', current_stage_type = NULL,
+                    finished_at_ms = ?, error_message = ?
+                WHERE id = ? AND job_type = 'SCAN' AND execution_version = 1
+                  AND status IN ('PENDING', 'RUNNING')
+                """, failedAtMs, message, jobId);
+    }
+
+    public int failRunningVersion1Stage(long jobId, long failedAtMs, String message) {
+        return jdbcTemplate.update("""
+                UPDATE job_stage SET status = 'FAILED', finished_at_ms = ?, error_message = ?
+                WHERE job_id = ? AND status = 'RUNNING'
+                """, failedAtMs, message, jobId);
     }
 
     public int failActiveVersion2Job(long jobId, long failedAtMs, String message) {
         return jdbcTemplate.update("""
                 UPDATE job SET status = 'FAILED', current_stage_type = NULL,
                     finished_at_ms = ?, error_message = ?
-                WHERE id = ? AND job_type = 'SCAN' AND execution_version = 2
+                WHERE id = ? AND job_type = 'SCAN' AND execution_version IN (2, 3)
                   AND status IN ('PENDING', 'RUNNING')
                 """, failedAtMs, message, jobId);
     }

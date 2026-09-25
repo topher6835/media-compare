@@ -38,7 +38,16 @@ public class Version2ContentHashingService {
     }
 
     public ContentHashingStageResult execute(long scanRunId) {
-        HashingPlan plan = preflight(scanRunId);
+        throw new UnsupportedOperationException(
+                "Historical v2 SCAN work cannot write the V6 catalog");
+    }
+
+    public ContentHashingStageResult executeVersion3(long scanRunId) {
+        return execute(scanRunId, ScanExecutionDefinition.VERSION_3);
+    }
+
+    private ContentHashingStageResult execute(long scanRunId, long executionVersion) {
+        HashingPlan plan = preflight(scanRunId, executionVersion);
         executionState.startStage(plan.job(), plan.stage(), System.currentTimeMillis());
 
         try {
@@ -59,11 +68,11 @@ public class Version2ContentHashingService {
         }
     }
 
-    private HashingPlan preflight(long scanRunId) {
+    private HashingPlan preflight(long scanRunId, long executionVersion) {
         ScanRun scanRun = scanRepository.findScanRunById(scanRunId)
                 .orElseThrow(() -> new NoSuchElementException("ScanRun " + scanRunId + " does not exist"));
         Job job = jobRepository.findJobByScanRunIdAndTypeAndExecutionVersion(
-                scanRunId, ScanExecutionDefinition.JOB_TYPE, ScanExecutionDefinition.VERSION_2)
+                scanRunId, ScanExecutionDefinition.JOB_TYPE, executionVersion)
                 .orElseThrow(() -> new NoSuchElementException(
                         "Version-2 execution for ScanRun " + scanRunId + " does not exist"));
         JobStage assignment = requireStage(job, ScanExecutionDefinition.CONTENT_ASSIGNMENT);

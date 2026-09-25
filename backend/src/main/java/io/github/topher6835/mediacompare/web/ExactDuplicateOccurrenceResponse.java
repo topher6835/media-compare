@@ -7,10 +7,12 @@ import io.github.topher6835.mediacompare.matching.ExactDuplicateOccurrence;
 public record ExactDuplicateOccurrenceResponse(
         long fileEntryId,
         long contentRecordId,
+        long membershipId,
         long sourceId,
         String sourceName,
         String relativePath,
         String presenceStatus,
+        String applicabilityStatus,
         String extension,
         FileCategory fileCategory,
         boolean matchesFilter) {
@@ -19,10 +21,12 @@ public record ExactDuplicateOccurrenceResponse(
         return new ExactDuplicateOccurrenceResponse(
                 occurrence.fileEntryId(),
                 occurrence.contentRecordId(),
+                occurrence.membershipId(),
                 occurrence.sourceId(),
                 occurrence.sourceName(),
                 occurrence.relativePath(),
                 occurrence.presenceStatus(),
+                occurrence.applicabilityStatus(),
                 occurrence.extensionKey() == null
                         ? null
                         : FileExtensionNormalizer.toApiValue(occurrence.extensionKey()),

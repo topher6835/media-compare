@@ -30,7 +30,16 @@ public class Version2ContentAssignmentService {
     }
 
     public ContentAssignmentStageResult execute(long scanRunId) {
-        AssignmentPlan plan = preflight(scanRunId);
+        throw new UnsupportedOperationException(
+                "Historical v2 SCAN work cannot write the V6 catalog");
+    }
+
+    public ContentAssignmentStageResult executeVersion3(long scanRunId) {
+        return execute(scanRunId, ScanExecutionDefinition.VERSION_3);
+    }
+
+    private ContentAssignmentStageResult execute(long scanRunId, long executionVersion) {
+        AssignmentPlan plan = preflight(scanRunId, executionVersion);
         executionState.startStage(plan.job(), plan.stage(), System.currentTimeMillis());
 
         try {
@@ -50,11 +59,11 @@ public class Version2ContentAssignmentService {
         }
     }
 
-    private AssignmentPlan preflight(long scanRunId) {
+    private AssignmentPlan preflight(long scanRunId, long executionVersion) {
         ScanRun scanRun = scanRepository.findScanRunById(scanRunId)
                 .orElseThrow(() -> new NoSuchElementException("ScanRun " + scanRunId + " does not exist"));
         Job job = jobRepository.findJobByScanRunIdAndTypeAndExecutionVersion(
-                scanRunId, ScanExecutionDefinition.JOB_TYPE, ScanExecutionDefinition.VERSION_2)
+                scanRunId, ScanExecutionDefinition.JOB_TYPE, executionVersion)
                 .orElseThrow(() -> new NoSuchElementException(
                         "Version-2 execution for ScanRun " + scanRunId + " does not exist"));
         JobStage reconciliation = requireStage(job, ScanExecutionDefinition.RECONCILIATION);

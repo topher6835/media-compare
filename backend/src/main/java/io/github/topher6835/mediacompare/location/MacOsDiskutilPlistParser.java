@@ -27,6 +27,15 @@ public final class MacOsDiskutilPlistParser {
     public static final int MAX_PLIST_BYTES = 1_024 * 1_024;
 
     public DiskutilInfo parse(byte[] plist) {
+        return diskutilInfo(values(plist));
+    }
+
+    public MountedDiskutilInfo parseMounted(byte[] plist) {
+        Map<String, Element> values = values(plist);
+        return new MountedDiskutilInfo(diskutilInfo(values), requireString(values, "MountPoint"));
+    }
+
+    private static Map<String, Element> values(byte[] plist) {
         if (plist == null || plist.length == 0 || plist.length > MAX_PLIST_BYTES) {
             throw new IllegalArgumentException("diskutil plist has an invalid size");
         }
@@ -69,7 +78,10 @@ public final class MacOsDiskutilPlistParser {
             throw new IllegalArgumentException("diskutil plist root value must be a dictionary");
         }
 
-        Map<String, Element> values = dictionaryValues(dictionary);
+        return dictionaryValues(dictionary);
+    }
+
+    private static DiskutilInfo diskutilInfo(Map<String, Element> values) {
         String fileSystemType = requireString(values, "FilesystemType").toLowerCase(Locale.ROOT);
         if (!MacOsApfsLocationContextEvidence.FILE_SYSTEM_TYPE.equals(fileSystemType)) {
             throw new UnsupportedFileSystemException();
@@ -152,6 +164,9 @@ public final class MacOsDiskutilPlistParser {
     }
 
     public record DiskutilInfo(String fileSystemType, String volumeUuid) {
+    }
+
+    public record MountedDiskutilInfo(DiskutilInfo volume, String mountPoint) {
     }
 
     public static final class UnsupportedFileSystemException extends IllegalArgumentException {

@@ -112,10 +112,12 @@ public class ExactDuplicateService {
         return new ExactDuplicateOccurrence(
                 occurrence.fileEntryId(),
                 occurrence.contentRecordId(),
+                occurrence.membershipId(),
                 occurrence.sourceId(),
                 occurrence.sourceName(),
                 occurrence.relativePath(),
                 occurrence.presenceStatus(),
+                occurrence.applicabilityStatus(),
                 occurrence.extensionKey(),
                 category,
                 filter.matches(occurrence.extensionKey()));

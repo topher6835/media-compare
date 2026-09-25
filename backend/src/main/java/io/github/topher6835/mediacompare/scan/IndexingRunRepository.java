@@ -28,7 +28,7 @@ public class IndexingRunRepository {
         return jdbc.query("SELECT " + SUMMARY_COLUMNS + """
                 FROM job j JOIN scan_run r ON r.id = j.scan_run_id
                 """ + RESULT_JOINS + """
-                WHERE j.job_type = 'SCAN' AND j.execution_version = 2
+                WHERE j.job_type = 'SCAN' AND j.execution_version IN (2, 3)
                   AND j.status IN ('PENDING', 'RUNNING') AND r.request_type = 'INDEX'
                 """, (rs, row) -> summary(rs)).stream().findFirst();
     }
@@ -42,7 +42,8 @@ public class IndexingRunRepository {
                     FROM scan_run_source srs
                     JOIN scan_run r ON r.id = srs.scan_run_id
                     JOIN job j ON j.scan_run_id = r.id
-                    WHERE j.job_type = 'SCAN' AND j.execution_version = 2 AND r.request_type = 'INDEX'
+                    WHERE j.job_type = 'SCAN' AND j.execution_version IN (2, 3)
+                      AND r.request_type = 'INDEX'
                 )
                 SELECT s.id AS source_id,
                 """ + SUMMARY_COLUMNS + """

@@ -40,7 +40,19 @@ import io.github.topher6835.mediacompare.analysis.UnsupportedMediaMetadata;
 import io.github.topher6835.mediacompare.catalog.CatalogRepository;
 import io.github.topher6835.mediacompare.catalog.ContentRecord;
 import io.github.topher6835.mediacompare.catalog.FileEntry;
+import io.github.topher6835.mediacompare.catalog.FileExtensionNormalizer;
 import io.github.topher6835.mediacompare.catalog.Source;
+import io.github.topher6835.mediacompare.location.LocationContextAcceptanceEvidence;
+import io.github.topher6835.mediacompare.location.LocationContextAcceptanceEvidenceCodec;
+import io.github.topher6835.mediacompare.location.LocationDialect;
+import io.github.topher6835.mediacompare.location.LocationKeyCodec;
+import io.github.topher6835.mediacompare.location.LocationPath;
+import io.github.topher6835.mediacompare.location.LocationPathCodec;
+import io.github.topher6835.mediacompare.location.LocationPathParser;
+import io.github.topher6835.mediacompare.location.MacOsApfsLocationContextEvidence;
+import io.github.topher6835.mediacompare.location.MacOsApfsSourceRootEvidence;
+import io.github.topher6835.mediacompare.location.SourceBindingEvidence;
+import io.github.topher6835.mediacompare.location.SourceBindingEvidenceCodec;
 
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
@@ -88,6 +100,7 @@ class ImageIoMediaMetadataAnalyzerTests {
     void clearApplicationTables() {
         jdbcTemplate.update("DELETE FROM content_hash");
         jdbcTemplate.update("DELETE FROM job_stage");
+        jdbcTemplate.update("DELETE FROM source_membership");
         jdbcTemplate.update("DELETE FROM file_entry");
         jdbcTemplate.update("DELETE FROM scan_run_source");
         jdbcTemplate.update("DELETE FROM working_set_content");
@@ -97,6 +110,7 @@ class ImageIoMediaMetadataAnalyzerTests {
         jdbcTemplate.update("DELETE FROM working_set");
         jdbcTemplate.update("DELETE FROM content_record");
         jdbcTemplate.update("DELETE FROM source");
+        jdbcTemplate.update("DELETE FROM location_context");
     }
 
     @ParameterizedTest(name = "extracts {0} as canonical {1}")
@@ -194,7 +208,10 @@ class ImageIoMediaMetadataAnalyzerTests {
     void completedImageResultIsReusedAfterTheOccurrenceBecomesMissing() throws Exception {
         Fixture fixture = createImageFixture("cache", "png", "photo.bin", 8, 6);
         MediaMetadataResult first = analyze(fixture);
-        jdbcTemplate.update("UPDATE file_entry SET presence_status = 'MISSING' WHERE current_content_id = ?",
+        jdbcTemplate.update("""
+                UPDATE source_membership SET presence_status = 'MISSING'
+                WHERE file_entry_id IN (SELECT id FROM file_entry WHERE current_content_id = ?)
+                """,
                 fixture.content().id());
         Files.delete(fixture.paths().getFirst());
 
@@ -273,24 +290,62 @@ class ImageIoMediaMetadataAnalyzerTests {
     }
 
     private Fixture catalogFixture(Path root, String name, List<String> relativePaths) throws Exception {
+        Path exactRoot = root.toRealPath();
         Source source = catalogRepository.insert(new Source(
-                null, name, root.toString(), root.toString(), 0, 1, 1));
-        Path firstPath = root.resolve(relativePaths.getFirst());
+                null, name, exactRoot.toString(), exactRoot.toString(), 0, 1, 1));
+        LocationPath rootLocation = LocationPathParser.parse(LocationDialect.UNIX, exactRoot.toString());
+        String contextId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        String volumeId = "11111111-2222-3333-4444-555555555555";
+        var contextEvidence = new MacOsApfsLocationContextEvidence(1,
+                MacOsApfsLocationContextEvidence.PROFILE, 1,
+                rootLocation, LocationKeyCodec.encode(rootLocation), "apfs", volumeId, "2",
+                true, false, 1, MacOsApfsLocationContextEvidence.Diagnostics.empty());
+        String acceptance = new LocationContextAcceptanceEvidenceCodec().encode(
+                new LocationContextAcceptanceEvidence(1, contextId, 1, contextEvidence));
+        jdbcTemplate.update("""
+                INSERT INTO location_context (id, anchor_location_path, anchor_location_key,
+                    lifecycle_status, continuity_status, revision, continuity_evidence_json,
+                    created_at_ms, updated_at_ms)
+                VALUES (?, ?, ?, 'ACTIVE', 'ACCEPTED', 1, ?, 1, 1)
+                """, contextId, new LocationPathCodec().encode(rootLocation),
+                LocationKeyCodec.encode(rootLocation).value(), acceptance);
+        var rootEvidence = new MacOsApfsSourceRootEvidence(1,
+                MacOsApfsSourceRootEvidence.PROFILE, 1, contextId, 1, 1,
+                rootLocation, LocationKeyCodec.encode(rootLocation), volumeId, "10",
+                new MacOsApfsSourceRootEvidence.BirthTime(100, 200), true, false, 1);
+        String binding = new SourceBindingEvidenceCodec().encode(
+                new SourceBindingEvidence(1, source.id(), rootEvidence));
+        jdbcTemplate.update("""
+                UPDATE source SET root_path_key = ?, root_path_dialect = 'unix',
+                    bound_location_context_id = ?, binding_evidence_json = ?, location_revision = 1
+                WHERE id = ?
+                """, LocationKeyCodec.encode(rootLocation).value(), contextId, binding, source.id());
+        Path firstPath = exactRoot.resolve(relativePaths.getFirst());
         BasicFileAttributes firstAttributes = Files.readAttributes(firstPath, BasicFileAttributes.class);
         ContentRecord content = catalogRepository.insert(
                 new ContentRecord(null, firstAttributes.size(), 1));
         for (String relativePath : relativePaths) {
-            Path file = root.resolve(relativePath);
+            Path file = exactRoot.resolve(relativePath);
             BasicFileAttributes attributes = Files.readAttributes(file, BasicFileAttributes.class);
             assertEquals(content.sizeBytes(), attributes.size());
             Instant modified = attributes.lastModifiedTime().toInstant();
-            catalogRepository.insert(new FileEntry(
-                    null, source.id(), relativePath, relativePath, content.id(), "PRESENT",
-                    attributes.size(), modified.getEpochSecond(), modified.getNano(), 0,
-                    1, 1, null, null));
+            LocationPath fileLocation = rootLocation.append(relativePath);
+            FileEntry entry = catalogRepository.insert(new FileEntry(
+                    null, "RESOLVED", contextId,
+                    new LocationPathCodec().encode(fileLocation),
+                    LocationKeyCodec.encode(fileLocation).value(), content.id(),
+                    attributes.size(), modified.getEpochSecond(), modified.getNano(),
+                    FileExtensionNormalizer.fromRelativePath(relativePath), 0, 1, 1));
+            jdbcTemplate.update("""
+                    INSERT INTO source_membership (source_id, file_entry_id, relative_path,
+                        path_key, applicability_status, presence_status,
+                        observed_file_entry_revision, first_seen_at_ms, last_seen_at_ms,
+                        observed_source_location_revision, observed_location_context_revision)
+                    VALUES (?, ?, ?, ?, 'ACTIVE', 'PRESENT', 0, 1, 1, 1, 1)
+                    """, source.id(), entry.id(), relativePath, relativePath);
         }
         return new Fixture(source, content,
-                relativePaths.stream().map(root::resolve).toList());
+                relativePaths.stream().map(exactRoot::resolve).toList());
     }
 
     private static void writeImage(Path file, String format, int width, int height) throws IOException {

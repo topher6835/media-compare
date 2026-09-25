@@ -75,7 +75,7 @@ public class DiscoveryExecutionState {
         requireOne(jobRepository.failDiscoveryStage(
                 discoveryStage.id(), job.executionVersion(), failedAtMs, errorMessage),
                 "fail DISCOVERY stage");
-        if (job.executionVersion() == ScanExecutionDefinition.VERSION_2) {
+        if (job.executionVersion() >= ScanExecutionDefinition.VERSION_2) {
             requireOne(jobRepository.failVersion2Job(
                     job.id(), ScanExecutionDefinition.DISCOVERY, failedAtMs, errorMessage), "fail Job");
         } else {

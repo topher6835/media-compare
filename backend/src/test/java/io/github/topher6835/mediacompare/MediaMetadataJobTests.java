@@ -43,12 +43,24 @@ import io.github.topher6835.mediacompare.analysis.UnsupportedMediaMetadata;
 import io.github.topher6835.mediacompare.catalog.CatalogRepository;
 import io.github.topher6835.mediacompare.catalog.ContentRecord;
 import io.github.topher6835.mediacompare.catalog.FileEntry;
+import io.github.topher6835.mediacompare.catalog.FileExtensionNormalizer;
 import io.github.topher6835.mediacompare.catalog.Source;
+import io.github.topher6835.mediacompare.location.LocationContextAcceptanceEvidence;
+import io.github.topher6835.mediacompare.location.LocationContextAcceptanceEvidenceCodec;
+import io.github.topher6835.mediacompare.location.LocationDialect;
+import io.github.topher6835.mediacompare.location.LocationKeyCodec;
+import io.github.topher6835.mediacompare.location.LocationPath;
+import io.github.topher6835.mediacompare.location.LocationPathCodec;
+import io.github.topher6835.mediacompare.location.LocationPathParser;
+import io.github.topher6835.mediacompare.location.MacOsApfsLocationContextEvidence;
+import io.github.topher6835.mediacompare.location.MacOsApfsSourceRootEvidence;
+import io.github.topher6835.mediacompare.location.SourceBindingEvidence;
+import io.github.topher6835.mediacompare.location.SourceBindingEvidenceCodec;
 import io.github.topher6835.mediacompare.job.Job;
 import io.github.topher6835.mediacompare.job.JobRepository;
 import io.github.topher6835.mediacompare.job.JobStage;
 import io.github.topher6835.mediacompare.scan.ScanRunService;
-import io.github.topher6835.mediacompare.scan.Version2ScanExecutionService;
+import io.github.topher6835.mediacompare.scan.Version3ScanExecutionService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -106,14 +118,14 @@ class MediaMetadataJobTests {
     private ScanRunService scanRuns;
 
     @Autowired
-    private Version2ScanExecutionService scanExecutions;
+    private Version3ScanExecutionService scanExecutions;
 
     @BeforeEach
     void clear() {
         for (String table : List.of(
-                "content_hash", "job_stage", "file_entry", "scan_run_source",
+                "content_hash", "job_stage", "source_membership", "file_entry", "scan_run_source",
                 "working_set_content", "analysis_record", "job", "scan_run",
-                "working_set", "content_record", "source")) {
+                "working_set", "content_record", "source", "location_context")) {
             jdbc.update("DELETE FROM " + table);
         }
         extractor.reset();
@@ -121,7 +133,7 @@ class MediaMetadataJobTests {
 
     @Test
     void processesMoreThanOneCandidatePageAndPersistsCompletedSummary() throws Exception {
-        Path root = Files.createDirectory(temporaryDirectory.resolve("paged"));
+        Path root = Files.createDirectory(temporaryDirectory.resolve("paged")).toRealPath();
         Source source = insertSource(root, "paged");
         Path seed = root.resolve("seed.png");
         writeImage(seed, 3, 2);
@@ -154,7 +166,7 @@ class MediaMetadataJobTests {
 
     @Test
     void corruptImageRecordsFailureAndJobContinues() throws Exception {
-        Path root = Files.createDirectory(temporaryDirectory.resolve("failure"));
+        Path root = Files.createDirectory(temporaryDirectory.resolve("failure")).toRealPath();
         Source source = insertSource(root, "failure");
         Files.write(root.resolve("corrupt.bin"), new byte[] {
                 (byte) 0xff, (byte) 0xd8, (byte) 0xff, (byte) 0xd9 });
@@ -176,7 +188,7 @@ class MediaMetadataJobTests {
 
     @Test
     void failedAnalysisRetriesToCompletionAndClearsItsError() throws Exception {
-        Path root = Files.createDirectory(temporaryDirectory.resolve("retry"));
+        Path root = Files.createDirectory(temporaryDirectory.resolve("retry")).toRealPath();
         Source source = insertSource(root, "retry");
         writeImage(root.resolve("retry.bin"), 5, 4);
         ContentRecord content = insertContentAndOccurrence(source, root, "retry.bin");
@@ -199,7 +211,7 @@ class MediaMetadataJobTests {
 
     @Test
     void repeatedFailureIncrementsAttemptAndRemainsRetryable() throws Exception {
-        Path root = Files.createDirectory(temporaryDirectory.resolve("repeat"));
+        Path root = Files.createDirectory(temporaryDirectory.resolve("repeat")).toRealPath();
         Source source = insertSource(root, "repeat");
         writeImage(root.resolve("repeat.bin"), 5, 4);
         ContentRecord content = insertContentAndOccurrence(source, root, "repeat.bin");
@@ -216,7 +228,7 @@ class MediaMetadataJobTests {
 
     @Test
     void staleExtractionFailureFallsBackWithoutPublishingFailure() throws Exception {
-        Path root = Files.createDirectory(temporaryDirectory.resolve("stale"));
+        Path root = Files.createDirectory(temporaryDirectory.resolve("stale")).toRealPath();
         Source source = insertSource(root, "stale");
         writeImage(root.resolve("first.bin"), 7, 6);
         Files.copy(root.resolve("first.bin"), root.resolve("second.bin"));
@@ -233,7 +245,7 @@ class MediaMetadataJobTests {
 
     @Test
     void unexpectedExtractorFailureFailsStageAndJob() throws Exception {
-        Path root = Files.createDirectory(temporaryDirectory.resolve("infrastructure-failure"));
+        Path root = Files.createDirectory(temporaryDirectory.resolve("infrastructure-failure")).toRealPath();
         Source source = insertSource(root, "infrastructure-failure");
         writeImage(root.resolve("broken-worker.bin"), 3, 3);
         insertContentAndOccurrence(source, root, "broken-worker.bin");
@@ -251,7 +263,7 @@ class MediaMetadataJobTests {
 
     @Test
     void admissionIsSeparateFromScanAndTerminalJobsReleaseIt() throws Exception {
-        Path root = Files.createDirectory(temporaryDirectory.resolve("admission"));
+        Path root = Files.createDirectory(temporaryDirectory.resolve("admission")).toRealPath();
         Source source = insertSource(root, "admission");
         writeImage(root.resolve("one.bin"), 2, 2);
         insertContentAndOccurrence(source, root, "one.bin");
@@ -284,7 +296,7 @@ class MediaMetadataJobTests {
 
     @Test
     void activeStageIsObservableWhileBackgroundExtractionRuns() throws Exception {
-        Path root = Files.createDirectory(temporaryDirectory.resolve("background"));
+        Path root = Files.createDirectory(temporaryDirectory.resolve("background")).toRealPath();
         Source source = insertSource(root, "background");
         writeImage(root.resolve("one.bin"), 2, 2);
         insertContentAndOccurrence(source, root, "one.bin");
@@ -331,7 +343,7 @@ class MediaMetadataJobTests {
 
     @Test
     void exactDefinitionRecoveryMakesOnlyAbandonedImageIoRowsRetryable() throws Exception {
-        Path root = Files.createDirectory(temporaryDirectory.resolve("analysis-recovery"));
+        Path root = Files.createDirectory(temporaryDirectory.resolve("analysis-recovery")).toRealPath();
         Source source = insertSource(root, "analysis-recovery");
         writeImage(root.resolve("pending.bin"), 2, 2);
         ContentRecord pending = insertContentAndOccurrence(source, root, "pending.bin");
@@ -388,8 +400,36 @@ class MediaMetadataJobTests {
     }
 
     private Source insertSource(Path root, String name) {
-        return catalog.insert(new Source(
+        Source source = catalog.insert(new Source(
                 null, name, root.toString(), root.toString(), 0, 1, 1));
+        LocationPath location = LocationPathParser.parse(LocationDialect.UNIX, root.toString());
+        String contextId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        String volumeId = "11111111-2222-3333-4444-555555555555";
+        var contextEvidence = new MacOsApfsLocationContextEvidence(1,
+                MacOsApfsLocationContextEvidence.PROFILE, 1,
+                location, LocationKeyCodec.encode(location), "apfs", volumeId, "2",
+                true, false, 1, MacOsApfsLocationContextEvidence.Diagnostics.empty());
+        String acceptance = new LocationContextAcceptanceEvidenceCodec().encode(
+                new LocationContextAcceptanceEvidence(1, contextId, 1, contextEvidence));
+        jdbc.update("""
+                INSERT INTO location_context (id, anchor_location_path, anchor_location_key,
+                    lifecycle_status, continuity_status, revision, continuity_evidence_json,
+                    created_at_ms, updated_at_ms)
+                VALUES (?, ?, ?, 'ACTIVE', 'ACCEPTED', 1, ?, 1, 1)
+                """, contextId, new LocationPathCodec().encode(location),
+                LocationKeyCodec.encode(location).value(), acceptance);
+        var rootEvidence = new MacOsApfsSourceRootEvidence(1,
+                MacOsApfsSourceRootEvidence.PROFILE, 1, contextId, 1, 1,
+                location, LocationKeyCodec.encode(location), volumeId, "10",
+                new MacOsApfsSourceRootEvidence.BirthTime(100, 200), true, false, 1);
+        String binding = new SourceBindingEvidenceCodec().encode(
+                new SourceBindingEvidence(1, source.id(), rootEvidence));
+        jdbc.update("""
+                UPDATE source SET root_path_key = ?, root_path_dialect = 'unix',
+                    bound_location_context_id = ?, binding_evidence_json = ?, location_revision = 1
+                WHERE id = ?
+                """, LocationKeyCodec.encode(location).value(), contextId, binding, source.id());
+        return catalog.findSourceById(source.id()).orElseThrow();
     }
 
     private ContentRecord insertContentAndOccurrence(
@@ -407,10 +447,21 @@ class MediaMetadataJobTests {
                     root.resolve(relativePath), BasicFileAttributes.class);
             assertEquals(content.sizeBytes(), attributes.size());
             Instant modified = attributes.lastModifiedTime().toInstant();
-            catalog.insert(new FileEntry(
-                    null, source.id(), relativePath, relativePath, content.id(), "PRESENT",
+            LocationPath fileLocation = LocationPathParser.parse(LocationDialect.UNIX,
+                    root.resolve(relativePath).toString());
+            FileEntry entry = catalog.insert(new FileEntry(
+                    null, "RESOLVED", source.boundLocationContextId(),
+                    new LocationPathCodec().encode(fileLocation),
+                    LocationKeyCodec.encode(fileLocation).value(), content.id(),
                     attributes.size(), modified.getEpochSecond(), modified.getNano(),
-                    0, 1, 1, null, null));
+                    FileExtensionNormalizer.fromRelativePath(relativePath), 0, 1, 1));
+            jdbc.update("""
+                    INSERT INTO source_membership (source_id, file_entry_id, relative_path,
+                        path_key, applicability_status, presence_status,
+                        observed_file_entry_revision, first_seen_at_ms, last_seen_at_ms,
+                        observed_source_location_revision, observed_location_context_revision)
+                    VALUES (?, ?, ?, ?, 'ACTIVE', 'PRESENT', 0, 1, 1, 1, 1)
+                    """, source.id(), entry.id(), relativePath, relativePath);
         }
         return content;
     }

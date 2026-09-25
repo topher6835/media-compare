@@ -16,7 +16,7 @@ import io.github.topher6835.mediacompare.analysis.MediaMetadataExecutionState;
 import io.github.topher6835.mediacompare.catalog.CatalogRepository;
 import io.github.topher6835.mediacompare.catalog.Source;
 import io.github.topher6835.mediacompare.scan.ScanRunService;
-import io.github.topher6835.mediacompare.scan.Version2ScanExecutionService;
+import io.github.topher6835.mediacompare.job.Job;
 import io.github.topher6835.mediacompare.job.JobRepository;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -42,7 +42,6 @@ class MediaMetadataRunApiTests {
     @Autowired private JobRepository jobs;
     @Autowired private CatalogRepository catalog;
     @Autowired private ScanRunService scanRuns;
-    @Autowired private Version2ScanExecutionService scanExecutions;
     @Autowired private io.github.topher6835.mediacompare.analysis.MediaMetadataExecutor executor;
     @Autowired private io.github.topher6835.mediacompare.MediaMetadataJobTests.ControllableExtractor extractor;
     @Autowired private ImageMetadataStageResultCodec stageCodec;
@@ -50,9 +49,9 @@ class MediaMetadataRunApiTests {
 
     @BeforeEach
     void clear() {
-        for (String table : List.of("content_hash", "job_stage", "file_entry", "scan_run_source",
+        for (String table : List.of("content_hash", "job_stage", "source_membership", "file_entry", "scan_run_source",
                 "working_set_content", "analysis_record", "job", "scan_run", "working_set",
-                "content_record", "source")) {
+                "content_record", "source", "location_context")) {
             jdbc.update("DELETE FROM " + table);
         }
     }
@@ -129,7 +128,8 @@ class MediaMetadataRunApiTests {
         Source source = catalog.insert(new Source(null, "scan", tempDir.toString(), tempDir.toString(), 1,
                 System.currentTimeMillis(), System.currentTimeMillis()));
         long scanRunId = scanRuns.create(List.of(source.id())).scanRun().id();
-        long scanJobId = scanExecutions.create(scanRunId).job().id();
+        long scanJobId = jobs.insert(new Job(null, scanRunId, "SCAN", 3, "PENDING", "DISCOVERY",
+                0, null, 0, System.currentTimeMillis(), null, null, null)).id();
         mvc.perform(get("/api/media-metadata-runs/" + scanJobId))
                 .andExpect(status().isNotFound())
                 .andExpect(header().string("Cache-Control", "no-store"));

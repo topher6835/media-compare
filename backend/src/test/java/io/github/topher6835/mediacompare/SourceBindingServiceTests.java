@@ -88,6 +88,7 @@ class SourceBindingServiceTests {
     void clear() {
         coordinator.gate = null;
         coordinator.forceGuardMiss = false;
+        jdbc.update("DELETE FROM source_membership");
         jdbc.update("DELETE FROM file_entry");
         jdbc.update("DELETE FROM source");
         jdbc.update("DELETE FROM location_context");
@@ -97,8 +98,8 @@ class SourceBindingServiceTests {
     void bindsSourceAtEqualAnchorAndPreservesOtherFields() {
         LocationContext context = acceptedContext(anchor());
         Source source = legacySource("/Volumes/Archive");
-        FileEntry file = sources.insert(new FileEntry(null, source.id(), "photo.jpg", "photo.jpg",
-                null, "PRESENT", 12, null, null, 0, 10, 12, null, null));
+        FileEntry file = sources.insert(new FileEntry(null, "UNRESOLVED", null, null,
+                null, null, 12, null, null, null, 0, 10, 12));
         Source bound = bind(source, context, capture(source, context, anchor()));
 
         assertEquals(new Source(source.id(), source.name(), source.rootPath(), key(anchor()),

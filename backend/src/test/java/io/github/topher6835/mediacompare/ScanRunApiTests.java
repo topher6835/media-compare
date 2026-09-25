@@ -58,6 +58,7 @@ class ScanRunApiTests {
     void clearApplicationTables() {
         jdbcTemplate.update("DELETE FROM content_hash");
         jdbcTemplate.update("DELETE FROM job_stage");
+        jdbcTemplate.update("DELETE FROM source_membership");
         jdbcTemplate.update("DELETE FROM file_entry");
         jdbcTemplate.update("DELETE FROM scan_run_source");
         jdbcTemplate.update("DELETE FROM working_set_content");

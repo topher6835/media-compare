@@ -12,11 +12,13 @@ import java.util.UUID;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import io.github.topher6835.mediacompare.catalog.CatalogRepository;
+import io.github.topher6835.mediacompare.catalog.LocationContextRepository;
 import io.github.topher6835.mediacompare.catalog.Source;
 import io.github.topher6835.mediacompare.config.CatalogOwnership;
 import io.github.topher6835.mediacompare.job.Job;
 import io.github.topher6835.mediacompare.job.JobRepository;
 import io.github.topher6835.mediacompare.scan.*;
+import io.github.topher6835.mediacompare.scan.V3TestHost;
 import io.github.topher6835.mediacompare.web.IndexingRunResponse;
 import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,7 +60,7 @@ class IndexingRunApiTests {
     @Autowired ScanRepository scans;
     @Autowired ScanRunService requests;
     @Autowired JobRepository jobs;
-    @Autowired Version2ScanExecutionService executions;
+    @Autowired Version3ScanExecutionService executions;
     @Autowired ScanExecutionService legacy;
     @Autowired Version2InterruptionRecovery recovery;
     @Autowired IndexingRunService starts;
@@ -70,8 +72,9 @@ class IndexingRunApiTests {
         executor.reset();
         acceptance.setBarrier(null);
         jdbc.execute("DROP TRIGGER IF EXISTS fail_acceptance");
-        for (String table : List.of("content_hash", "job_stage", "file_entry", "scan_run_source", "working_set_content",
-                "analysis_record", "job", "scan_run", "working_set", "content_record", "source")) jdbc.update("DELETE FROM " + table);
+        for (String table : List.of("content_hash", "job_stage", "source_membership", "file_entry",
+                "scan_run_source", "working_set_content", "analysis_record", "job", "scan_run",
+                "working_set", "content_record", "source", "location_context")) jdbc.update("DELETE FROM " + table);
     }
 
     @Test
@@ -197,23 +200,11 @@ class IndexingRunApiTests {
     }
 
     @Test
-    void simultaneousV1AndV2CreationCannotAcquireCompetingOwnership() throws Exception {
+    void historicalV1AndV3CannotAcquireCompetingOwnership() throws Exception {
         long id = requests.create(List.of(source("ownership-race").id())).scanRun().id();
-        CyclicBarrier gate = new CyclicBarrier(2);
-        try (var callers = Executors.newFixedThreadPool(2)) {
-            var first = callers.submit(() -> {
-                gate.await(10, TimeUnit.SECONDS);
-                try { legacy.create(id); return "created"; }
-                catch (ScanExecutionAlreadyExistsException conflict) { return "conflict"; }
-            });
-            var second = callers.submit(() -> {
-                gate.await(10, TimeUnit.SECONDS);
-                try { executions.create(id); return "created"; }
-                catch (Version2ExecutionConflictException conflict) { return "conflict"; }
-            });
-            assertEquals(List.of("conflict", "created"), java.util.stream.Stream.of(first.get(15, TimeUnit.SECONDS),
-                    second.get(15, TimeUnit.SECONDS)).sorted().toList());
-        }
+        assertThrows(ScanExecutionAlreadyExistsException.class, () -> legacy.create(id));
+        executions.create(id);
+        assertThrows(ScanExecutionAlreadyExistsException.class, () -> legacy.create(id));
         assertEquals(1, count("job"));
         assertEquals(1, count("job_stage"));
     }
@@ -228,7 +219,7 @@ class IndexingRunApiTests {
         assertEquals("FAILED", failed.status());
         assertEquals("Execution could not be scheduled", failed.errorMessage());
         assertEquals("PENDING", failed.stages().getFirst().status());
-        assertTrue(jobs.findActiveVersion2ScanJobs().isEmpty());
+        assertFalse(jobs.hasActiveScanJob());
         assertEquals(1, executor.submissions.get());
         executor.reject = false;
         var replacement = body(start(UUID.randomUUID().toString(), List.of(source.id())).andExpect(status().isAccepted()).andReturn());
@@ -256,7 +247,7 @@ class IndexingRunApiTests {
     void normalCreationExcludesBothExecutionOwnershipDirections() throws Exception {
         Source source = source("ownership");
         long firstScan = requests.create(List.of(source.id())).scanRun().id();
-        legacy.create(firstScan);
+        historicalV1(firstScan);
         assertThrows(Version2ExecutionConflictException.class, () -> executions.create(firstScan));
         long secondScan = requests.create(List.of(source.id())).scanRun().id();
         executions.create(secondScan);
@@ -268,22 +259,23 @@ class IndexingRunApiTests {
     void unknownAndV1OnlyDetailsAre404() throws Exception {
         mvc.perform(get("/api/indexing-runs/999")).andExpect(status().isNotFound()).andExpect(header().string("Cache-Control", "no-store"));
         long id = requests.create(List.of(source("v1").id())).scanRun().id();
-        legacy.create(id);
+        historicalV1(id);
         mvc.perform(get("/api/indexing-runs/" + id)).andExpect(status().isNotFound());
     }
 
     @Test
     void discoveryFailureAndStartupInterruptionRemainReplayable() throws Exception {
         Source source = source("missing");
-        jdbc.update("UPDATE source SET root_path = ? WHERE id = ?", directory.resolve("absent").toString(), source.id());
         String key = UUID.randomUUID().toString();
         var accepted = body(start(key, List.of(source.id())).andExpect(status().isAccepted()).andReturn());
+        jdbc.update("UPDATE source SET root_path = ? WHERE id = ?", directory.resolve("absent").toString(), source.id());
         executor.runAccepted();
         var failed = body(start(key, List.of(source.id())).andExpect(status().isOk()).andReturn());
         assertEquals(accepted.jobId(), failed.jobId());
         assertEquals("FAILED", failed.status());
-        assertEquals("Discovery failed for Source " + source.id(), failed.errorMessage());
+        assertEquals("Version-3 discovery failed for Source " + source.id(), failed.errorMessage());
         assertEquals("FAILED", failed.stages().getFirst().status());
+        jdbc.update("UPDATE source SET root_path = ? WHERE id = ?", source.rootPath(), source.id());
         String nextKey = UUID.randomUUID().toString();
         var interrupted = body(start(nextKey, List.of(source.id())).andExpect(status().isAccepted()).andReturn());
         executor.held.clear(); // Models a process that exited before scheduling its accepted task.
@@ -297,7 +289,7 @@ class IndexingRunApiTests {
     private Source source(String name) throws Exception {
         Path root = Files.createDirectory(directory.resolve(name));
         Files.writeString(root.resolve("one.txt"), "content");
-        return catalog.insert(new Source(null, name, root.toString(), root.toString(), 0, 1, 1));
+        return V3TestHost.boundSource(catalog, jdbc, root, name);
     }
     private ResultActions start(String key, List<Long> ids) throws Exception {
         return mvc.perform(post("/api/indexing-runs").contentType(MediaType.APPLICATION_JSON)
@@ -309,13 +301,25 @@ class IndexingRunApiTests {
                 .andExpect(header().string("Cache-Control", "no-store")).andReturn());
     }
     private long count(String table) { return jdbc.queryForObject("SELECT COUNT(*) FROM " + table, Long.class); }
+    private void historicalV1(long scanRunId) {
+        long now = System.currentTimeMillis();
+        jobs.insert(new Job(null, scanRunId, "SCAN", 1, "COMPLETED", null,
+                0, null, 1, now, now, now, null));
+    }
 
     @TestConfiguration
     static class Hooks {
+        @Bean @Primary Version3AuthorityCapture trustedCapture(
+                CatalogRepository catalog, LocationContextRepository contexts) {
+            return V3TestHost.trustedCapture(catalog, contexts);
+        }
+        @Bean @Primary Version3DiscoveryWalker trustedWalker() {
+            return V3TestHost.trustedWalker();
+        }
         @Bean @Primary ControlledExecutor controlledExecutor(CatalogOwnership ownership, Version2IndexingStartup startup, JdbcTemplate jdbc) {
             return new ControlledExecutor(ownership, startup, jdbc);
         }
-        @Bean @Primary BarrierAcceptance barrierAcceptance(ScanRepository scans, ScanRunService requests, Version2ScanExecutionService executions) {
+        @Bean @Primary BarrierAcceptance barrierAcceptance(ScanRepository scans, ScanRunService requests, Version3ScanExecutionService executions) {
             return new BarrierAcceptance(scans, requests, executions);
         }
     }
@@ -356,7 +360,7 @@ class IndexingRunApiTests {
     static class BarrierAcceptance extends IndexingRunAcceptance {
         volatile CyclicBarrier barrier;
         final AtomicInteger attempts = new AtomicInteger();
-        BarrierAcceptance(ScanRepository scans, ScanRunService requests, Version2ScanExecutionService executions) { super(scans, requests, executions); }
+        BarrierAcceptance(ScanRepository scans, ScanRunService requests, Version3ScanExecutionService executions) { super(scans, requests, executions); }
         public void setBarrier(CyclicBarrier barrier) { this.barrier = barrier; attempts.set(0); }
         public int attemptCount() { return attempts.get(); }
         @Override @Transactional

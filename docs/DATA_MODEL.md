@@ -2,9 +2,7 @@
 
 ## Status and Scope
 
-The reviewed V1 persistence design is implemented by Flyway migration `V1__create_core_schema.sql`. Java Flyway migration `V2__add_file_entry_extension_key` evolves `file_entry` with normalized technical extension metadata and an index. SQL migration `V3__add_durable_indexing_foundation.sql` adds fields and partial unique indexes used by internal durable full-pipeline indexing. V4 adds nullable `analysis_record.result_json` for typed compact analysis results. V5 adds the `location_context` table and nullable Source binding fields, now used by explicit first-time local APFS binding. The application now has twelve tables, immutable Java record representations, and small Spring JDBC repositories.
-
-The first migration contains exactly eleven application tables. The fields and constraints below describe the implemented schema.
+Flyway V1–V5 retain their historical schema meaning. Java migration `V6__source_membership_authority` is the current schema: thirteen application tables, source-independent FileEntries, and SourceMembership as the sole writable Source/FileEntry relationship and presence authority. Every V5 FileEntry keeps its ID, content association, byte evidence, extension, revision, and timestamps; it becomes `UNRESOLVED` with null absolute identity and exactly one backfilled membership. V6 neither probes the filesystem nor merges apparently equal historical entries. The old v1/v2 execution rows remain readable, while new SCAN work uses execution version 3.
 
 ## Implemented Tables
 
@@ -27,7 +25,7 @@ Source has a durable database identity. `root_path` and `root_path_key` are loca
 
 Initial Source registration sets `root_path_key` equal to the supplied `root_path`. The registration service preserves that supplied string and uses `Path.of(...)` only to require host-platform syntax and an absolute path. It does not require the path to exist or be a directory and does not perform filesystem canonicalization, case conversion, Unicode normalization, symlink resolution, or `toRealPath()`. Duplicate names, root paths, and root-path keys are intentionally allowed; each registration receives a distinct database identity.
 
-V5 does not reinterpret or rewrite the existing `root_path_key`. `root_path_dialect = NULL` means the Source root/key has not been established under the future resolver contract. `bound_location_context_id` restrictively references `location_context(id)`, and `idx_source_bound_location_context` supports reference lookup. All three fields remain null for migrated and newly registered Sources; no current workflow requires or interprets them.
+V5 did not reinterpret or rewrite existing `root_path_key` values. `root_path_dialect = NULL` means the Source root/key has not been established under the resolver contract. `bound_location_context_id` restrictively references `location_context(id)`, and `idx_source_bound_location_context` supports reference lookup. The fields remain null for migrated and newly registered Sources until explicit first-time binding; v3 admission requires a current supported binding.
 
 ### `location_context` (added by V5)
 
@@ -89,41 +87,21 @@ Implemented fields:
 
 A ContentRecord permanently represents one byte-version. Its identity is an internal ID rather than an exact hash. An established record is not mutated to represent replacement bytes. Initial assignment creates one distinct record per eligible unassigned FileEntry occurrence/version, even when separate files have identical bytes and metadata. Exact hashing stores analysis artifacts for each record without changing or merging it. Exact duplicate groups are derived from compatible artifacts and likewise do not rewrite identity. Materialized grouping and merge behavior remain deferred; V1 has no canonical redirect or merge table.
 
-### `file_entry`
+### `file_entry` (V6)
 
-Implemented fields:
+`file_entry` is a physical occurrence independent of Source. It retains `id`, `current_content_id`, nonnegative `size_bytes`, paired exact mtime seconds/nanoseconds, nullable normalized `extension_key`, nonnegative `observation_revision`, and first/last observation timestamps. Its `location_identity_status` is `UNRESOLVED` or `RESOLVED`. Unresolved rows require null `location_context_id`, `location_path`, and `location_key`; resolved rows require all three. The context ID has a restrictive foreign key. A partial unique index on `(location_context_id, location_key)` applies only to resolved rows. Application code strictly decodes the structured `lp1` path and `lk1` key and requires canonical agreement before using a resolved row.
 
-- `id INTEGER PRIMARY KEY`
-- `source_id INTEGER NOT NULL`
-- `relative_path TEXT NOT NULL`
-- `path_key TEXT NOT NULL`
-- `extension_key TEXT NULL` (added by V2)
-- `current_content_id INTEGER NULL`
-- `presence_status TEXT NOT NULL`
-- `size_bytes INTEGER NOT NULL CHECK >= 0`
-- `modified_time_epoch_second INTEGER NULL`
-- `modified_time_nano INTEGER NULL`, valid from `0` through `999999999` when present
-- `observation_revision INTEGER NOT NULL DEFAULT 0 CHECK >= 0`
-- `first_seen_at_ms INTEGER NOT NULL`
-- `last_seen_at_ms INTEGER NOT NULL`
-- `last_seen_scan_run_source_id INTEGER NULL`
-- `last_seen_traversal_generation INTEGER NULL`, positive when present
+V6 removes Source ID, relative path/key, presence, and Source traversal provenance from FileEntry. All migrated V5 FileEntries are unresolved; their historical ContentRecords and analyses stay attached without inferred absolute identity. A trusted v3 observation resolves or inserts by `(location_context_id, location_key)` and reuses the same FileEntry across overlapping Sources. Size or exact mtime change increments `observation_revision` and clears `current_content_id`; a membership becoming present again without changed byte evidence does neither. `extension_key` remains the V2 lowercase technical suffix convention and is updated for newly resolved locations.
 
-The uniqueness rule is `UNIQUE(source_id, path_key)`. `relative_path` preserves observed case and Unicode spelling through Java NIO. Persisted portable relative paths use `/` between segments. V1 does not globally lowercase paths, Unicode-normalize them, resolve symlinks, or call `toRealPath()` to construct occurrence identity. Where equivalence is uncertain, observations remain separate. Initially `path_key` may match the portable serialized path while remaining a separate field for future lookup policy.
+### `source_membership` (V6)
 
-`extension_key` is technical normalized FileEntry metadata, not a user category or tag. V2 snapshots its extraction rules inside the historical migration: use the basename suffix after its last dot and lowercase with `Locale.ROOT`; lone leading dots, trailing dots, and names without a dot store null. Paths and extension text are not Unicode-normalized. Runtime discovery/re-observation uses `FileExtensionNormalizer`; both currently implement the V2 rules. A future change to persisted extension semantics requires a later migration so fresh databases remain consistent with databases that already applied V2. Unknown extensions remain valid. Broad `PHOTO`, `VIDEO`, and `DOCUMENT` values are derived in Java from this key and are not persisted; unclassified extensions have no technical FileCategory.
+Each membership stores `id`, `source_id`, `file_entry_id`, Source-relative `relative_path` and `path_key`, `ACTIVE`/`RETIRED` applicability, `PRESENT`/`MISSING` presence, nonnegative `membership_revision`, `observed_file_entry_revision`, first/last positive timestamps, nullable last-positive ScanRunSource/generation, and nullable observed Source/context revisions. Foreign keys protect Source and FileEntry identity. `UNIQUE(source_id, file_entry_id)` prevents duplicate relationships; a partial unique index permits only one ACTIVE membership at a `(source_id, path_key)`.
 
-A FileEntry represents a filesystem occurrence, not immutable content. Its occurrence remains historically useful when the file disappears. `PRESENT` and `MISSING` are the minimum conceptual presence states. `observation_revision` increments when an observation indicates that bytes or content association may have changed; seeing the same unchanged file does not increment it.
+`observed_source_location_revision` and `observed_location_context_revision` are both null for migrated/unproven history or both non-null for trusted observations. V6 enforces that pair with a CHECK. Last-positive ScanRunSource and traversal generation are intentionally not paired by a CHECK because V5 allowed partial historical values. The backfill copies V5 Source/path/presence/provenance fields exactly, sets applicability ACTIVE and membership revision zero, and leaves both authority revisions null. Trusted publication may retire an active unresolved path collision and insert a new resolved membership in one transaction; it never retargets the historical FileEntry or ContentRecord.
 
-Implemented discovery inserts a new observed occurrence as `PRESENT`, with normalized extension metadata, no ContentRecord, observation revision zero, equal first/last-seen timestamps, and the current ScanRunSource/traversal generation. Re-observation always refreshes path spelling and its derived extension, presence, size, modification time, last-seen time, and traversal identity. A size change, modification-time change, or return from a non-`PRESENT` state increments the revision once and clears `current_content_id`; unchanged metadata preserves both revision and content association.
+Only ACTIVE memberships participate in current presence. An ACTIVE PRESENT membership makes a physical FileEntry known present; all applicable ACTIVE memberships missing means no current membership reports it present. RETIRED rows remain historical. V3 missing sweeps require a trusted complete traversal and change only the scanned Source's ACTIVE membership presence and revision. FileEntry has no cached presence.
 
-Implemented reconciliation marks a currently `PRESENT` occurrence `MISSING` when it belongs to the Source being reconciled and its last-seen ScanRunSource/generation pair does not exactly match the completed traversal. Null last-seen fields count as not observed. This update changes only `presence_status`; it preserves `extension_key`, `current_content_id`, observation revision, paths, size, modification time, first/last-seen timestamps, and traversal identity. Already-`MISSING` entries remain unchanged.
-
-Implemented ContentRecord assignment selects only `PRESENT`, content-null FileEntries whose last-seen ScanRunSource and generation exactly match a completed ScanRunSource traversal. Candidate reads use ascending FileEntry-ID keyset pages of at most 250 and carry only ID, observation revision, and size. ContentRecord insertion and publication to `current_content_id` share one transaction. The conditional publication requires unchanged presence, null content, observation revision, and size; a stale candidate rolls back the inserted record so no orphan remains. Last-seen traversal identity is intentionally not part of that publication guard, allowing a later unchanged observation of the same occurrence version. Existing content identity survives unchanged rescans, and repeating assignment creates no duplicate record.
-
-Implemented content hashing selects only `PRESENT`, assigned FileEntries whose last-seen ScanRunSource/generation pair exactly matches a completed traversal. Ascending-ID keyset pages contain at most 250 candidates and snapshot FileEntry/ContentRecord/Source identity, portable path, observation revision, size, exact mtime, and the ScanRunSource's Source-location revision. Final publication requires the FileEntry to retain its Source, presence, ContentRecord, observation revision, size, and exact mtime and requires the Source location revision to match. Last-seen traversal identity may change after selection if the occurrence version otherwise remains unchanged. Hashing never mutates FileEntry or ContentRecord.
-
-When `last_seen_scan_run_source_id` is non-null, the referenced ScanRunSource must have the same `source_id` as the FileEntry. In V1, `CatalogRepository` checks this invariant within the FileEntry insert transaction. The schema retains the direct foreign key and `ON DELETE SET NULL`; no composite foreign key or trigger is used.
+Assignment, hashing, and live media-metadata reads select only resolved FileEntries with at least one current ACTIVE/PRESENT trusted membership whose observed FileEntry revision matches. Publication reserves a SQLite writer, rereads Source/context authority and resolved path/relationship coherence, and guards the candidate revisions. A stale assignment rolls back its new ContentRecord. Hashing and metadata read the resolved absolute path with filesystem pre/post validation; unresolved historical rows remain readable but are not live-read candidates.
 
 ### `working_set`
 
@@ -205,9 +183,9 @@ Implemented fields:
 - `finished_at_ms INTEGER NULL`
 - `error_message TEXT NULL`
 
-Job is the durable execution authority. ScanRun remains the user-request and operation-summary record. `execution_version = 1` identifies the public reconciliation-ending SCAN execution; version 2 identifies the backend-owned pipeline through exact hashing. Both creation paths start with `status = PENDING`, `current_stage_type = DISCOVERY`, zero progress/attempts, and null execution timestamps/error without mutating the ScanRun or its Source rows.
+Job is the durable execution authority. ScanRun remains the user-request and operation-summary record. `execution_version = 1` identifies the historical reconciliation-ending SCAN execution; version 2 identifies the historical pipeline through exact hashing; version 3 is the current membership-authority pipeline with the same four stages as v2. New creation starts with `status = PENDING`, `current_stage_type = DISCOVERY`, zero progress/attempts, and null execution timestamps/error without mutating the ScanRun or its Source rows.
 
-Normal service creation permits one SCAN execution owner per ScanRun and excludes competing v1/v2 ownership under SQLite write reservation. Historical repository fixtures can retain both versions for explicit version-aware reads. `ScanExecutionService` enforces that API behavior; no schema-wide `UNIQUE(scan_run_id)` constraint was added because Job remains generic. V3 enforces at most one version-2 `SCAN` Job per ScanRun and at most one globally active version-2 `SCAN` Job whose status is `PENDING` or `RUNNING`. Terminal version-2 Jobs, version-1 Jobs, and unrelated Job types do not occupy that global slot. Internal version-2 creation uses those constraints as the race-safe authority and converts conflicts to service-domain conflicts. Bounded background scheduling, startup interruption finalization, public v2 start/read APIs, and the frontend polling cutover are implemented.
+V6 admission creates only version-3 SCAN Jobs. SQLite write reservation and a current active-Job check exclude competing work across versions. Partial indexes enforce one v3 Job per ScanRun and one active v2/v3 SCAN Job catalog-wide; historical v1/v2 records remain readable. The public indexing start/read API and background scheduler route new work to v3. The old manual v1 discovery/reconciliation write endpoints reject new writes.
 
 When DISCOVERY starts, the Job becomes `RUNNING`, increments its attempt count, records its start time, and reports persisted regular-file observations as progress while total remains null. Successful discovery sets completed and total progress to the final observation count, keeps the Job `RUNNING`, and changes its current stage to `RECONCILIATION`. Starting RECONCILIATION keeps the same Job attempt and start timestamp but resets progress to zero out of the number of Sources, establishing that Job progress mirrors its current stage. Successful reconciliation completes the Job, clears `current_stage_type`, preserves completed Source-based progress, and records its finish time. Filesystem failure during DISCOVERY instead marks the Job `FAILED` with finish/error state.
 
@@ -232,7 +210,7 @@ The uniqueness rule is `UNIQUE(job_id, stage_type)`. A stage row is an aggregate
 
 The initial handoff creates exactly one `DISCOVERY` stage with `status = PENDING`, zero completed progress, null total progress, zero attempts, the same creation timestamp as its Job, and null execution timestamps/error. Job and stage creation occur in one service transaction. Stage reads use stable ascending database-ID order; a deliberate multi-stage ordering model remains deferred.
 
-Execution moves DISCOVERY to `RUNNING`, increments its attempt count, and updates progress in the same bounded transactions as FileEntry observations. Success completes it and creates one pending RECONCILIATION stage. Version 1 ends by completing the Job and ScanRun after reconciliation. Version 2 instead creates CONTENT_ASSIGNMENT, then CONTENT_HASHING, and completes the Job/ScanRun only with successful hashing finalization. ScanRunSource becomes `COMPLETED` at reconciliation and is not kept running through assignment or hashing. Candidate-level hash skips/failures are durable counts on a completed stage; whole-stage failure marks the current stage, Job, and ScanRun failed and clears `current_stage_type`.
+V3 moves DISCOVERY to `RUNNING`, increments its attempt count, and updates progress in bounded transactions with membership publication. A trusted complete traversal creates the pending RECONCILIATION stage. Reconciliation marks only applicable SourceMemberships missing, then creates CONTENT_ASSIGNMENT; CONTENT_HASHING completes the Job/ScanRun. ScanRunSource becomes `COMPLETED` at reconciliation. Candidate-level hash skips/failures remain durable counts; whole-stage failure marks the current stage, Job, and ScanRun failed and clears `current_stage_type`. Historical v1/v2 stage records retain their original interpretation.
 
 ### `analysis_record`
 
@@ -285,7 +263,7 @@ Implemented fields:
 
 This is the specialized exact-hash artifact. The implemented built-in artifact uses algorithm `SHA-256` and a structurally validated lowercase 64-character hexadecimal digest. AnalysisRecord and ContentHash are inserted atomically after database evidence is revalidated. Index `(algorithm, digest_hex)`, but do not make that pair unique: separate ContentRecords with identical bytes retain separate artifacts with equal digests. The hash is never the ContentRecord primary key.
 
-The exact duplicate view uses this existing index and the exact built-in AnalysisRecord provenance to derive groups with at least two distinct ContentRecords. It stores no group identity or membership rows. Member counts are calculated independently of FileEntry joins; retained FileEntries then supply present/missing occurrence and Source counts. A ContentRecord without a FileEntry remains a member. Potential storage savings is estimated as `max(present occurrence count - 1, 0) * size_bytes`; missing occurrences contribute no current savings, and this is not a measurement of allocated disk blocks.
+The exact duplicate view uses exact built-in AnalysisRecord provenance to derive groups with at least two distinct ContentRecords. It stores no group identity. Member counts are calculated independently of FileEntry joins; distinct physical FileEntries supply present/missing occurrence counts, while memberships supply Source counts and relative-path details. A ContentRecord without a FileEntry remains a member. Potential storage savings is estimated as `max(present physical FileEntry count - 1, 0) * size_bytes`; missing entries contribute no current savings, and this is not a measurement of allocated disk blocks.
 
 Occurrence filters use `file_entry.extension_key` to select complete exact groups. Both `PRESENT` and `MISSING` retained occurrences can select a group; a ContentRecord without an occurrence remains a full member after another occurrence selects that group. Summary counts and savings remain whole-group values, while `filterMatch` counts only matching retained occurrences. Detail responses return the whole group and mark each occurrence against the filter. Filter options aggregate distinct digest-group and retained-occurrence counts by non-null extension across valid exact groups.
 
@@ -293,11 +271,7 @@ Occurrence filters use `file_entry.extension_key` to select complete exact group
 
 Application lifecycle timestamps use epoch milliseconds stored as SQLite integers. Filesystem modification times preserve available Java `FileTime` precision with an epoch-second value and nanosecond component. The two values are both present or both absent; nanoseconds are constrained to `0..999999999`. Filesystems that provide less precision remain valid.
 
-## Approved Target Model (Partially Migrated)
-
-The preceding sections describe the implemented twelve-table schema, including V5 LocationContext persistence and first-time Source binding storage. The wider target model below remains approved architecture, not implemented SourceMembership, FileEntry identity/presence authority, probe orchestration, rebinding, or scan behavior.
-
-The new `scan.authority` records are transient pure values, not database rows or a migration. A trusted `ResolvedFileCandidate` carries current Source/context IDs and revisions, exact absolute structured file path/key, a component-derived Source-relative portable path/key, regular non-link and same-volume APFS classification, size, and exact mtime. Its future FileEntry identity portion is `(location_context_id, file_location_key)`; the Source-relative portion belongs to a future membership. The typed start/end snapshots and traversal-completion result can authorize a future missing sweep only for an unchanged, completely covered scope. No current FileEntry is converted to resolved status by reconstruction from Source root and relative path; no V6 schema or operational indexing change has occurred.
+## Current Membership Authority and Remaining Catalog Work
 
 ```text
 Catalog
@@ -306,86 +280,44 @@ Catalog
   └─ SourceMembership ──→ Source
                        └─→ FileEntry ──→ ContentRecord ──→ AnalysisRecord
 
-FileEntry ──→ LocationContext
+FileEntry ──→ LocationContext (resolved only)
 ```
 
-Each independent Catalog will eventually use a separate SQLite file and immutable internal `catalog_uuid`. The implemented LocationContext foundation is intended to represent one accepted continuity period for one address/binding domain; it is not the entire catalog, necessarily one Source, or a physical-volume identifier. Explicitly bound Sources can now reference LocationContext; current FileEntries do not reference it.
+The pure `scan.authority` contract and v3 host adapter admit trusted local macOS/APFS observations. V3 retains `DISCOVERY -> RECONCILIATION -> CONTENT_ASSIGNMENT -> CONTENT_HASHING -> COMPLETED`, using SourceMembership for positive observations and complete-traversal missing claims. Unbound Sources, unsupported profiles, legacy raw acceptance evidence, and Windows hosts are ineligible for new v3 admission. Existing v1/v2 Jobs and ScanRuns keep their recorded meaning and remain readable; incompatible active work is failed during startup recovery. A later shortened SCAN, with hashing separate, requires execution version 4 or later.
 
-V5 implements the LocationContext fields described above. Services enforce structural-domain overlap during ACTIVE creation and same-anchor replacement, plus guarded retirement. The accepted context baseline protects its address domain during first binding; the bound Source-root baseline protects the selected recursive root. The pure path/key contract and the limited macOS exact-spelling/local-APFS probe are implemented as described above; unbinding/rebinding, relocation, and other host/provider profiles remain open.
-
-`SourceMembership` will be a current durable relationship, not a row per Source revision. Conceptual fields are Source/FileEntry IDs, Source-relative portable path/key, `ACTIVE`/`RETIRED` applicability, `PRESENT`/`MISSING` membership presence, membership revision, observed FileEntry revision, positive-observation timestamps, and traversal/reconciliation evidence. Intended uniqueness is `UNIQUE(source_id, file_entry_id)` plus active-path uniqueness equivalent to `UNIQUE(source_id, path_key) WHERE applicability_status = 'ACTIVE'`. A rebind retains the Source ID, changes its binding revision, retires active memberships, and makes no missing claim or filesystem observation. It never retargets a membership merely because a relative path matches.
-
-Target FileEntry retains its surrogate ID, content association, size, exact mtime, extension metadata, observation revision, and location-level timestamps. Source ownership, relative path/key, authoritative presence, and Source traversal evidence move to SourceMembership. It gains `location_identity_status`, `location_context_id` (referencing LocationContext), `location_path`, and `location_key`. The path is lossless display/diagnostic/reconstruction data; the key is a versioned unambiguous equality encoding. Resolved identities are intended to be unique by `(location_context_id, location_key)`; legacy ambiguity remains `UNRESOLVED` rather than guessed or consolidated.
-
-There is no universal path equality: no global case folding or Unicode normalization, `toRealPath()` identity, content-hash identity, inode/file-key-only identity, automatic mapped-drive/UNC equivalence, or automatic rename/move/remount recognition. Different hard-link names remain separate FileEntries. Only explicitly supported platform/address cases resolve; ambiguous cases remain unresolved.
-
-In the target model FileEntry has no independently authoritative persisted presence. Membership `PRESENT` reflects positive observation absent a later authorized sweep; `MISSING` requires a successful complete applicable traversal that did not observe it. Unavailable Sources, incomplete traversal, and age alone never prove absence. Aggregate FileEntry presence is initially derived rather than cached. A candidate still requires a current active/present membership in an applicable accepted LocationContext with matching observed FileEntry revision, then existing filesystem pre/post checks and transactional publication revalidation.
-
-FileEntry observation revision changes only when byte-version evidence changes or becomes untrusted. Membership revision changes with applicability, presence, relative path/key, or observed FileEntry revision. Source binding revision changes with root/context/scope interpretation, not name edits or temporary availability. Publication will snapshot and revalidate Source, membership, FileEntry, ContentRecord, and context evidence.
-
-The target `PRESENT` to `MISSING` transition additionally requires an active Source binding to an accepted LocationContext; passing context-anchor and Source-root continuity profiles before and after traversal; unchanged captured Source/context revisions; complete intended-scope coverage with no inaccessible subtree, cancellation, traversal failure, or unresolved link/reparse/storage boundary; and transactional revalidation of that evidence. Routine scans may infer absence when these checks pass. Under uncertain continuity, current inspection may be diagnostic, but existing membership presence and content associations are preserved and no missing sweep or trusted historical-content attachment is allowed.
-
-The eventual migration creates one membership from each current FileEntry without changing ContentRecord or AnalysisRecord identities. It preserves ambiguous legacy duplicates and does not merge them because hashes match. Future ScanRunSource rows must snapshot Source/context revisions, resolved root/scope, continuity profile versions, and scan-time acceptance evidence; historical v1/v2 executions cannot be backfilled with information they never stored. Historical SCAN v2 remains `DISCOVERY -> RECONCILIATION -> CONTENT_ASSIGNMENT -> CONTENT_HASHING -> COMPLETED`; a likely future v3 ends after assignment and runs exact hashing as a separate deterministic operation. Existing v1/v2 Jobs remain readable. Catalog switching, cross-catalog queries, hot switching, membership-history generations, cached aggregate presence, automatic freshness expiry, and host/provider resolver details remain deferred.
+No global case folding, Unicode normalization, `toRealPath()` identity, hash/inode-only identity, automatic mapped-drive/UNC equivalence, or automatic rename/move/remount recognition is introduced. Distinct hard-link names remain distinct FileEntries. Catalog switching, Source unbinding/rebinding, other host/provider profiles, and automatic historical consolidation remain deferred.
 
 ## Current Implemented Relationships, Foreign Keys, and Deletion
 
-The conceptual relationship is:
+The current operational relationship is:
 
 ```text
-Source -> FileEntry -> ContentRecord -> AnalysisRecord -> specialized results
-Source -> LocationContext (nullable dormant V5 reference)
+Source -> SourceMembership -> FileEntry -> ContentRecord -> AnalysisRecord
+Source -> LocationContext; resolved FileEntry -> LocationContext
 WorkingSet -> ContentRecord membership
 ScanRun -> ScanRunSource -> Source
 ScanRun -> Job -> JobStage
 ```
 
-Historical catalog evidence must not disappear accidentally when a Source, ContentRecord, scan record, or related parent is removed. The migration uses restrictive deletion for durable catalog identities and reusable analysis relationships. WorkingSet membership cascades from WorkingSet deletion, JobStage cascades from Job deletion, and ContentHash cascades from AnalysisRecord deletion. `file_entry.last_seen_scan_run_source_id` uses `ON DELETE SET NULL`, allowing execution history to be removed later without deleting FileEntry history.
-
-V5 uses `ON DELETE RESTRICT` from nullable `source.bound_location_context_id` to `location_context.id`. This protects a referenced context; explicit first-time binding now establishes the reference.
+Restrictive foreign keys preserve Source, FileEntry, ContentRecord, analysis, and context history. WorkingSet membership cascades from WorkingSet deletion, JobStage from Job deletion, and ContentHash from AnalysisRecord deletion. `source_membership.last_positive_scan_run_source_id` uses `ON DELETE SET NULL`. A bound Source and resolved FileEntries protect their LocationContext from deletion.
 
 SQLite foreign-key enforcement is enabled for every physical datasource connection with the `foreign_keys=on` SQLite JDBC URL property.
 
 ## Initial Index Direction
 
-Beyond primary keys and uniqueness constraints, the reviewed initial useful indexes are:
-
-- `file_entry(current_content_id, presence_status)`
-- `file_entry(source_id, presence_status, last_seen_traversal_generation)` for Source-led reconciliation
-- `file_entry(extension_key, current_content_id)` for occurrence-led exact-group filtering (added by V2)
-- `working_set_content(content_record_id)`
-- `scan_run_source(source_id, status)`
-- `job(scan_run_id)`
-- `content_hash(algorithm, digest_hex)`
-- `source(bound_location_context_id)` (added by V5)
-
-V3 additionally creates these partial unique indexes:
-
-- `scan_run(request_key) WHERE request_key IS NOT NULL`
-- `job(scan_run_id) WHERE job_type = 'SCAN' AND execution_version = 2`
-- `job(execution_version) WHERE job_type = 'SCAN' AND execution_version = 2 AND status IN ('PENDING', 'RUNNING')`
-
-V5 additionally creates `UNIQUE location_context(anchor_location_key) WHERE lifecycle_status = 'ACTIVE'` with binary anchor-key comparison.
-
-Do not add indexes for hypothetical queries before measuring actual access patterns.
+V6 retains content/extension lookup indexes and adds resolved-location uniqueness, active membership path uniqueness, FileEntry-to-membership lookup, and Source reconciliation indexes. Its paired authority-revision CHECK and the resolved/unresolved FileEntry identity CHECK are structural database invariants. V3 Jobs have one per ScanRun and a catalog-wide active v2/v3 exclusion; service admission also checks active historical v1 work. Historical V1–V5 indexes remain represented by their original migrations.
 
 ## Lifecycle and Type Validation
 
 Evolving status and type values are not locked into rigid SQLite `CHECK (... IN (...))` lists. SQL constraints enforce structural invariants such as nullability, foreign keys, uniqueness, ranges, and numeric validity. V5 maps LocationContext lifecycle and continuity values through strict Java enums; other exact lifecycle values are validated by their corresponding Java workflows.
 
-With exclusive catalog ownership, startup recovery atomically fails each interrupted active v2 SCAN Job, clears its current stage, fails its nonterminal ScanRun, and fails only its current `RUNNING` stage. Never-started stages remain `PENDING`; completed stage results are preserved. Active `DISCOVERING` ScanRunSource rows become `FAILED` with completion time and null completed generation. `DISCOVERED` rows retain successful traversal evidence without authorizing an automatic missing sweep, and `COMPLETED` rows retain committed reconciliation state. All observations, content associations, and published analysis/hash artifacts survive. Impossible state aborts startup instead of being repaired. Terminal and version-1 Jobs are unchanged; no automatic resume/retry is implemented.
+With exclusive catalog ownership, startup recovery fails incompatible active v1/v2 SCAN work and interrupted v3 work. It preserves completed stages, results, FileEntries, memberships, content, and analysis artifacts; only the current running stage and active execution are failed. No old discovery/reconciliation is resumed against V6. Malformed active v2/v3 state still aborts startup instead of being silently repaired.
 
 The independent `MEDIA_METADATA` execution version 1 has a null `scan_run_id` and one `IMAGE_METADATA` stage. Service admission uses process-local serialization under exclusive catalog ownership plus a short SQLite writer reservation to allow one active metadata Job independently of SCAN; no new schema index is required. Startup fails an abandoned active metadata Job and its sole stage, while exact-definition ImageIO `PENDING`/`RUNNING` AnalysisRecords become `FAILED` and retryable without changing their attempt counts. The next Job re-enumerates candidates rather than resuming a cursor; completed artifacts are skipped.
 
 ## Java Persistence Foundation
 
-Immutable records representing the implemented table row shapes, including V3 execution fields, V4 result storage, and V5 LocationContext/Source binding fields, and concrete Spring JDBC repositories are organized under the persistence-related feature packages:
-
-- `catalog`
-- `scan`
-- `job`
-- `analysis`
-
-`CatalogRepository`, `LocationContextRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` provide focused insert, read, and workflow-specific update operations. They use `JdbcTemplate` directly without a generic repository superclass or ORM. `LocationContextActivationService`, `LocationContextAcceptanceService`, `LocationContextRetirementService`, and `LocationContextReplacementService` use `LocationContextRepository` for short transactional lifecycle changes; no Source or indexing workflow calls them. `CatalogRepository` includes Source lookup/listing, extension-maintaining FileEntry observation, an explicit Source-scoped missing update, bounded assignment/hashing candidate reads, and guarded publication checks. `AnalysisRepository` reads exact provenance keys and persists AnalysisRecord/ContentHash artifacts. `ExactDuplicateRepository` performs read-only integrity, filtered grouped-summary, match-context, filter-option, member, and occurrence queries. Dedicated Spring beans give discovery start/batches/finalization/failure, reconciliation start/finalization, each Source's atomic missing-sweep/completed-generation boundary, each ContentRecord insert/FileEntry publication, and each guarded AnalysisRecord/ContentHash publication a real transaction. Exact grouping uses no transaction spanning its live read view. Filesystem traversal and hashing remain outside database transactions; reconciliation, ContentRecord assignment, and exact grouping/filtering perform no filesystem work.
+Immutable records represent the V6 FileEntry and SourceMembership rows. `CatalogRepository`, `SourceMembershipRepository`, `LocationContextRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` use focused Spring JDBC methods without an ORM or generic repository layer. `SourceMembershipPublicationService` reserves the SQLite writer and atomically checks current binding/context authority, publishes resolved FileEntries and memberships, retires unresolved path collisions, and reconciles trusted missing claims. V3 traversal and probe capture stay outside write transactions. Assignment, hashing, and metadata candidate reads use resolved membership authority; duplicate reporting counts physical FileEntries for storage savings and memberships for Source/path details.
 
 ## Explicitly Deferred
 

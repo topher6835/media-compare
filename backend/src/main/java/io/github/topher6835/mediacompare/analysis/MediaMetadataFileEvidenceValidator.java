@@ -8,6 +8,11 @@ import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Instant;
 import java.util.Objects;
+import io.github.topher6835.mediacompare.location.LocationDialect;
+import io.github.topher6835.mediacompare.location.LocationKey;
+import io.github.topher6835.mediacompare.location.LocationKeyCodec;
+import io.github.topher6835.mediacompare.location.LocationPath;
+import io.github.topher6835.mediacompare.location.LocationPathCodec;
 
 import org.springframework.stereotype.Component;
 
@@ -17,7 +22,7 @@ public class MediaMetadataFileEvidenceValidator {
     public Path validateBeforeExtraction(MediaMetadataFileCandidate candidate) {
         Objects.requireNonNull(candidate, "candidate");
         try {
-            Path file = resolvePortableRelativePath(Path.of(candidate.sourceRootPath()), candidate);
+            Path file = resolveAbsoluteLocation(candidate);
             requireExpectedRegularFile(candidate, file, "filesystem evidence changed before extraction");
             return file;
         } catch (StaleMediaMetadataEvidenceException exception) {
@@ -31,7 +36,7 @@ public class MediaMetadataFileEvidenceValidator {
         Objects.requireNonNull(candidate, "candidate");
         Objects.requireNonNull(file, "file");
         try {
-            Path expectedFile = resolvePortableRelativePath(Path.of(candidate.sourceRootPath()), candidate);
+            Path expectedFile = resolveAbsoluteLocation(candidate);
             if (!expectedFile.equals(file)) {
                 throw stale(candidate, "validated path changed during extraction");
             }
@@ -43,27 +48,23 @@ public class MediaMetadataFileEvidenceValidator {
         }
     }
 
-    private static Path resolvePortableRelativePath(Path sourceRoot, MediaMetadataFileCandidate candidate)
+    private static Path resolveAbsoluteLocation(MediaMetadataFileCandidate candidate)
             throws IOException {
-        String relativePath = candidate.relativePath();
-        if (relativePath == null || relativePath.isEmpty()) {
-            throw stale(candidate, "relative path is empty");
+        final LocationPath location;
+        try {
+            location = new LocationPathCodec().decode(candidate.locationPath());
+            if (!LocationKeyCodec.matches(location, LocationKey.parse(candidate.locationKey()))
+                    || location.dialect() != LocationDialect.UNIX || location.components().isEmpty()) {
+                throw stale(candidate, "absolute location identity is invalid");
+            }
+        } catch (IllegalArgumentException exception) {
+            throw stale(candidate, "absolute location identity is invalid");
         }
-
-        requireDirectoryWithoutLinks(sourceRoot, candidate);
-        Path resolved = sourceRoot;
-        String[] segments = relativePath.split("/", -1);
-        for (int index = 0; index < segments.length; index++) {
-            String segment = segments[index];
-            if (segment.isEmpty() || ".".equals(segment) || "..".equals(segment)) {
-                throw stale(candidate, "relative path contains an unsafe component");
-            }
-            Path component = Path.of(segment);
-            if (component.isAbsolute() || component.getRoot() != null || component.getNameCount() != 1) {
-                throw stale(candidate, "relative path contains an unsafe component");
-            }
-            resolved = resolved.resolve(component);
-            if (index < segments.length - 1) {
+        Path resolved = Path.of("/");
+        requireDirectoryWithoutLinks(resolved, candidate);
+        for (int index = 0; index < location.components().size(); index++) {
+            resolved = resolved.resolve(location.components().get(index));
+            if (index < location.components().size() - 1) {
                 requireDirectoryWithoutLinks(resolved, candidate);
             }
         }

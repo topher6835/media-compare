@@ -113,7 +113,7 @@ class LocationContextMigrationTests {
                     """);
         }
 
-        migrateLatest(databaseUrl);
+        migrateToV5(databaseUrl);
 
         try (Connection connection = DriverManager.getConnection(databaseUrl)) {
             assertEquals(List.of(
@@ -162,7 +162,7 @@ class LocationContextMigrationTests {
     @Test
     void freshV5SchemaHasOnlyTheLocationContextFoundation() throws Exception {
         String databaseUrl = databaseUrl("v5-fresh.db");
-        migrateLatest(databaseUrl);
+        migrateToV5(databaseUrl);
 
         try (Connection connection = DriverManager.getConnection(databaseUrl)) {
             assertEquals(V5_APPLICATION_TABLES, Set.copyOf(queryStrings(connection, """
@@ -218,10 +218,11 @@ class LocationContextMigrationTests {
                 .migrate();
     }
 
-    private void migrateLatest(String databaseUrl) {
+    private void migrateToV5(String databaseUrl) {
         Flyway.configure()
                 .dataSource(databaseUrl, null, null)
                 .locations("classpath:db/migration")
+                .target(MigrationVersion.fromVersion("5"))
                 .load()
                 .migrate();
     }

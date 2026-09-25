@@ -2,6 +2,7 @@ package io.github.topher6835.mediacompare.analysis;
 
 import io.github.topher6835.mediacompare.catalog.CatalogRepository;
 import io.github.topher6835.mediacompare.catalog.ContentHashCandidate;
+import io.github.topher6835.mediacompare.catalog.CurrentMembershipAuthority;
 
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,10 +14,13 @@ public class ContentHashWriter {
 
     private final CatalogRepository catalogRepository;
     private final AnalysisRepository analysisRepository;
+    private final CurrentMembershipAuthority authority;
 
-    public ContentHashWriter(CatalogRepository catalogRepository, AnalysisRepository analysisRepository) {
+    public ContentHashWriter(CatalogRepository catalogRepository, AnalysisRepository analysisRepository,
+            CurrentMembershipAuthority authority) {
         this.catalogRepository = catalogRepository;
         this.analysisRepository = analysisRepository;
+        this.authority = authority;
     }
 
     @Transactional
@@ -25,6 +29,9 @@ public class ContentHashWriter {
         if (!Sha256AnalysisDefinition.isValidDigest(digestHex)) {
             throw new IllegalArgumentException("SHA-256 digest must be lowercase 64-character hexadecimal");
         }
+        authority.reserveAndRequire(candidate.sourceId(), candidate.sourceLocationRevision(),
+                candidate.contextId(), candidate.contextRevision(), candidate.fileEntryId(),
+                candidate.membershipId());
         if (catalogRepository.verifyContentHashCandidate(candidate) != 1) {
             throw new StaleContentHashException(candidate.fileEntryId(), "catalog evidence changed");
         }

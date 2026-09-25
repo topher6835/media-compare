@@ -1,6 +1,6 @@
 # Media Compare
 
-Media Compare is an early-stage application for media comparison workflows. The repository contains a working full-stack scaffold, a SQLite persistence foundation, REST APIs for Sources and scan requests, a durable ScanRun-to-Job handoff, synchronous DISCOVERY and RECONCILIATION execution, a database-only ContentRecord-assignment pass, exact SHA-256 hashing for assigned content, and read-only exact duplicate browsing with backend file-category and extension filtering. The frontend can register and browse Sources, launch that existing indexing pipeline, follow its stage and count updates, and continue to exact duplicate results. Broader comparison and cleanup workflows have not yet been implemented.
+Media Compare is an early-stage application for media comparison workflows. V6 moves Source/FileEntry relationships and presence to SourceMembership and routes new indexing through a four-stage v3 SCAN. Historical V5 FileEntries remain separate and unresolved after migration; trusted overlapping Sources can share one resolved physical FileEntry. Broader comparison and cleanup workflows remain deferred.
 
 ## Stack
 
@@ -52,14 +52,16 @@ During development:
 - Health endpoint: `http://localhost:8080/api/health`
 - Source endpoints: `http://localhost:8080/api/sources`
 - Scan-request endpoints: `http://localhost:8080/api/scan-runs`
-- Scan discovery endpoint: `POST http://localhost:8080/api/scan-runs/{id}/execution/discovery`
-- Scan reconciliation endpoint: `POST http://localhost:8080/api/scan-runs/{id}/execution/reconciliation`
+- New indexing endpoint: `POST http://localhost:8080/api/indexing-runs`
+- Indexing detail: `GET http://localhost:8080/api/indexing-runs/{id}`
 - Content assignment endpoint: `POST http://localhost:8080/api/scan-runs/{id}/content-assignment`
 - Content hashing endpoint: `POST http://localhost:8080/api/scan-runs/{id}/content-hashing`
 - Exact duplicate endpoints: `GET http://localhost:8080/api/exact-duplicate-groups`, `GET http://localhost:8080/api/exact-duplicate-groups/filter-options`, and `GET http://localhost:8080/api/exact-duplicate-groups/{digestHex}`. List and detail reads accept repeated `fileCategory` and `extension` query parameters.
 - Source management and indexing frontend: `http://localhost:5173/sources`
 - Exact duplicate frontend: `http://localhost:5173/duplicates`
 - The Vite development server proxies `/api` requests to the backend.
+
+The V6 schema and v3 indexing cutover are implemented. SourceMembership owns the Source/FileEntry relationship and presence; trusted overlapping Sources can share one source-independent FileEntry. Historical v1/v2 indexing executions remain readable, and new indexing uses v3. The full backend suite and package, frontend lint/build, and repository whitespace check pass; see [`docs/STATUS.md`](docs/STATUS.md) for current validation results.
 
 The SQLite database is created locally at `backend/data/media-compare.db` when the backend is run from `backend/`. Local database files are ignored by Git and are not committed.
 
@@ -69,10 +71,10 @@ The configured `spring.datasource.url` also determines the catalog's `.lock` sid
 
 `POST /api/indexing-runs` accepts `{"requestKey":"client-generated UUID","sourceIds":[1]}`. Keys use canonical UUID text (case-insensitive input, lowercase storage); Source IDs must be distinct positive integers, with 1–1,000 Sources per request. New acceptance returns `202` and `Location: /api/indexing-runs/{scanRunId}`. An exact replay, regardless of Source order or terminal state, returns `200` with the same execution and never resubmits it. Reusing a key for another Source set returns `409`. A later attempt after failure needs a new key.
 
-ScanRun, Source membership, v2 Job, and DISCOVERY stage commit atomically before background submission. Another active v2 run returns `409` without leaving an orphan request. Scheduling rejection returns `503` but retains a failed attempt that can be read or replayed.
+ScanRun, ScanRunSource selections, v3 Job, and DISCOVERY stage commit atomically before background submission. Every requested Source must already have current supported local macOS/APFS binding and accepted LocationContext authority. Unbound/unsupported Sources and Windows hosts cannot start v3 scans; the frontend has no binding UI yet. Another active SCAN returns `409` without leaving an orphan request. Scheduling rejection returns `503` but retains a failed attempt that can be read or replayed.
 
-`GET /api/indexing-runs/{scanRunId}` returns durable stage/progress/timestamp state and typed final assignment/hash counts. `GET /api/indexing-runs/source-status` returns the active summary plus the latest v2 run for every registered Source in one response. Both GETs are read-only and send `Cache-Control: no-store`. `completedWithIssues` is derived from completed hashing counts, not stored as a Job status. React `/sources` now starts one v2 run and polls this durable state; SSE, cancellation, retry/resume, and multi-Source UI remain unimplemented.
+`GET /api/indexing-runs/{scanRunId}` returns durable stage/progress/timestamp state and typed final assignment/hash counts. `GET /api/indexing-runs/source-status` returns the active summary plus the latest v2 or v3 run for every registered Source in one response. Both GETs are read-only and send `Cache-Control: no-store`. `completedWithIssues` is derived from completed hashing counts, not stored as a Job status. React `/sources` starts one v3 run and polls this durable state; SSE, cancellation, retry/resume, and multi-Source UI remain unimplemented.
 
 ## Status
 
-The baseline frontend/backend connection, persistence foundation, Source API, scan-request API, and indexing stages are working. The backend has a public background version-2 lifecycle in which one durable SCAN Job owns DISCOVERY, RECONCILIATION, CONTENT_ASSIGNMENT, and CONTENT_HASHING, including typed final assignment/hash summaries and terminal failure state. React `/sources` creates a client UUID, starts one durable run, reconstructs active/latest state on load, and polls only while a run is active. A bounded single worker runs only after execution creation commits. Startup fails interrupted active v2 attempts without resuming them, preserving committed catalog work. Shutdown allows up to 30 seconds before interrupting the worker. Existing version-1 endpoints remain available but are no longer used by the active `/sources` flow. Successful hashing may report skipped or failed candidates and still complete with issues, leaving usable exact-hashed content available. Exact duplicate APIs derive groups from trusted artifacts without materializing or merging ContentRecords. SSE, similarity analysis, AI, review metadata, and cleanup remain deferred. See [`docs/STATUS.md`](docs/STATUS.md) for the current handoff state.
+V6 migration, membership publication, trusted v3 discovery/reconciliation, downstream candidate guards, duplicate physical-copy counting, and historical execution recovery are implemented. Focused V6 checks and the full validation suite pass, including a four-stage v3 execution with deterministic host observations. See [`docs/STATUS.md`](docs/STATUS.md) for current validation results and the next lifecycle step.

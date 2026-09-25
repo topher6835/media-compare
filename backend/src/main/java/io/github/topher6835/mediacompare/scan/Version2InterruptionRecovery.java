@@ -33,7 +33,13 @@ public class Version2InterruptionRecovery {
     @Transactional
     public void failIfActive(long jobId, String message) {
         Job job = jobs.findJobById(jobId).orElseThrow();
-        if (job.executionVersion() != 2 || !"SCAN".equals(job.jobType())
+        if (job.executionVersion() == 1 && "SCAN".equals(job.jobType())
+                && List.of("PENDING", "RUNNING").contains(job.status())) {
+            failHistoricalVersion1(job, message);
+            return;
+        }
+        if ((job.executionVersion() != 2 && job.executionVersion() != 3)
+                || !"SCAN".equals(job.jobType())
                 || List.of("COMPLETED", "FAILED").contains(job.status())) {
             return;
         }
@@ -45,6 +51,20 @@ public class Version2InterruptionRecovery {
             throw new IllegalStateException("Invalid interrupted execution: Job " + job.id()
                     + ", ScanRun " + job.scanRunId() + ", stage " + job.currentStageType(), exception);
         }
+    }
+
+    private void failHistoricalVersion1(Job job, String message) {
+        long now = System.currentTimeMillis();
+        for (ScanRunSource source : scans.findScanRunSourcesByScanRunId(job.scanRunId())) {
+            if ("DISCOVERING".equals(source.status())) {
+                require(scans.failSourceDiscovery(source.id(), now, message) == 1,
+                        "Historical Source changed during recovery");
+            }
+        }
+        jobs.failRunningVersion1Stage(job.id(), now, message);
+        scans.failNonterminalScanRun(job.scanRunId(), now, message);
+        require(jobs.failActiveVersion1Job(job.id(), now, message) == 1,
+                "Historical Job changed during recovery");
     }
 
     private void validateAndFail(Job job, String message) {

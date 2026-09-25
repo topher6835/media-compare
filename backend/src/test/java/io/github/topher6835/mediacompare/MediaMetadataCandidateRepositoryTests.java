@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.UUID;
 
 import io.github.topher6835.mediacompare.analysis.AnalysisRecord;
 import io.github.topher6835.mediacompare.analysis.AnalysisRepository;
@@ -22,7 +23,19 @@ import io.github.topher6835.mediacompare.analysis.Sha256AnalysisDefinition;
 import io.github.topher6835.mediacompare.catalog.CatalogRepository;
 import io.github.topher6835.mediacompare.catalog.ContentRecord;
 import io.github.topher6835.mediacompare.catalog.FileEntry;
+import io.github.topher6835.mediacompare.catalog.FileExtensionNormalizer;
 import io.github.topher6835.mediacompare.catalog.Source;
+import io.github.topher6835.mediacompare.location.LocationContextAcceptanceEvidence;
+import io.github.topher6835.mediacompare.location.LocationContextAcceptanceEvidenceCodec;
+import io.github.topher6835.mediacompare.location.LocationDialect;
+import io.github.topher6835.mediacompare.location.LocationKeyCodec;
+import io.github.topher6835.mediacompare.location.LocationPath;
+import io.github.topher6835.mediacompare.location.LocationPathCodec;
+import io.github.topher6835.mediacompare.location.LocationPathParser;
+import io.github.topher6835.mediacompare.location.MacOsApfsLocationContextEvidence;
+import io.github.topher6835.mediacompare.location.MacOsApfsSourceRootEvidence;
+import io.github.topher6835.mediacompare.location.SourceBindingEvidence;
+import io.github.topher6835.mediacompare.location.SourceBindingEvidenceCodec;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -60,6 +73,7 @@ class MediaMetadataCandidateRepositoryTests {
     void clearApplicationTables() {
         jdbcTemplate.update("DELETE FROM content_hash");
         jdbcTemplate.update("DELETE FROM job_stage");
+        jdbcTemplate.update("DELETE FROM source_membership");
         jdbcTemplate.update("DELETE FROM file_entry");
         jdbcTemplate.update("DELETE FROM scan_run_source");
         jdbcTemplate.update("DELETE FROM working_set_content");
@@ -69,6 +83,7 @@ class MediaMetadataCandidateRepositoryTests {
         jdbcTemplate.update("DELETE FROM working_set");
         jdbcTemplate.update("DELETE FROM content_record");
         jdbcTemplate.update("DELETE FROM source");
+        jdbcTemplate.update("DELETE FROM location_context");
     }
 
     @Test
@@ -103,7 +118,9 @@ class MediaMetadataCandidateRepositoryTests {
         assertEquals(List.of(first.id(), second.id()),
                 occurrences.stream().map(MediaMetadataFileCandidate::fileEntryId).toList());
         assertEquals(content.id(), occurrences.getFirst().contentRecordId());
-        assertEquals(source.rootPath(), occurrences.getFirst().sourceRootPath());
+        assertEquals(new LocationPathCodec().encode(
+                LocationPathParser.parse(LocationDialect.UNIX, source.rootPath()).append("first.jpg")),
+                occurrences.getFirst().locationPath());
     }
 
     @Test
@@ -125,7 +142,10 @@ class MediaMetadataCandidateRepositoryTests {
 
         assertTrue(candidateRepository.findCandidates(DEFINITION, 0, 10).isEmpty());
 
-        jdbcTemplate.update("UPDATE file_entry SET presence_status = 'MISSING' WHERE current_content_id = ?",
+        jdbcTemplate.update("""
+                UPDATE source_membership SET presence_status = 'MISSING'
+                WHERE file_entry_id IN (SELECT id FROM file_entry WHERE current_content_id = ?)
+                """,
                 content.id());
         assertEquals(expected, metadataCache.findReusableResult(content.id(), DEFINITION).orElseThrow());
         assertTrue(candidateRepository.findCandidates(DEFINITION, 0, 10).isEmpty());
@@ -226,7 +246,35 @@ class MediaMetadataCandidateRepositoryTests {
     }
 
     private Source insertSource(String rootPath) {
-        return catalogRepository.insert(new Source(null, rootPath, rootPath, rootPath, 0, 1, 1));
+        Source source = catalogRepository.insert(new Source(null, rootPath, rootPath, rootPath, 0, 1, 1));
+        LocationPath root = LocationPathParser.parse(LocationDialect.UNIX, rootPath);
+        String contextId = UUID.randomUUID().toString();
+        String volumeId = "11111111-2222-3333-4444-555555555555";
+        var contextEvidence = new MacOsApfsLocationContextEvidence(1,
+                MacOsApfsLocationContextEvidence.PROFILE, 1,
+                root, LocationKeyCodec.encode(root), "apfs", volumeId, "2",
+                true, false, 1, MacOsApfsLocationContextEvidence.Diagnostics.empty());
+        String acceptance = new LocationContextAcceptanceEvidenceCodec().encode(
+                new LocationContextAcceptanceEvidence(1, contextId, 1, contextEvidence));
+        jdbcTemplate.update("""
+                INSERT INTO location_context (id, anchor_location_path, anchor_location_key,
+                    lifecycle_status, continuity_status, revision, continuity_evidence_json,
+                    created_at_ms, updated_at_ms)
+                VALUES (?, ?, ?, 'ACTIVE', 'ACCEPTED', 1, ?, 1, 1)
+                """, contextId, new LocationPathCodec().encode(root),
+                LocationKeyCodec.encode(root).value(), acceptance);
+        var rootEvidence = new MacOsApfsSourceRootEvidence(1,
+                MacOsApfsSourceRootEvidence.PROFILE, 1, contextId, 1, 1,
+                root, LocationKeyCodec.encode(root), volumeId, "10",
+                new MacOsApfsSourceRootEvidence.BirthTime(100, 200), true, false, 1);
+        String binding = new SourceBindingEvidenceCodec().encode(
+                new SourceBindingEvidence(1, source.id(), rootEvidence));
+        jdbcTemplate.update("""
+                UPDATE source SET root_path_key = ?, root_path_dialect = 'unix',
+                    bound_location_context_id = ?, binding_evidence_json = ?, location_revision = 1
+                WHERE id = ?
+                """, LocationKeyCodec.encode(root).value(), contextId, binding, source.id());
+        return catalogRepository.findSourceById(source.id()).orElseThrow();
     }
 
     private ContentRecord insertContent(long sizeBytes) {
@@ -235,9 +283,23 @@ class MediaMetadataCandidateRepositoryTests {
 
     private FileEntry insertFile(
             Source source, ContentRecord content, String relativePath, String presenceStatus) {
-        return catalogRepository.insert(new FileEntry(
-                null, source.id(), relativePath, relativePath, content.id(), presenceStatus,
-                content.sizeBytes(), 100L, 200, 0, 1, 1, null, null));
+        LocationPath location = LocationPathParser.parse(LocationDialect.UNIX, source.rootPath());
+        for (String segment : relativePath.split("/")) {
+            location = location.append(segment);
+        }
+        FileEntry entry = catalogRepository.insert(new FileEntry(
+                null, "RESOLVED", source.boundLocationContextId(),
+                new LocationPathCodec().encode(location), LocationKeyCodec.encode(location).value(),
+                content.id(), content.sizeBytes(), 100L, 200,
+                FileExtensionNormalizer.fromRelativePath(relativePath), 0, 1, 1));
+        jdbcTemplate.update("""
+                INSERT INTO source_membership (source_id, file_entry_id, relative_path, path_key,
+                    applicability_status, presence_status, observed_file_entry_revision,
+                    first_seen_at_ms, last_seen_at_ms, observed_source_location_revision,
+                    observed_location_context_revision)
+                VALUES (?, ?, ?, ?, 'ACTIVE', ?, 0, 1, 1, 1, 1)
+                """, source.id(), entry.id(), relativePath, relativePath, presenceStatus);
+        return entry;
     }
 
     private void insertCompletedMetadata(ContentRecord content, MediaMetadataResult result) {

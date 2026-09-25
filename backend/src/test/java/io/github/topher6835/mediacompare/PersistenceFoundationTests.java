@@ -43,6 +43,7 @@ class PersistenceFoundationTests {
             "source",
             "content_record",
             "file_entry",
+            "source_membership",
             "working_set",
             "working_set_content",
             "scan_run",
@@ -75,6 +76,7 @@ class PersistenceFoundationTests {
     void clearApplicationTables() {
         jdbcTemplate.update("DELETE FROM content_hash");
         jdbcTemplate.update("DELETE FROM job_stage");
+        jdbcTemplate.update("DELETE FROM source_membership");
         jdbcTemplate.update("DELETE FROM file_entry");
         jdbcTemplate.update("DELETE FROM scan_run_source");
         jdbcTemplate.update("DELETE FROM working_set_content");
@@ -88,7 +90,7 @@ class PersistenceFoundationTests {
     }
 
     @Test
-    void flywayCreatesExactlyTheTwelveApplicationTables() {
+    void flywayCreatesExactlyTheThirteenApplicationTables() {
         Set<String> actualTables = Set.copyOf(jdbcTemplate.queryForList("""
                 SELECT name
                 FROM sqlite_schema
@@ -118,63 +120,48 @@ class PersistenceFoundationTests {
     }
 
     @Test
-    void fileEntryIdentityIsUniqueWithinASourceButNotAcrossSources() {
-        Source firstSource = insertSource("First");
-        Source secondSource = insertSource("Second");
-
-        catalogRepository.insert(new FileEntry(null, firstSource.id(), "Photos/Cat.jpg", "Photos/Cat.jpg", null,
-                "PRESENT", 10, 100L, 25, 0, 1, 1, null, null));
-
+    void activeMembershipPathIsUniqueWithinSourceButNotAcrossSources() {
+        Source first = insertSource("First");
+        Source second = insertSource("Second");
+        FileEntry firstEntry = catalogRepository.insert(unresolvedEntry(10, null));
+        FileEntry secondEntry = catalogRepository.insert(unresolvedEntry(10, null));
+        FileEntry thirdEntry = catalogRepository.insert(unresolvedEntry(10, null));
+        insertMembership(first.id(), firstEntry.id(), "Cat.jpg");
         assertThrows(DataAccessException.class,
-                () -> catalogRepository.insert(new FileEntry(null, firstSource.id(), "Photos/Cat.jpg",
-                        "Photos/Cat.jpg", null, "PRESENT", 10, 100L, 25, 0, 1, 1, null, null)));
-
-        FileEntry otherSourceEntry = catalogRepository.insert(new FileEntry(null, secondSource.id(),
-                "Photos/Cat.jpg", "Photos/Cat.jpg", null, "PRESENT", 10, 100L, 25, 0, 1, 1, null, null));
-        assertNotNull(otherSourceEntry.id());
+                () -> insertMembership(first.id(), secondEntry.id(), "Cat.jpg"));
+        insertMembership(second.id(), thirdEntry.id(), "Cat.jpg");
+        assertEquals(2, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM source_membership", Integer.class));
     }
 
     @Test
-    void fileEntryLastSeenScanRunSourceMustBelongToTheSameSource() {
-        Source firstSource = insertSource("First");
-        Source secondSource = insertSource("Second");
-        ScanRun scanRun = insertScanRun();
-        ScanRunSource firstScanSource = insertScanRunSource(scanRun.id(), firstSource.id(), 1, null);
-        ScanRunSource secondScanSource = insertScanRunSource(scanRun.id(), secondSource.id(), 1, null);
-
-        FileEntry matchingEntry = catalogRepository.insert(new FileEntry(null, firstSource.id(), "matching.dat",
-                "matching.dat", null, "PRESENT", 10, null, null, 0, 1, 1, firstScanSource.id(), 1L));
-        assertNotNull(matchingEntry.id());
-
-        FileEntry mismatchedEntry = new FileEntry(null, firstSource.id(), "mismatched.dat", "mismatched.dat", null,
-                "PRESENT", 10, null, null, 0, 1, 1, secondScanSource.id(), 1L);
-        assertThrows(DataIntegrityViolationException.class, () -> catalogRepository.insert(mismatchedEntry));
+    void trustedAuthorityRevisionsArePairedButHistoricalScanProvenanceMayBePartial() {
+        Source source = insertSource("Historical");
+        FileEntry entry = catalogRepository.insert(unresolvedEntry(10, null));
+        assertThrows(DataAccessException.class, () -> jdbcTemplate.update("""
+                INSERT INTO source_membership (source_id, file_entry_id, relative_path,
+                    path_key, applicability_status, presence_status, observed_file_entry_revision,
+                    first_seen_at_ms, last_seen_at_ms, observed_source_location_revision)
+                VALUES (?, ?, 'a', 'a', 'ACTIVE', 'PRESENT', 0, 1, 1, 0)
+                """, source.id(), entry.id()));
+        jdbcTemplate.update("""
+                INSERT INTO source_membership (source_id, file_entry_id, relative_path,
+                    path_key, applicability_status, presence_status, observed_file_entry_revision,
+                    first_seen_at_ms, last_seen_at_ms, last_positive_traversal_generation)
+                VALUES (?, ?, 'a', 'a', 'ACTIVE', 'PRESENT', 0, 1, 1, 1)
+                """, source.id(), entry.id());
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM source_membership", Integer.class));
     }
 
     @Test
-    void observationMaintainsExtensionAndMissingReconciliationPreservesIt() {
-        Source source = insertSource("Observed");
-        ScanRun scanRun = insertScanRun();
-        ScanRunSource scanSource = insertScanRunSource(scanRun.id(), source.id(), 1, null);
-
-        FileEntry observed = catalogRepository.observeFile(new FileObservation(
-                source.id(), "photos/Image.JPG", "stable-path-key", 10, 100, 25,
-                1, scanSource.id(), 1));
-        assertEquals("jpg", observed.extensionKey());
-
-        assertEquals(1, catalogRepository.markUnseenPresentFilesMissing(
-                source.id(), scanSource.id(), 2));
-        FileEntry missing = catalogRepository.findFileEntryById(observed.id()).orElseThrow();
-        assertEquals("MISSING", missing.presenceStatus());
-        assertEquals("jpg", missing.extensionKey());
-
-        FileEntry reobserved = catalogRepository.observeFile(new FileObservation(
-                source.id(), "photos/Renamed.PDF", "stable-path-key", 10, 100, 25,
-                2, scanSource.id(), 2));
-        assertEquals("PRESENT", reobserved.presenceStatus());
-        assertEquals("pdf", reobserved.extensionKey());
-        assertEquals("pdf", catalogRepository.findFileEntryById(observed.id())
-                .orElseThrow().extensionKey());
+    void historicalDiscoveryAndMissingWritersCannotMutateV6Presence() {
+        Source source = insertSource("Legacy");
+        assertThrows(UnsupportedOperationException.class,
+                () -> catalogRepository.observeFile(new FileObservation(
+                        source.id(), "a.jpg", "a.jpg", 10, 100, 25, 1, 1, 1)));
+        assertThrows(UnsupportedOperationException.class,
+                () -> catalogRepository.markUnseenPresentFilesMissing(source.id(), 1, 1));
     }
 
     @Test
@@ -256,8 +243,6 @@ class PersistenceFoundationTests {
 
     @Test
     void structuralNumericAndTimestampConstraintsRejectInvalidValues() {
-        Source source = insertSource("Constraints");
-
         assertThrows(DataAccessException.class,
                 () -> jdbcTemplate.update("INSERT INTO content_record (size_bytes, created_at_ms) VALUES (-1, 1)"));
         assertThrows(DataAccessException.class, () -> jdbcTemplate.update("""
@@ -273,8 +258,8 @@ class PersistenceFoundationTests {
                     job_type, execution_version, status, progress_completed, attempt_count, created_at_ms
                 ) VALUES ('SCAN', 0, 'PENDING', 0, 0, 1)
                 """));
-        assertThrows(DataAccessException.class, () -> insertFileEntryDirectly(source.id(), 10L, 1_000_000_000));
-        assertThrows(DataAccessException.class, () -> insertFileEntryDirectly(source.id(), 10L, null));
+        assertThrows(DataAccessException.class, () -> insertFileEntryDirectly(10L, 1_000_000_000));
+        assertThrows(DataAccessException.class, () -> insertFileEntryDirectly(10L, null));
     }
 
     @Test
@@ -299,8 +284,9 @@ class PersistenceFoundationTests {
                 "PENDING", source.locationRevision(), 1, null, null, null, null));
         assertEquals(scanRunSource, scanRepository.findScanRunSourceById(scanRunSource.id()).orElseThrow());
 
-        FileEntry fileEntry = catalogRepository.insert(new FileEntry(null, source.id(), "Media/Clip.mov",
-                "Media/Clip.mov", contentRecord.id(), "PRESENT", 42, 100L, 123, 0, 6, 6, scanRunSource.id(), 1L));
+        FileEntry fileEntry = catalogRepository.insert(new FileEntry(null, "UNRESOLVED", null,
+                null, null, contentRecord.id(), 42, 100L, 123, "mov", 0, 6, 6));
+        insertMembership(source.id(), fileEntry.id(), "Media/Clip.mov");
         assertEquals(fileEntry, catalogRepository.findFileEntryById(fileEntry.id()).orElseThrow());
 
         Job job = jobRepository.insert(new Job(null, scanRun.id(), "SCAN", 2, "PENDING", "DISCOVERY", 0, 10L, 0,
@@ -344,6 +330,20 @@ class PersistenceFoundationTests {
         return catalogRepository.insert(new ContentRecord(null, sizeBytes, 1));
     }
 
+    private FileEntry unresolvedEntry(long sizeBytes, Long contentId) {
+        return new FileEntry(null, "UNRESOLVED", null, null, null, contentId,
+                sizeBytes, 100L, 25, null, 0, 1, 1);
+    }
+
+    private void insertMembership(long sourceId, long fileEntryId, String path) {
+        jdbcTemplate.update("""
+                INSERT INTO source_membership (source_id, file_entry_id, relative_path,
+                    path_key, applicability_status, presence_status, observed_file_entry_revision,
+                    first_seen_at_ms, last_seen_at_ms)
+                VALUES (?, ?, ?, ?, 'ACTIVE', 'PRESENT', 0, 1, 1)
+                """, sourceId, fileEntryId, path, path);
+    }
+
     private ScanRun insertScanRun() {
         return scanRepository.insert(new ScanRun(null, null, "INDEX", "PENDING", null, 1, "{}", 1,
                 null, null, null));
@@ -360,13 +360,13 @@ class PersistenceFoundationTests {
                 1, configurationHash, configurationJson, null, "PENDING", 0, 1, null, null, null);
     }
 
-    private void insertFileEntryDirectly(long sourceId, Long modifiedSecond, Integer modifiedNano) {
+    private void insertFileEntryDirectly(Long modifiedSecond, Integer modifiedNano) {
         jdbcTemplate.update("""
                 INSERT INTO file_entry (
-                    source_id, relative_path, path_key, presence_status, size_bytes,
+                    location_identity_status, size_bytes,
                     modified_time_epoch_second, modified_time_nano, first_seen_at_ms, last_seen_at_ms
-                ) VALUES (?, 'file.dat', 'file.dat', 'PRESENT', 1, ?, ?, 1, 1)
-                """, sourceId, modifiedSecond, modifiedNano);
+                ) VALUES ('UNRESOLVED', 1, ?, ?, 1, 1)
+                """, modifiedSecond, modifiedNano);
     }
 
     private int foreignKeysSetting(Connection connection) throws SQLException {

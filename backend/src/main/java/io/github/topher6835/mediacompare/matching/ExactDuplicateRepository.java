@@ -35,6 +35,20 @@ public class ExactDuplicateRepository {
                   AND content_hash.algorithm = ?
                   AND length(content_hash.digest_hex) = 64
                   AND content_hash.digest_hex NOT GLOB '*[^0-9a-f]*'
+            ), physical_entries AS (
+                SELECT file_entry.id, file_entry.current_content_id, file_entry.extension_key,
+                       CASE WHEN EXISTS (
+                           SELECT 1 FROM source_membership AS membership
+                           WHERE membership.file_entry_id = file_entry.id
+                             AND membership.applicability_status = 'ACTIVE'
+                             AND membership.presence_status = 'PRESENT'
+                       ) THEN 'PRESENT' ELSE 'MISSING' END AS presence_status
+                FROM file_entry
+                WHERE EXISTS (
+                    SELECT 1 FROM source_membership AS membership
+                    WHERE membership.file_entry_id = file_entry.id
+                      AND membership.applicability_status = 'ACTIVE'
+                )
             )
             """;
 
@@ -91,7 +105,7 @@ public class ExactDuplicateRepository {
                             WHERE EXISTS (
                                 SELECT 1
                                 FROM exact_members AS matching_member
-                                JOIN file_entry AS matching_entry
+                                JOIN physical_entries AS matching_entry
                                   ON matching_entry.current_content_id = matching_member.content_record_id
                                 WHERE matching_member.digest_hex = eligible_groups.digest_hex
                                   AND matching_entry.extension_key IN (%s)
@@ -127,10 +141,18 @@ public class ExactDuplicateRepository {
                            AS present_occurrence_count,
                        COALESCE(SUM(CASE WHEN file_entry.presence_status = 'MISSING' THEN 1 ELSE 0 END), 0)
                            AS missing_occurrence_count,
-                       COUNT(DISTINCT file_entry.source_id) AS source_count
+                       (SELECT COUNT(DISTINCT membership.source_id)
+                        FROM exact_members AS source_member
+                        JOIN file_entry AS source_entry
+                          ON source_entry.current_content_id = source_member.content_record_id
+                        JOIN source_membership AS membership
+                          ON membership.file_entry_id = source_entry.id
+                        WHERE source_member.digest_hex = selected_groups.digest_hex
+                          AND membership.applicability_status = 'ACTIVE') AS source_count
                 FROM selected_groups
                 JOIN exact_members ON exact_members.digest_hex = selected_groups.digest_hex
-                LEFT JOIN file_entry ON file_entry.current_content_id = exact_members.content_record_id
+                LEFT JOIN physical_entries AS file_entry
+                  ON file_entry.current_content_id = exact_members.content_record_id
                 GROUP BY selected_groups.digest_hex,
                          selected_groups.size_bytes,
                          selected_groups.content_record_count
@@ -162,10 +184,18 @@ public class ExactDuplicateRepository {
                            AS present_occurrence_count,
                        COALESCE(SUM(CASE WHEN file_entry.presence_status = 'MISSING' THEN 1 ELSE 0 END), 0)
                            AS missing_occurrence_count,
-                       COUNT(DISTINCT file_entry.source_id) AS source_count
+                       (SELECT COUNT(DISTINCT membership.source_id)
+                        FROM exact_members AS source_member
+                        JOIN file_entry AS source_entry
+                          ON source_entry.current_content_id = source_member.content_record_id
+                        JOIN source_membership AS membership
+                          ON membership.file_entry_id = source_entry.id
+                        WHERE source_member.digest_hex = selected_group.digest_hex
+                          AND membership.applicability_status = 'ACTIVE') AS source_count
                 FROM selected_group
                 JOIN exact_members ON exact_members.digest_hex = selected_group.digest_hex
-                LEFT JOIN file_entry ON file_entry.current_content_id = exact_members.content_record_id
+                LEFT JOIN physical_entries AS file_entry
+                  ON file_entry.current_content_id = exact_members.content_record_id
                 GROUP BY selected_group.digest_hex,
                          selected_group.size_bytes,
                          selected_group.content_record_count
@@ -189,25 +219,31 @@ public class ExactDuplicateRepository {
         return jdbcTemplate.query(EXACT_MEMBERS_CTE + """
                 SELECT file_entry.id AS file_entry_id,
                        file_entry.current_content_id AS content_record_id,
-                       file_entry.source_id,
+                       membership.id AS membership_id,
+                       membership.source_id,
                        source.name AS source_name,
-                       file_entry.relative_path,
+                       membership.relative_path,
                        file_entry.extension_key,
-                       file_entry.presence_status
+                       membership.presence_status,
+                       membership.applicability_status
                 FROM exact_members
                 JOIN file_entry ON file_entry.current_content_id = exact_members.content_record_id
-                JOIN source ON source.id = file_entry.source_id
+                JOIN source_membership AS membership ON membership.file_entry_id = file_entry.id
+                JOIN source ON source.id = membership.source_id
                 WHERE exact_members.digest_hex = ?
-                ORDER BY file_entry.current_content_id, file_entry.source_id,
-                         file_entry.relative_path, file_entry.id
+                  AND membership.applicability_status = 'ACTIVE'
+                ORDER BY file_entry.current_content_id, membership.source_id,
+                         membership.relative_path, file_entry.id, membership.id
                 """, (resultSet, rowNumber) -> new ExactDuplicateOccurrenceRow(
                         resultSet.getLong("file_entry_id"),
                         resultSet.getLong("content_record_id"),
+                        resultSet.getLong("membership_id"),
                         resultSet.getLong("source_id"),
                         resultSet.getString("source_name"),
                         resultSet.getString("relative_path"),
                         resultSet.getString("extension_key"),
-                        resultSet.getString("presence_status")),
+                        resultSet.getString("presence_status"),
+                        resultSet.getString("applicability_status")),
                 exactDefinitionParameters(digestHex));
     }
 
@@ -221,7 +257,8 @@ public class ExactDuplicateRepository {
                        file_entry.extension_key,
                        COUNT(*) AS occurrence_count
                 FROM exact_members
-                JOIN file_entry ON file_entry.current_content_id = exact_members.content_record_id
+                JOIN physical_entries AS file_entry
+                  ON file_entry.current_content_id = exact_members.content_record_id
                 WHERE exact_members.digest_hex IN (%s)
                   AND file_entry.extension_key IN (%s)
                 GROUP BY exact_members.digest_hex, file_entry.extension_key
@@ -250,7 +287,8 @@ public class ExactDuplicateRepository {
                        COUNT(*) AS retained_occurrence_count
                 FROM duplicate_groups
                 JOIN exact_members ON exact_members.digest_hex = duplicate_groups.digest_hex
-                JOIN file_entry ON file_entry.current_content_id = exact_members.content_record_id
+                JOIN physical_entries AS file_entry
+                  ON file_entry.current_content_id = exact_members.content_record_id
                 WHERE file_entry.extension_key IS NOT NULL
                 GROUP BY file_entry.extension_key
                 ORDER BY file_entry.extension_key

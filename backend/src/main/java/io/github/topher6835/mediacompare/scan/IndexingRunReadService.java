@@ -34,7 +34,9 @@ public class IndexingRunReadService {
     @Transactional(readOnly = true)
     public IndexingRunDetails require(long scanRunId) {
         ScanRun scan = scans.findScanRunById(scanRunId).orElseThrow();
-        Job job = jobs.findJobByScanRunIdAndTypeAndExecutionVersion(scanRunId, "SCAN", 2).orElseThrow();
+        Job job = jobs.findJobByScanRunIdAndTypeAndExecutionVersion(scanRunId, "SCAN", 3)
+                .or(() -> jobs.findJobByScanRunIdAndTypeAndExecutionVersion(scanRunId, "SCAN", 2))
+                .orElseThrow();
         if (!"INDEX".equals(scan.requestType())) throw new NoSuchElementException();
         try {
             requireValid(scan.status().equals(job.status()), "ScanRun/Job status mismatch");

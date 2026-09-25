@@ -2,6 +2,7 @@ package io.github.topher6835.mediacompare.analysis;
 
 import java.util.Objects;
 import java.util.Optional;
+import io.github.topher6835.mediacompare.catalog.CurrentMembershipAuthority;
 
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,14 +16,17 @@ public class MediaMetadataPublisher {
     private final MediaMetadataCandidateRepository candidateRepository;
     private final AnalysisRepository analysisRepository;
     private final MediaMetadataResultCodec resultCodec;
+    private final CurrentMembershipAuthority authority;
 
     public MediaMetadataPublisher(
             MediaMetadataCandidateRepository candidateRepository,
             AnalysisRepository analysisRepository,
-            MediaMetadataResultCodec resultCodec) {
+            MediaMetadataResultCodec resultCodec,
+            CurrentMembershipAuthority authority) {
         this.candidateRepository = candidateRepository;
         this.analysisRepository = analysisRepository;
         this.resultCodec = resultCodec;
+        this.authority = authority;
     }
 
     @Transactional
@@ -35,6 +39,10 @@ public class MediaMetadataPublisher {
         Objects.requireNonNull(candidate, "candidate");
         Objects.requireNonNull(definition, "definition");
         String resultJson = resultCodec.write(Objects.requireNonNull(result, "result"));
+
+        authority.reserveAndRequire(candidate.sourceId(), candidate.sourceLocationRevision(),
+                candidate.contextId(), candidate.contextRevision(), candidate.fileEntryId(),
+                candidate.membershipId());
 
         if (candidateRepository.verifyCandidate(candidate) != 1) {
             throw new StaleMediaMetadataEvidenceException(
@@ -83,6 +91,10 @@ public class MediaMetadataPublisher {
         Objects.requireNonNull(candidate, "candidate");
         Objects.requireNonNull(definition, "definition");
         String safeError = requireSafeError(errorMessage);
+
+        authority.reserveAndRequire(candidate.sourceId(), candidate.sourceLocationRevision(),
+                candidate.contextId(), candidate.contextRevision(), candidate.fileEntryId(),
+                candidate.membershipId());
 
         if (candidateRepository.verifyCandidate(candidate) != 1) {
             throw new StaleMediaMetadataEvidenceException(

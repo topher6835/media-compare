@@ -94,8 +94,7 @@ public class ContentHashingService {
 
                     long startedAtMs = System.currentTimeMillis();
                     try {
-                        String digestHex = fileHasher.hash(
-                                Path.of(source.rootPath()), candidate);
+                        String digestHex = fileHasher.hash(candidate);
                         IndexingInterruptedException.check();
                         contentHashWriter.publish(
                                 candidate, digestHex, startedAtMs, System.currentTimeMillis());

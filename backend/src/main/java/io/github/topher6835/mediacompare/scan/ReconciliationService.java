@@ -34,11 +34,13 @@ public class ReconciliationService {
     }
 
     public ScanExecutionDetails execute(long scanRunId) {
-        return execute(scanRunId, ScanExecutionDefinition.VERSION_1);
+        throw new ReconciliationConflictException(
+                "Historical reconciliation cannot write the V6 catalog");
     }
 
     public ScanExecutionDetails executeVersion2(long scanRunId) {
-        return execute(scanRunId, ScanExecutionDefinition.VERSION_2);
+        throw new ReconciliationConflictException(
+                "Historical reconciliation cannot write the V6 catalog");
     }
 
     private ScanExecutionDetails execute(long scanRunId, long executionVersion) {

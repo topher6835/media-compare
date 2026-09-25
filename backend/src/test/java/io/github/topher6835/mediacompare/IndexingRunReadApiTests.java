@@ -58,8 +58,8 @@ class IndexingRunReadApiTests {
     void clear() {
         executor.reset();
         jdbc.execute("DROP TRIGGER IF EXISTS fail_hashing");
-        for (String table : List.of("content_hash", "job_stage", "file_entry", "scan_run_source", "working_set_content",
-                "analysis_record", "job", "scan_run", "working_set", "content_record", "source")) jdbc.update("DELETE FROM " + table);
+        for (String table : List.of("content_hash", "job_stage", "source_membership", "file_entry", "scan_run_source", "working_set_content",
+                "analysis_record", "job", "scan_run", "working_set", "content_record", "source", "location_context")) jdbc.update("DELETE FROM " + table);
     }
 
     @ParameterizedTest
@@ -68,22 +68,14 @@ class IndexingRunReadApiTests {
         var accepted = pending(List.of(source("running").id()));
         long scanId = accepted.scanRun().id();
         long jobId = accepted.job().id();
-        if (type.equals("DISCOVERY")) {
-            long now = System.currentTimeMillis();
-            scans.startScanRun(scanId, now);
-            jobs.startJob(jobId, 2, now);
-            jobs.startDiscoveryStage(accepted.stages().getFirst().id(), 2, now);
-            scans.startSourceDiscovery(scans.findScanRunSourcesByScanRunId(scanId).getFirst().id(), 1, now);
+        long now = System.currentTimeMillis();
+        jdbc.update("UPDATE scan_run SET status = 'RUNNING', started_at_ms = ? WHERE id = ?", now, scanId);
+        jdbc.update("UPDATE job SET status = 'RUNNING', current_stage_type = ?, started_at_ms = ?, attempt_count = 1 WHERE id = ?", type, now, jobId);
+        if (!type.equals("DISCOVERY")) {
+            jdbc.update("UPDATE job_stage SET status = 'COMPLETED', started_at_ms = ?, finished_at_ms = ?, attempt_count = 1 WHERE job_id = ?", now, now, jobId);
+            jobs.insert(new JobStage(null, jobId, type, null, "RUNNING", 0, null, 1, now, now, null, null));
         } else {
-            discovery.executeVersion2Discovery(scanId);
-            Job job = jobs.findJobById(jobId).orElseThrow();
-            if (type.equals("RECONCILIATION")) {
-                reconciliationState.start(job, jobs.findJobStageByJobIdAndType(jobId, type).orElseThrow(), 1, System.currentTimeMillis());
-            } else {
-                reconciliation.executeVersion2(scanId);
-                if (type.equals("CONTENT_HASHING")) assignment.execute(scanId);
-                state.startStage(jobs.findJobById(jobId).orElseThrow(), jobs.findJobStageByJobIdAndType(jobId, type).orElseThrow(), System.currentTimeMillis());
-            }
+            jdbc.update("UPDATE job_stage SET status = 'RUNNING', started_at_ms = ?, attempt_count = 1 WHERE job_id = ?", now, jobId);
         }
         jdbc.update("UPDATE job SET progress_completed = 7, progress_total = 12 WHERE id = ?", jobId);
         jdbc.update("UPDATE job_stage SET progress_completed = 7, progress_total = 12 WHERE job_id = ? AND stage_type = ?", jobId, type);
@@ -203,7 +195,7 @@ class IndexingRunReadApiTests {
     private Source source(String name) throws Exception {
         Path root = Files.createDirectory(directory.resolve(name));
         Files.writeString(root.resolve("one.txt"), "content");
-        return catalog.insert(new Source(null, name, root.toString(), root.toString(), 0, 1, 1));
+        return V3TestHost.boundSource(catalog, jdbc, root, name);
     }
     private IndexingRunDetails pending(List<Long> ids) { return starts.start(UUID.randomUUID().toString(), ids).run(); }
     private IndexingRunResponse detail(long id) throws Exception {
@@ -217,10 +209,10 @@ class IndexingRunReadApiTests {
         @Bean @Primary CountingJdbc countingJdbc(DataSource dataSource) { return new CountingJdbc(dataSource); }
         @Bean @Primary ContentHashFileHasher issueHasher() {
             return new ContentHashFileHasher() {
-                @Override public String hash(Path root, ContentHashCandidate candidate) throws IOException {
-                    if (candidate.relativePath().equals("skipped.txt")) throw new StaleContentHashException(candidate.fileEntryId(), "fixture");
-                    if (candidate.relativePath().equals("failed.txt")) throw new IOException("private filesystem detail");
-                    return super.hash(root, candidate);
+                @Override public String hash(ContentHashCandidate candidate) throws IOException {
+                    if (candidate.locationPath().contains("skipped.txt")) throw new StaleContentHashException(candidate.fileEntryId(), "fixture");
+                    if (candidate.locationPath().contains("failed.txt")) throw new IOException("private filesystem detail");
+                    return super.hash(candidate);
                 }
             };
         }

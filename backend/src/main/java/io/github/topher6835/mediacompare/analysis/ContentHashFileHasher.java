@@ -15,6 +15,11 @@ import java.util.HexFormat;
 import java.util.Set;
 
 import io.github.topher6835.mediacompare.catalog.ContentHashCandidate;
+import io.github.topher6835.mediacompare.location.LocationDialect;
+import io.github.topher6835.mediacompare.location.LocationKey;
+import io.github.topher6835.mediacompare.location.LocationKeyCodec;
+import io.github.topher6835.mediacompare.location.LocationPath;
+import io.github.topher6835.mediacompare.location.LocationPathCodec;
 import io.github.topher6835.mediacompare.scan.IndexingInterruptedException;
 
 import org.springframework.stereotype.Component;
@@ -24,8 +29,8 @@ public class ContentHashFileHasher {
 
     private static final int BUFFER_SIZE = 64 * 1024;
 
-    public String hash(Path sourceRoot, ContentHashCandidate candidate) throws IOException {
-        Path file = resolvePortableRelativePath(sourceRoot, candidate);
+    public String hash(ContentHashCandidate candidate) throws IOException {
+        Path file = resolveAbsoluteLocation(candidate);
         BasicFileAttributes before = readRegularFileAttributes(file, candidate);
         requireExpectedMetadata(candidate, before, "metadata changed before hashing");
 
@@ -46,27 +51,23 @@ public class ContentHashFileHasher {
         return HexFormat.of().formatHex(digest.digest());
     }
 
-    private static Path resolvePortableRelativePath(Path sourceRoot, ContentHashCandidate candidate)
+    private static Path resolveAbsoluteLocation(ContentHashCandidate candidate)
             throws IOException {
-        String relativePath = candidate.relativePath();
-        if (relativePath == null || relativePath.isEmpty()) {
-            throw stale(candidate, "relative path is empty");
+        final LocationPath location;
+        try {
+            location = new LocationPathCodec().decode(candidate.locationPath());
+            if (!LocationKeyCodec.matches(location, LocationKey.parse(candidate.locationKey()))
+                    || location.dialect() != LocationDialect.UNIX || location.components().isEmpty()) {
+                throw stale(candidate, "absolute location identity is invalid");
+            }
+        } catch (IllegalArgumentException exception) {
+            throw stale(candidate, "absolute location identity is invalid");
         }
-
-        requireDirectoryWithoutLinks(sourceRoot, candidate);
-        Path resolved = sourceRoot;
-        String[] segments = relativePath.split("/", -1);
-        for (int index = 0; index < segments.length; index++) {
-            String segment = segments[index];
-            if (segment.isEmpty() || ".".equals(segment) || "..".equals(segment)) {
-                throw stale(candidate, "relative path contains an unsafe component");
-            }
-            Path component = Path.of(segment);
-            if (component.isAbsolute() || component.getRoot() != null || component.getNameCount() != 1) {
-                throw stale(candidate, "relative path contains an unsafe component");
-            }
-            resolved = resolved.resolve(component);
-            if (index < segments.length - 1) {
+        Path resolved = Path.of("/");
+        requireDirectoryWithoutLinks(resolved, candidate);
+        for (int index = 0; index < location.components().size(); index++) {
+            resolved = resolved.resolve(location.components().get(index));
+            if (index < location.components().size() - 1) {
                 requireDirectoryWithoutLinks(resolved, candidate);
             }
         }

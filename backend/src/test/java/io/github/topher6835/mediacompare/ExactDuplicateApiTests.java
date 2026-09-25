@@ -20,6 +20,7 @@ import io.github.topher6835.mediacompare.analysis.Sha256AnalysisDefinition;
 import io.github.topher6835.mediacompare.catalog.CatalogRepository;
 import io.github.topher6835.mediacompare.catalog.ContentRecord;
 import io.github.topher6835.mediacompare.catalog.FileEntry;
+import io.github.topher6835.mediacompare.catalog.FileExtensionNormalizer;
 import io.github.topher6835.mediacompare.catalog.Source;
 import io.github.topher6835.mediacompare.matching.ExactDuplicateIntegrityException;
 import io.github.topher6835.mediacompare.matching.ExactDuplicateFilter;
@@ -62,6 +63,7 @@ class ExactDuplicateApiTests {
     void clearApplicationTables() {
         jdbcTemplate.update("DELETE FROM content_hash");
         jdbcTemplate.update("DELETE FROM job_stage");
+        jdbcTemplate.update("DELETE FROM source_membership");
         jdbcTemplate.update("DELETE FROM file_entry");
         jdbcTemplate.update("DELETE FROM scan_run_source");
         jdbcTemplate.update("DELETE FROM working_set_content");
@@ -119,6 +121,80 @@ class ExactDuplicateApiTests {
         mockMvc.perform(get("/api/exact-duplicate-groups"))
                 .andExpect(status().isOk());
         assertEquals(before, durableState());
+    }
+
+    @Test
+    void sharedPhysicalEntryCountsOnceButKeepsBothActiveSourceOccurrences() throws Exception {
+        String digest = digest(11);
+        Source firstSource = insertSource("First", temporaryDirectory.resolve("shared-first"));
+        Source secondSource = insertSource("Second", temporaryDirectory.resolve("shared-second"));
+        ContentRecord sharedContent = insertHashedContent(100, digest);
+        insertHashedContent(100, digest);
+        FileEntry shared = insertOccurrence(firstSource, sharedContent, "photos/a.jpg", "PRESENT");
+        jdbcTemplate.update("""
+                INSERT INTO source_membership (source_id, file_entry_id, relative_path, path_key,
+                    applicability_status, presence_status, observed_file_entry_revision,
+                    first_seen_at_ms, last_seen_at_ms)
+                VALUES (?, ?, 'archive/a.jpg', 'archive/a.jpg', 'ACTIVE', 'PRESENT', 0, 1, 1)
+                """, secondSource.id(), shared.id());
+
+        mockMvc.perform(get("/api/exact-duplicate-groups").param("extension", "JPG"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups.length()").value(1))
+                .andExpect(jsonPath("$.groups[0].presentOccurrenceCount").value(1))
+                .andExpect(jsonPath("$.groups[0].missingOccurrenceCount").value(0))
+                .andExpect(jsonPath("$.groups[0].sourceCount").value(2))
+                .andExpect(jsonPath("$.groups[0].potentialStorageSavingsBytes").value(0))
+                .andExpect(jsonPath("$.groups[0].filterMatch.matchingOccurrenceCount").value(1));
+        mockMvc.perform(get("/api/exact-duplicate-groups/{digest}", digest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.occurrences.length()").value(2))
+                .andExpect(jsonPath("$.occurrences[0].fileEntryId").value(shared.id()))
+                .andExpect(jsonPath("$.occurrences[1].fileEntryId").value(shared.id()));
+    }
+
+    @Test
+    void retiredOnlyEntryIsExcludedWhileActiveMissingEntryRemainsQueryable() throws Exception {
+        String digest = digest(12);
+        Source activeSource = insertSource("Active", temporaryDirectory.resolve("active-missing"));
+        Source retiredSource = insertSource("Retired", temporaryDirectory.resolve("retired-only"));
+        ContentRecord missingContent = insertHashedContent(100, digest);
+        ContentRecord retiredContent = insertHashedContent(100, digest);
+        insertOccurrence(activeSource, missingContent, "kept/missing.jpg", "MISSING");
+        FileEntry retired = insertOccurrence(retiredSource, retiredContent, "old/retired.xyz", "PRESENT");
+        jdbcTemplate.update("""
+                UPDATE source_membership SET applicability_status = 'RETIRED'
+                WHERE file_entry_id = ?
+                """, retired.id());
+
+        mockMvc.perform(get("/api/exact-duplicate-groups"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups.length()").value(1))
+                .andExpect(jsonPath("$.groups[0].presentOccurrenceCount").value(0))
+                .andExpect(jsonPath("$.groups[0].missingOccurrenceCount").value(1))
+                .andExpect(jsonPath("$.groups[0].sourceCount").value(1))
+                .andExpect(jsonPath("$.groups[0].potentialStorageSavingsBytes").value(0));
+        mockMvc.perform(get("/api/exact-duplicate-groups/{digest}", digest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.occurrences.length()").value(1))
+                .andExpect(jsonPath("$.occurrences[0].fileEntryId").value(
+                        jdbcTemplate.queryForObject("""
+                                SELECT file_entry_id FROM source_membership
+                                WHERE source_id = ? AND applicability_status = 'ACTIVE'
+                                """, Long.class, activeSource.id())))
+                .andExpect(jsonPath("$.occurrences[0].presenceStatus").value("MISSING"));
+        mockMvc.perform(get("/api/exact-duplicate-groups").param("extension", "XYZ"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups.length()").value(0));
+        mockMvc.perform(get("/api/exact-duplicate-groups").param("extension", "JPG"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups.length()").value(1))
+                .andExpect(jsonPath("$.groups[0].filterMatch.matchingOccurrenceCount").value(1));
+        mockMvc.perform(get("/api/exact-duplicate-groups/filter-options"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.extensions.length()").value(1))
+                .andExpect(jsonPath("$.extensions[0].extension").value("JPG"))
+                .andExpect(jsonPath("$.extensions[0].retainedOccurrenceCount").value(1));
     }
 
     @Test
@@ -522,26 +598,23 @@ class ExactDuplicateApiTests {
 
     private FileEntry insertOccurrence(
             Source source, ContentRecord content, String relativePath, String presenceStatus) {
-        return catalogRepository.insert(new FileEntry(
-                null,
-                source.id(),
-                relativePath,
-                relativePath,
-                content.id(),
-                presenceStatus,
-                content.sizeBytes(),
-                100L,
-                200,
-                0,
-                1,
-                1,
-                null,
-                null));
+        FileEntry entry = catalogRepository.insert(new FileEntry(
+                null, "UNRESOLVED", null, null, null, content.id(),
+                content.sizeBytes(), 100L, 200,
+                FileExtensionNormalizer.fromRelativePath(relativePath), 0, 1, 1));
+        jdbcTemplate.update("""
+                INSERT INTO source_membership (source_id, file_entry_id, relative_path, path_key,
+                    applicability_status, presence_status, observed_file_entry_revision,
+                    first_seen_at_ms, last_seen_at_ms)
+                VALUES (?, ?, ?, ?, 'ACTIVE', ?, 0, 1, 1)
+                """, source.id(), entry.id(), relativePath, relativePath, presenceStatus);
+        return entry;
     }
 
     private DurableState durableState() {
         return new DurableState(
                 table("source"),
+                table("source_membership"),
                 table("file_entry"),
                 table("content_record"),
                 table("working_set"),
@@ -564,6 +637,7 @@ class ExactDuplicateApiTests {
 
     private record DurableState(
             List<Map<String, Object>> sources,
+            List<Map<String, Object>> memberships,
             List<Map<String, Object>> files,
             List<Map<String, Object>> contents,
             List<Map<String, Object>> workingSets,

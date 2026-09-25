@@ -113,10 +113,10 @@ export function DuplicateGroupDetail({
         <div className="detail-filter-context">
           <strong>Filtered by {filterDescription(filters)}</strong>
           <span>
-            {pluralize(matchingCount, 'retained occurrence')}{' '}
+            {pluralize(matchingCount, 'source path')}{' '}
             {matchingCount === 1 ? 'matches' : 'match'} this filter
             {additionalCount > 0 &&
-              `; ${pluralize(additionalCount, 'additional retained occurrence')} ${additionalCount === 1 ? 'remains' : 'remain'} in the exact group`}
+              `; ${pluralize(additionalCount, 'additional source path')} ${additionalCount === 1 ? 'remains' : 'remain'} in the exact group`}
             .
           </span>
         </div>
@@ -132,11 +132,11 @@ export function DuplicateGroupDetail({
           <dd>{formatBytes(detail.sizeBytes)}</dd>
         </div>
         <div>
-          <dt>Present occurrences</dt>
+          <dt>Present physical occurrences</dt>
           <dd>{detail.presentOccurrenceCount.toLocaleString()}</dd>
         </div>
         <div>
-          <dt>Missing occurrences</dt>
+          <dt>Missing physical occurrences</dt>
           <dd>{detail.missingOccurrenceCount.toLocaleString()}</dd>
         </div>
         <div>
@@ -149,7 +149,7 @@ export function DuplicateGroupDetail({
         </div>
       </dl>
       <p className="estimate-note">
-        Potential savings is a logical estimate based on present occurrences;
+        Potential savings is a logical estimate based on present physical FileEntries;
         it is not guaranteed recoverable filesystem space.
       </p>
 
@@ -179,21 +179,22 @@ export function DuplicateGroupDetail({
       <section className="content-section" aria-labelledby="occurrences-heading">
         <div className="section-heading-row">
           <div>
-            <h2 id="occurrences-heading">Retained occurrences</h2>
+            <h2 id="occurrences-heading">Retained Source paths</h2>
             <p>
-              Present and missing retained FileEntry occurrences, in catalog
-              order. Filters highlight matches without removing exact-group
-              context.
+              Source relationships for retained FileEntries, in catalog order.
+              One physical FileEntry can appear under multiple Sources. Filters
+              highlight matches without removing exact-group context.
             </p>
           </div>
-          <span>{pluralize(detail.occurrences.length, 'occurrence')}</span>
+          <span>{pluralize(detail.occurrences.length, 'source path')}</span>
         </div>
         {detail.occurrences.length === 0 ? (
-          <p className="subtle-empty">No retained FileEntry occurrences.</p>
+          <p className="subtle-empty">No retained Source paths.</p>
         ) : (
           <div className="occurrence-list">
             {detail.occurrences.map((occurrence) => {
               const isMissing = occurrence.presenceStatus === 'MISSING'
+                || occurrence.applicabilityStatus === 'RETIRED'
               const matchClass = filtersActive
                 ? occurrence.matchesFilter
                   ? ' is-filter-match'
@@ -202,7 +203,7 @@ export function DuplicateGroupDetail({
               return (
                 <article
                   className={`occurrence-row${isMissing ? ' is-missing' : ''}${matchClass}`}
-                  key={occurrence.fileEntryId}
+                  key={occurrence.membershipId}
                 >
                   <div className="occurrence-main">
                     <div className="filename-row">
@@ -210,7 +211,9 @@ export function DuplicateGroupDetail({
                       <span
                         className={`status-badge ${isMissing ? 'missing' : 'present'}`}
                       >
-                        {occurrence.presenceStatus}
+                        {occurrence.applicabilityStatus === 'RETIRED'
+                          ? 'RETIRED'
+                          : occurrence.presenceStatus}
                       </span>
                       {filtersActive && occurrence.matchesFilter && (
                         <span className="status-badge filter-match">FILTER MATCH</span>
