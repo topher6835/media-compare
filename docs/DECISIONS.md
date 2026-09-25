@@ -269,6 +269,12 @@ The V5-only behavior below records the sequence that preceded the V6 cutover. Th
 - V3 retains v2's four stages: `DISCOVERY -> RECONCILIATION -> CONTENT_ASSIGNMENT -> CONTENT_HASHING -> COMPLETED`. V3 discovery publishes trusted positives through SourceMembership and only a stable complete traversal authorizes a guarded missing sweep. A child mount is unsupported even when its Volume UUID matches; uncertain provider/link/storage boundaries fail closed. Physical FileEntry byte revision changes only on size/exact-mtime change; membership presence changes do not clear content. Assignment, hashing, and metadata live reads require current resolved membership authority. Duplicate savings count distinct physical FileEntries, while Source/path details use memberships.
 - Preserve historical v1/v2 execution meaning and reads, but do not admit or resume their discovery/reconciliation writers against V6. Startup finalizes incompatible active old work. The previously planned shortened SCAN is version 4 or later. Source unbinding/rebinding remains subsequent lifecycle work.
 
+## V7 Source Binding History
+
+- Keep the current `source` row and `SourceBindingAuthority` as the sole authority for a Source's current binding. `source_binding_period` records historical binding periods and is never consulted by v3 admission or publication to establish current authority.
+- Backfill exactly one open period for each currently bound Source from its exact current root, context, revision, binding evidence, and `updated_at_ms`; leave unbound Sources without a period. Reject partial persisted binding shapes and verify foreign keys. Do not probe or synthesize evidence during migration.
+- Insert the first open period in the same writer-reserved transaction as the guarded first Source binding. Enforce unique bound revisions and one open period per Source; closing fields are paired and must advance revision and time. Future unbinding can close a period before or while withdrawing Source authority. Unbinding/rebinding and SourceMembership retirement on unbind are not implemented by V7.
+
 ## Approved Future Catalog Boundaries
 
 - Use one independent SQLite file per Catalog, with an immutable internal catalog UUID and a rebuildable known-catalog registry/settings store outside individual catalog databases. Initially allow exactly one active/open catalog; use controlled backend/context restart or reinitialization rather than hot DataSource switching. Do not silently query or reuse data across catalogs.

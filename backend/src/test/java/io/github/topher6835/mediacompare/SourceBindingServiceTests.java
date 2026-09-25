@@ -44,6 +44,8 @@ import io.github.topher6835.mediacompare.catalog.SourceBindingAuthority;
 import io.github.topher6835.mediacompare.catalog.SourceBindingCapture;
 import io.github.topher6835.mediacompare.catalog.SourceBindingConflictException;
 import io.github.topher6835.mediacompare.catalog.SourceBindingService;
+import io.github.topher6835.mediacompare.catalog.SourceBindingPeriod;
+import io.github.topher6835.mediacompare.catalog.SourceBindingPeriodRepository;
 import io.github.topher6835.mediacompare.location.ContinuityProbeResult;
 import io.github.topher6835.mediacompare.location.LocationContextAcceptanceEvidence;
 import io.github.topher6835.mediacompare.location.LocationContextAcceptanceEvidenceCodec;
@@ -74,6 +76,7 @@ class SourceBindingServiceTests {
     @Autowired private CatalogRepository sources;
     @Autowired private LocationContextRepository contexts;
     @Autowired private SourceBindingService binding;
+    @Autowired private SourceBindingPeriodRepository periods;
     @Autowired private LocationContextRetirementService retirement;
     @Autowired private LocationContextReplacementService replacement;
     @Autowired private ReservationCoordinator coordinator;
@@ -90,6 +93,7 @@ class SourceBindingServiceTests {
         coordinator.forceGuardMiss = false;
         jdbc.update("DELETE FROM source_membership");
         jdbc.update("DELETE FROM file_entry");
+        jdbc.update("DELETE FROM source_binding_period");
         jdbc.update("DELETE FROM source");
         jdbc.update("DELETE FROM location_context");
     }
@@ -115,6 +119,7 @@ class SourceBindingServiceTests {
         assertEquals(rootEvidence(context.id(), 8, 5, anchor(), VOLUME_UUID, true, false),
                 envelope.macOsApfsSourceRootEvidence());
         assertEquals(envelope, bindingCodec.decode(bound.bindingEvidenceJson()));
+        assertEquals(java.util.List.of(expectedPeriod(bound)), periods.findBySourceId(source.id()));
     }
 
     @Test
@@ -133,6 +138,7 @@ class SourceBindingServiceTests {
         Source bound = bind(source, context, capture(source, context, photos()));
         assertFailureUnchanged(SourceBindingConflictException.class, bound, context, 5, 8, 30,
                 capture(bound, context, photos(), 6));
+        assertEquals(java.util.List.of(expectedPeriod(bound)), periods.findBySourceId(source.id()));
     }
 
     @Test
@@ -314,6 +320,19 @@ class SourceBindingServiceTests {
     }
 
     @Test
+    void periodInsertFailureRollsBackSourceBinding() {
+        LocationContext context = acceptedContext(anchor());
+        Source source = legacySource("/Volumes/Archive/Photos");
+        periods.insertOpen(new SourceBindingPeriod(null, source.id(), 1, context.id(), "unix",
+                source.rootPath(), "historical-key", "historical-evidence", 10, null, null));
+
+        assertThrows(org.springframework.dao.DataAccessException.class,
+                () -> bind(source, context, capture(source, context, photos())));
+        assertEquals(source, sources.findSourceById(source.id()).orElseThrow());
+        assertEquals(1, periods.findBySourceId(source.id()).size());
+    }
+
+    @Test
     void bindingAuthorityRejectsWrongSourceIdAndRevision() {
         LocationContext context = acceptedContext(anchor());
         Source source = legacySource("/Volumes/Archive/Photos");
@@ -336,6 +355,8 @@ class SourceBindingServiceTests {
         assertTrue(results.first() instanceof Source);
         assertTrue(results.second() instanceof SourceBindingConflictException);
         assertEquals(5, sources.findSourceById(source.id()).orElseThrow().locationRevision());
+        assertEquals(java.util.List.of(expectedPeriod(sources.findSourceById(source.id()).orElseThrow())),
+                periods.findBySourceId(source.id()));
     }
 
     @Test
@@ -347,6 +368,7 @@ class SourceBindingServiceTests {
         assertTrue(results.first() instanceof Source);
         assertTrue(results.second() instanceof LocationContextRetirementConflictException);
         assertEquals(LifecycleStatus.ACTIVE, contexts.findById(context.id()).orElseThrow().lifecycleStatus());
+        assertEquals(1, periods.findBySourceId(source.id()).size());
     }
 
     @Test
@@ -358,6 +380,7 @@ class SourceBindingServiceTests {
         assertTrue(results.first() instanceof LocationContext);
         assertTrue(results.second() instanceof SourceBindingConflictException);
         assertEquals(source, sources.findSourceById(source.id()).orElseThrow());
+        assertTrue(periods.findBySourceId(source.id()).isEmpty());
     }
 
     @Test
@@ -370,6 +393,7 @@ class SourceBindingServiceTests {
         assertTrue(results.first() instanceof Source);
         assertTrue(results.second() instanceof LocationContextReplacementConflictException);
         assertTrue(contexts.findById(next.id()).isEmpty());
+        assertEquals(1, periods.findBySourceId(source.id()).size());
     }
 
     @Test
@@ -383,6 +407,7 @@ class SourceBindingServiceTests {
         assertTrue(results.second() instanceof SourceBindingConflictException);
         assertEquals(source, sources.findSourceById(source.id()).orElseThrow());
         assertEquals(next, contexts.findById(next.id()).orElseThrow());
+        assertTrue(periods.findBySourceId(source.id()).isEmpty());
     }
 
     private RaceResults race(Attempt firstAttempt, Attempt secondAttempt) throws Exception {
@@ -424,6 +449,15 @@ class SourceBindingServiceTests {
                 source.id(), sourceRevision, context.id(), contextRevision, time, capture));
         assertEquals(source, sources.findSourceById(source.id()).orElseThrow());
         assertEquals(context, contexts.findById(context.id()).orElseThrow());
+        assertEquals(source.boundLocationContextId() == null ? 0 : 1,
+                periods.findBySourceId(source.id()).size());
+    }
+
+    private SourceBindingPeriod expectedPeriod(Source bound) {
+        SourceBindingPeriod persisted = periods.findOpenBySourceId(bound.id()).orElseThrow();
+        return new SourceBindingPeriod(persisted.id(), bound.id(), bound.locationRevision(),
+                bound.boundLocationContextId(), bound.rootPathDialect(), bound.rootPath(),
+                bound.rootPathKey(), bound.bindingEvidenceJson(), bound.updatedAtMs(), null, null);
     }
 
     private void assertInvalidRoot(Source source, LocationContext context, MacOsApfsSourceRootEvidence root) {

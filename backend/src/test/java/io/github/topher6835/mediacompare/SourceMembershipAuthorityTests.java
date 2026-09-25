@@ -281,6 +281,34 @@ class SourceMembershipAuthorityTests {
     }
 
     @Test
+    void historicalOpenPeriodDoesNotAuthorizeV3AdmissionAfterSourceAuthorityIsWithdrawn() throws Exception {
+        try (var app = app()) {
+            JdbcTemplate jdbc = app.getBean(JdbcTemplate.class);
+            seed(jdbc);
+            jdbc.update("""
+                    INSERT INTO source_binding_period (
+                        source_id, bound_source_location_revision, location_context_id,
+                        root_path_dialect, root_path, root_path_key, binding_evidence_json, bound_at_ms
+                    )
+                    SELECT id, location_revision, bound_location_context_id,
+                           root_path_dialect, root_path, root_path_key, binding_evidence_json, updated_at_ms
+                    FROM source WHERE id = 1
+                    """);
+            jdbc.update("""
+                    UPDATE source SET bound_location_context_id = NULL,
+                        root_path_dialect = NULL, binding_evidence_json = NULL,
+                        location_revision = location_revision + 1 WHERE id = 1
+                    """);
+            pendingScan(jdbc, 80, 1);
+
+            assertEquals(1, count(jdbc, "SELECT COUNT(*) FROM source_binding_period WHERE source_id = 1"));
+            assertThrows(Version2ExecutionConflictException.class,
+                    () -> app.getBean(Version3ScanExecutionService.class).create(80));
+            assertEquals(0, count(jdbc, "SELECT COUNT(*) FROM job"));
+        }
+    }
+
+    @Test
     void legacyAcceptanceIsIneligibleButMalformedAcceptanceIsIntegrityFailure() throws Exception {
         try (var app = app()) {
             JdbcTemplate jdbc = app.getBean(JdbcTemplate.class);

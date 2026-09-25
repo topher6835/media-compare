@@ -19,7 +19,7 @@ The repository currently contains a working full-stack scaffold:
 - Read-only APIs that derive exact duplicate groups and retained occurrences from trusted SHA-256 artifacts, with catalog-correct file-category and extension filtering.
 - Frontend `/sources`, `/duplicates`, and `/duplicates/:digestHex` routes for Source registration/indexing and derived exact-group browsing, in addition to the `/` health route.
 
-The reviewed persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the initial eleven application tables, structural constraints, foreign keys, and indexes. Java migration `V2__add_file_entry_extension_key` adds and backfills normalized FileEntry extension metadata plus its lookup index. SQL migration `V3__add_durable_indexing_foundation.sql` adds durable indexing fields and constraints, V4 adds nullable `analysis_record.result_json`, and V5 adds `location_context` plus nullable Source binding storage; transactional V6 replaces Source-owned FileEntries with source-independent FileEntries and `source_membership`, bringing the schema to thirteen tables. Explicit context creation, acceptance, retirement, same-anchor replacement, and first-time local APFS Source binding are implemented. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, `analysis`, and `matching` feature packages. Source registration/read, historical execution reads, the four-stage version-3 lifecycle, background execution/recovery, public indexing start/polling APIs, frontend polling, exact analysis, derived duplicate reporting/filtering, reusable media-metadata persistence/safety mechanics, pure ffprobe video-output interpretation, and bounded ffprobe process execution are implemented. Legacy v1/v2 execution records remain readable; old v1 discovery/reconciliation write endpoints reject new work.
+The reviewed persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the initial eleven application tables, structural constraints, foreign keys, and indexes. Java migration `V2__add_file_entry_extension_key` adds and backfills normalized FileEntry extension metadata plus its lookup index. SQL migration `V3__add_durable_indexing_foundation.sql` adds durable indexing fields and constraints, V4 adds nullable `analysis_record.result_json`, and V5 adds `location_context` plus nullable Source binding storage; transactional V6 replaces Source-owned FileEntries with source-independent FileEntries and `source_membership`. V7 adds `source_binding_period` and backfills one open period per currently bound Source, bringing the schema to fourteen tables. Explicit context creation, acceptance, retirement, same-anchor replacement, and first-time local APFS Source binding are implemented. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, `analysis`, and `matching` feature packages. Source registration/read, historical execution reads, the four-stage version-3 lifecycle, background execution/recovery, public indexing start/polling APIs, frontend polling, exact analysis, derived duplicate reporting/filtering, reusable media-metadata persistence/safety mechanics, pure ffprobe video-output interpretation, and bounded ffprobe process execution are implemented. Legacy v1/v2 execution records remain readable; old v1 discovery/reconciliation write endpoints reject new work.
 
 ## Architectural Style
 
@@ -34,7 +34,7 @@ Responsibilities remain meaningfully separated inside the applications without c
 
 ## Implemented Persistence Boundaries
 
-The implemented persistence schema contains these twelve application tables:
+The implemented persistence schema contains these fourteen application tables:
 
 ```text
 source
@@ -49,6 +49,8 @@ job_stage
 analysis_record
 content_hash
 location_context
+source_membership
+source_binding_period
 ```
 
 The implemented fields, constraints, indexes, foreign-key direction, and remaining design boundaries are recorded in [`DATA_MODEL.md`](DATA_MODEL.md).
@@ -219,6 +221,8 @@ V5 can persist a `LocationContext` representing one continuity period for one ad
 New ACTIVE contexts start REVIEW_REQUIRED with null evidence. Acceptance is an explicit writer-reserved REVIEW_REQUIRED to ACCEPTED transition on an unbound context: the service checks the current persisted anchor and supplied accepted APFS observation, advances revision exactly once, and writes the versioned envelope with the resulting revision and caller-owned non-regressing update time. The current-authority helper requires ACTIVE + ACCEPTED and matching envelope ID, revision, and anchor. Retirement/replacement preserve the older envelope while advancing the historical row revision; a RETIRED row is ineligible as current authority without being corrupt for that difference. Legacy raw APFS JSON remains persisted but cannot pass current-authority validation. Reacceptance is separate future work.
 
 `SourceBindingService.bindUnboundSource(...)` makes the first existing legacy Source to existing current ACTIVE + ACCEPTED context link for local macOS/APFS. Typed context and Source-root probe results are captured before its short transaction. Under the same SQLite writer reservation used by context transitions, it rereads both rows, validates the context through `LocationContextAcceptanceAuthority`, compares the fresh context observation with the accepted baseline, and validates one accepted Source-root candidate for exact configured/observed spelling, structural containment, matching APFS volume and classification, and provenance for the post-bind Source revision. That accepted candidate becomes the initial Source-root baseline; later continuity checks may compare it with later observations. A guarded Source update preserves `root_path` while setting Unix dialect, canonical `lk1` key, context foreign key, versioned binding envelope, revision N+1, and caller-owned non-regressing update time. A bound Source blocks context retirement/replacement. Binding is non-idempotent; unbinding/rebinding and probe orchestration remain future work. V6 subsequently changed FileEntry ownership, membership presence, and new SCAN execution without changing first-binding semantics.
+
+V7 records each successful first binding as one open `source_binding_period` in the same writer-reserved transaction as that Source update. It snapshots the resulting Source revision, context, root dialect/path/key, exact binding evidence, and bind timestamp. Migration backfills the currently open period from each bound Source row without probing or changing existing catalog rows. The Source row and `SourceBindingAuthority` remain the sole current binding authority for v3 admission and publication; the period table is durable lifecycle history. A future unbind can close the period before or while withdrawing Source authority. Neither unbinding/rebinding nor SourceMembership retirement on unbind is implemented.
 
 ### Sources, Memberships, and Location Identity
 

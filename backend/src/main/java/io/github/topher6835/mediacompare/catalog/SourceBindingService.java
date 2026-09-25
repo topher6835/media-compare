@@ -26,13 +26,16 @@ import io.github.topher6835.mediacompare.location.SourceBindingEvidenceCodec;
 public class SourceBindingService {
     private final CatalogRepository sources;
     private final LocationContextRepository contexts;
+    private final SourceBindingPeriodRepository periods;
     private final SourceBindingEvidenceCodec bindingCodec = new SourceBindingEvidenceCodec();
     private final MacOsApfsLocationContextEvidenceCodec legacyContextCodec =
             new MacOsApfsLocationContextEvidenceCodec();
 
-    public SourceBindingService(CatalogRepository sources, LocationContextRepository contexts) {
+    public SourceBindingService(CatalogRepository sources, LocationContextRepository contexts,
+            SourceBindingPeriodRepository periods) {
         this.sources = sources;
         this.contexts = contexts;
+        this.periods = periods;
     }
 
     @Transactional
@@ -126,6 +129,9 @@ public class SourceBindingService {
         Source bound = sources.findSourceById(sourceId)
                 .orElseThrow(() -> new IllegalStateException("Bound Source " + sourceId + " disappeared"));
         SourceBindingAuthority.requireCurrentBound(bound);
+        periods.insertOpen(new SourceBindingPeriod(null, bound.id(), bound.locationRevision(),
+                bound.boundLocationContextId(), bound.rootPathDialect(), bound.rootPath(),
+                bound.rootPathKey(), bound.bindingEvidenceJson(), bound.updatedAtMs(), null, null));
         return bound;
     }
 

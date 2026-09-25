@@ -2,7 +2,7 @@
 
 ## Status and Scope
 
-Flyway V1–V5 retain their historical schema meaning. Java migration `V6__source_membership_authority` is the current schema: thirteen application tables, source-independent FileEntries, and SourceMembership as the sole writable Source/FileEntry relationship and presence authority. Every V5 FileEntry keeps its ID, content association, byte evidence, extension, revision, and timestamps; it becomes `UNRESOLVED` with null absolute identity and exactly one backfilled membership. V6 neither probes the filesystem nor merges apparently equal historical entries. The old v1/v2 execution rows remain readable, while new SCAN work uses execution version 3.
+Flyway V1–V5 retain their historical schema meaning. Java migration `V6__source_membership_authority` establishes source-independent FileEntries and SourceMembership as the sole writable Source/FileEntry relationship and presence authority. Every V5 FileEntry keeps its ID, content association, byte evidence, extension, revision, and timestamps; it becomes `UNRESOLVED` with null absolute identity and exactly one backfilled membership. V7 adds durable Source binding-period history, bringing the schema to fourteen application tables. Neither migration probes the filesystem or merges apparently equal historical entries. The old v1/v2 execution rows remain readable, while new SCAN work uses execution version 3.
 
 ## Implemented Tables
 
@@ -25,7 +25,23 @@ Source has a durable database identity. `root_path` and `root_path_key` are loca
 
 Initial Source registration sets `root_path_key` equal to the supplied `root_path`. The registration service preserves that supplied string and uses `Path.of(...)` only to require host-platform syntax and an absolute path. It does not require the path to exist or be a directory and does not perform filesystem canonicalization, case conversion, Unicode normalization, symlink resolution, or `toRealPath()`. Duplicate names, root paths, and root-path keys are intentionally allowed; each registration receives a distinct database identity.
 
-V5 did not reinterpret or rewrite existing `root_path_key` values. `root_path_dialect = NULL` means the Source root/key has not been established under the resolver contract. `bound_location_context_id` restrictively references `location_context(id)`, and `idx_source_bound_location_context` supports reference lookup. The fields remain null for migrated and newly registered Sources until explicit first-time binding; v3 admission requires a current supported binding.
+V5 did not reinterpret or rewrite existing `root_path_key` values. `root_path_dialect = NULL` means the Source root/key has not been established under the resolver contract. `bound_location_context_id` restrictively references `location_context(id)`, and `idx_source_bound_location_context` supports reference lookup. The fields remain null for migrated and newly registered Sources until explicit first-time binding; v3 admission requires a current supported binding. The Source row remains the sole current binding authority; binding periods are historical records and cannot authorize a Source.
+
+### `source_binding_period` (added by V7)
+
+- `id INTEGER PRIMARY KEY`
+- `source_id INTEGER NOT NULL` (restrictive FK to Source)
+- `bound_source_location_revision INTEGER NOT NULL CHECK >= 0`
+- `location_context_id TEXT COLLATE BINARY NOT NULL` (restrictive FK to LocationContext)
+- `root_path_dialect TEXT NOT NULL`
+- `root_path TEXT NOT NULL`
+- `root_path_key TEXT COLLATE BINARY NOT NULL`
+- `binding_evidence_json TEXT NOT NULL`
+- `bound_at_ms INTEGER NOT NULL`
+- `unbound_source_location_revision INTEGER NULL CHECK >= 0`
+- `unbound_at_ms INTEGER NULL`
+
+Each row snapshots one accepted binding period. `(source_id, bound_source_location_revision)` is unique, and a partial unique index allows at most one open period per Source. Closing revision/time are paired null or paired non-null. A closed period requires a closing revision greater than its binding revision and a closing time no earlier than its binding time. No status field is stored. V7 copies one exact open snapshot for each currently bound Source, using `source.updated_at_ms` as its start time; unbound Sources receive none. It rejects partial Source binding shapes and checks foreign keys, without changing existing rows or deriving filesystem evidence. First binding inserts its period inside the guarded Source-binding transaction; an insert failure rolls back the Source update. Closing periods, unbinding/rebinding, and retirement of SourceMembership on unbind remain future work.
 
 ### `location_context` (added by V5)
 
@@ -317,7 +333,7 @@ The independent `MEDIA_METADATA` execution version 1 has a null `scan_run_id` an
 
 ## Java Persistence Foundation
 
-Immutable records represent the V6 FileEntry and SourceMembership rows. `CatalogRepository`, `SourceMembershipRepository`, `LocationContextRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` use focused Spring JDBC methods without an ORM or generic repository layer. `SourceMembershipPublicationService` reserves the SQLite writer and atomically checks current binding/context authority, publishes resolved FileEntries and memberships, retires unresolved path collisions, and reconciles trusted missing claims. V3 traversal and probe capture stay outside write transactions. Assignment, hashing, and metadata candidate reads use resolved membership authority; duplicate reporting counts physical FileEntries for storage savings and memberships for Source/path details.
+Immutable records represent the FileEntry, SourceMembership, and SourceBindingPeriod rows. `CatalogRepository`, `SourceMembershipRepository`, `SourceBindingPeriodRepository`, `LocationContextRepository`, `ScanRepository`, `JobRepository`, and `AnalysisRepository` use focused Spring JDBC methods without an ORM or generic repository layer. `SourceMembershipPublicationService` reserves the SQLite writer and atomically checks current Source-row binding/context authority, publishes resolved FileEntries and memberships, retires unresolved path collisions, and reconciles trusted missing claims. V3 traversal and probe capture stay outside write transactions. Assignment, hashing, and metadata candidate reads use resolved membership authority; duplicate reporting counts physical FileEntries for storage savings and memberships for Source/path details.
 
 ## Explicitly Deferred
 
