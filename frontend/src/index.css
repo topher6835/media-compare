@@ -661,6 +661,10 @@ main {
   font-size: 0.72rem;
 }
 
+.source-action-note.error {
+  color: var(--danger);
+}
+
 .source-active-label {
   flex: none;
   padding: 6px 10px;

@@ -51,6 +51,7 @@ During development:
 - Backend: `http://localhost:8080`
 - Health endpoint: `http://localhost:8080/api/health`
 - Source endpoints: `http://localhost:8080/api/sources`
+- Source preparation: `POST http://localhost:8080/api/sources/{id}/prepare`
 - Scan-request endpoints: `http://localhost:8080/api/scan-runs`
 - New indexing endpoint: `POST http://localhost:8080/api/indexing-runs`
 - Indexing detail: `GET http://localhost:8080/api/indexing-runs/{id}`
@@ -61,17 +62,21 @@ During development:
 - Exact duplicate frontend: `http://localhost:5173/duplicates`
 - The Vite development server proxies `/api` requests to the backend.
 
-The V6 schema and v3 indexing cutover are implemented. SourceMembership owns the Source/FileEntry relationship and presence; trusted overlapping Sources can share one source-independent FileEntry. Historical v1/v2 indexing executions remain readable, and new indexing uses v3. The full backend suite and package, frontend lint/build, and repository whitespace check pass; see [`docs/STATUS.md`](docs/STATUS.md) for current validation results.
+The V6 schema and v3 indexing cutover are implemented. SourceMembership owns the Source/FileEntry relationship and presence; trusted overlapping Sources can share one source-independent FileEntry. Historical v1/v2 indexing executions remain readable, and new indexing uses v3. On supported local macOS/APFS storage, register a folder on `/sources`, select **Prepare Source**, then select **Analyze Source** once it shows Ready. Registration stores the path without checking that it exists; preparation checks the filesystem and binds the Source to an accepted logical LocationContext. See [`docs/STATUS.md`](docs/STATUS.md) for current validation results.
 
 The SQLite database is created locally at `backend/data/media-compare.db` when the backend is run from `backend/`. Local database files are ignored by Git and are not committed.
 
 The configured `spring.datasource.url` also determines the catalog's `.lock` sidecar. A Java NIO OS lock prevents a second backend from using the same local catalog; do not delete the lock file to try to release ownership. Locking precedes Flyway and startup recovery. Keep the catalog on a local filesystem and use one canonical catalog location, not hard-link aliases.
 
+## Source preparation API
+
+`POST /api/sources/{id}/prepare` has no request body. It returns the Source with `preparationState: READY` after successful first-time preparation, and returns the current Source unchanged if it was already ready. Source registration returns `PREPARATION_REQUIRED` without probing the path. A previously bound, currently unbound Source reports `REBIND_REQUIRED`; preparation returns `409` for that state because rebinding is a separate operation. Unknown Sources return `404`. Unavailable or unsupported local storage and uncertain APFS evidence return bounded `422` codes; probe infrastructure errors return `503`. The endpoint is currently for local macOS/APFS folders only.
+
 ## Background indexing API
 
 `POST /api/indexing-runs` accepts `{"requestKey":"client-generated UUID","sourceIds":[1]}`. Keys use canonical UUID text (case-insensitive input, lowercase storage); Source IDs must be distinct positive integers, with 1–1,000 Sources per request. New acceptance returns `202` and `Location: /api/indexing-runs/{scanRunId}`. An exact replay, regardless of Source order or terminal state, returns `200` with the same execution and never resubmits it. Reusing a key for another Source set returns `409`. A later attempt after failure needs a new key.
 
-ScanRun, ScanRunSource selections, v3 Job, and DISCOVERY stage commit atomically before background submission. Every requested Source must already have current supported local macOS/APFS binding and accepted LocationContext authority. Unbound/unsupported Sources and Windows hosts cannot start v3 scans; the frontend has no binding UI yet. Another active SCAN returns `409` without leaving an orphan request. Scheduling rejection returns `503` but retains a failed attempt that can be read or replayed.
+ScanRun, ScanRunSource selections, v3 Job, and DISCOVERY stage commit atomically before background submission. Every requested Source must already have current supported local macOS/APFS binding and accepted LocationContext authority. Unbound/unsupported Sources and Windows hosts cannot start v3 scans. The frontend explicitly prepares first-time Sources; rebinding and automatic remount recognition remain deferred. Another active SCAN returns `409` without leaving an orphan request. Scheduling rejection returns `503` but retains a failed attempt that can be read or replayed.
 
 `GET /api/indexing-runs/{scanRunId}` returns durable stage/progress/timestamp state and typed final assignment/hash counts. `GET /api/indexing-runs/source-status` returns the active summary plus the latest v2 or v3 run for every registered Source in one response. Both GETs are read-only and send `Cache-Control: no-store`. `completedWithIssues` is derived from completed hashing counts, not stored as a Job status. React `/sources` starts one v3 run and polls this durable state; SSE, cancellation, retry/resume, and multi-Source UI remain unimplemented.
 

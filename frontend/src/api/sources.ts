@@ -4,9 +4,32 @@ export interface Source {
   id: number
   name: string
   rootPath: string
+  preparationState: 'PREPARATION_REQUIRED' | 'READY' | 'REBIND_REQUIRED'
   locationRevision: number
   createdAtMs: number
   updatedAtMs: number
+}
+
+export type SourcePreparationErrorCode =
+  | 'PATH_UNAVAILABLE'
+  | 'PROFILE_UNSUPPORTED'
+  | 'EVIDENCE_UNCERTAIN'
+  | 'PROBE_ERROR'
+  | 'STATE_CHANGED'
+
+export class SourcePreparationApiError extends Error {
+  readonly status: number
+  readonly code: SourcePreparationErrorCode | null
+
+  constructor(
+    status: number,
+    code: SourcePreparationErrorCode | null,
+  ) {
+    super(`Source preparation failed with status ${status}`)
+    this.name = 'SourcePreparationApiError'
+    this.status = status
+    this.code = code
+  }
 }
 
 export interface RegisterSourceInput {
@@ -36,4 +59,22 @@ export function registerSource(
     body: JSON.stringify(input),
     signal,
   })
+}
+
+export async function prepareSource(sourceId: number): Promise<Source> {
+  const response = await fetch(`/api/sources/${sourceId}/prepare`, {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+  })
+  if (!response.ok) {
+    let code: SourcePreparationErrorCode | null = null
+    try {
+      const body = (await response.json()) as { code?: SourcePreparationErrorCode }
+      code = body.code ?? null
+    } catch {
+      // Network and server errors may have no JSON response.
+    }
+    throw new SourcePreparationApiError(response.status, code)
+  }
+  return (await response.json()) as Source
 }

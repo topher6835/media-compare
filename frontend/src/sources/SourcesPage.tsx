@@ -25,7 +25,9 @@ import {
 } from '../api/indexing.ts'
 import {
   getSources,
+  prepareSource,
   registerSource,
+  SourcePreparationApiError,
   validateSourceRegistration,
   type RegisterSourceInput,
   type Source,
@@ -44,6 +46,24 @@ function registrationErrorMessage(error: unknown): string {
     return 'The backend did not accept this Source. Check the name and use an absolute path for the computer running the backend.'
   }
   return 'The Source could not be registered. Check that the backend is running and try again.'
+}
+
+function preparationErrorMessage(error: unknown): string {
+  if (error instanceof SourcePreparationApiError) {
+    if (error.code === 'PATH_UNAVAILABLE') {
+      return 'This folder is unavailable to the backend. Check the path and try again.'
+    }
+    if (error.code === 'PROFILE_UNSUPPORTED') {
+      return 'Preparation currently supports local macOS APFS folders only.'
+    }
+    if (error.code === 'EVIDENCE_UNCERTAIN') {
+      return 'The filesystem could not be verified consistently. Try again when the folder is stable.'
+    }
+    if (error.status === 409 || error.code === 'STATE_CHANGED') {
+      return 'Source or storage state changed. Refresh the Source list before trying again.'
+    }
+  }
+  return 'The Source could not be prepared. Check that the backend is running and try again.'
 }
 
 function runDisplayStatus(run: IndexingRunSummary): string {
@@ -258,6 +278,11 @@ export function SourcesPage() {
   const [formError, setFormError] = useState<string | null>(null)
   const [formSuccess, setFormSuccess] = useState<string | null>(null)
   const [isRegistering, setIsRegistering] = useState(false)
+  const [preparingSourceId, setPreparingSourceId] = useState<number | null>(null)
+  const [preparationMessage, setPreparationMessage] = useState<{
+    sourceId: number
+    text: string
+  } | null>(null)
   const [run, setRun] = useState<IndexingRun | null>(null)
   const [startingSourceId, setStartingSourceId] = useState<number | null>(null)
   const [uncertainStart, setUncertainStart] = useState<PendingIndexingStart | null>(
@@ -268,6 +293,7 @@ export function SourcesPage() {
   const [startMessage, setStartMessage] = useState<string | null>(null)
   const [startMessageIsError, setStartMessageIsError] = useState(false)
   const registrationLock = useRef(false)
+  const preparationLock = useRef(false)
   const startLock = useRef(false)
   const mounted = useRef(true)
   const recoveryMessage = useRef(false)
@@ -458,7 +484,7 @@ export function SourcesPage() {
   }
 
   async function startAnalysis(source: Source, retryUncertain = false) {
-    if (startLock.current) return
+    if (startLock.current || source.preparationState !== 'READY') return
 
     const retainedAttempt = getPendingIndexingStart()
     const requestKey =
@@ -531,6 +557,28 @@ export function SourcesPage() {
     }
   }
 
+  async function prepare(source: Source) {
+    if (preparationLock.current || source.preparationState !== 'PREPARATION_REQUIRED') return
+    preparationLock.current = true
+    setPreparingSourceId(source.id)
+    setPreparationMessage(null)
+    try {
+      const ready = await prepareSource(source.id)
+      if (!mounted.current) return
+      setSources((current) => current?.map((item) => item.id === ready.id ? ready : item) ?? null)
+      await refreshCollection().catch(() => setListError(true))
+    } catch (error: unknown) {
+      if (!mounted.current) return
+      setPreparationMessage({ sourceId: source.id, text: preparationErrorMessage(error) })
+      if (error instanceof SourcePreparationApiError && error.status === 409) {
+        await refreshCollection().catch(() => setListError(true))
+      }
+    } finally {
+      preparationLock.current = false
+      if (mounted.current) setPreparingSourceId(null)
+    }
+  }
+
   const metadataById = new Map(sources?.map((source) => [source.id, source]))
   const displayedSources =
     sourceStatus?.sources.map((status) => ({
@@ -541,12 +589,14 @@ export function SourcesPage() {
     effectiveActiveRun?.scanRunId === run?.scanRunId ? (run?.sourceIds ?? []) : []
   const globallyBusy =
     effectiveActiveRun !== null ||
+    preparingSourceId !== null ||
     startingSourceId !== null ||
     uncertainStart !== null ||
     statusRecoveryNeeded
   const panelSourceId = run?.sourceIds[0] ?? null
+  const panelSource = panelSourceId === null ? null : metadataById.get(panelSourceId)
   const panelSourceName =
-    (panelSourceId === null ? null : metadataById.get(panelSourceId)?.name) ??
+    panelSource?.name ??
     (panelSourceId === null ? 'Source' : `Source #${panelSourceId}`)
 
   function retrySourceList() {
@@ -565,7 +615,7 @@ export function SourcesPage() {
           <p className="eyebrow">Catalog setup</p>
           <h1>Sources</h1>
           <p className="page-intro">
-            Register a local folder, then analyze it through discovery,
+            Register and prepare a local folder, then analyze it through discovery,
             catalog reconciliation, content assignment, and exact hashing.
           </p>
         </div>
@@ -576,7 +626,7 @@ export function SourcesPage() {
           <h2 id="register-source-heading">Register a Source</h2>
           <p className="section-intro">
             The path is interpreted by the local backend. It may be unavailable
-            now and checked later when analysis begins.
+            now and is checked when you prepare the Source.
           </p>
         </div>
         <form onSubmit={submitSource} noValidate>
@@ -645,7 +695,7 @@ export function SourcesPage() {
         <IndexingPanel
           run={run}
           sourceName={panelSourceName}
-          canStartNew={!globallyBusy}
+          canStartNew={!globallyBusy && panelSource?.preparationState === 'READY'}
           onStartNew={() => {
             const source =
               panelSourceId === null ? undefined : metadataById.get(panelSourceId)
@@ -701,6 +751,7 @@ export function SourcesPage() {
                   ? displayRun
                   : effectiveActiveRun
               const isStarting = startingSourceId === status.sourceId
+              const isPreparing = preparingSourceId === status.sourceId
               const isUncertain = uncertainStart?.sourceId === status.sourceId
               const blockedByActiveRun =
                 effectiveActiveRun !== null && !isActiveSource
@@ -727,6 +778,22 @@ export function SourcesPage() {
                     {source && (
                       <p className="source-path" title={source.rootPath}>
                         {source.rootPath}
+                      </p>
+                    )}
+                    {source?.preparationState === 'READY' && (
+                      <p className="source-action-note">Ready</p>
+                    )}
+                    {source?.preparationState === 'PREPARATION_REQUIRED' && (
+                      <p className="source-action-note">Setup required</p>
+                    )}
+                    {source?.preparationState === 'REBIND_REQUIRED' && (
+                      <p className="source-action-note">
+                        Rebinding required. This Source was previously connected and must be reconnected before analysis.
+                      </p>
+                    )}
+                    {preparationMessage?.sourceId === status.sourceId && (
+                      <p className="source-action-note error" role="alert">
+                        {preparationMessage.text}
                       </p>
                     )}
                     {displayRun && (
@@ -762,12 +829,20 @@ export function SourcesPage() {
                         ? runDisplayStatus(activeSourceRun)
                         : 'Waiting to start'}
                     </span>
-                  ) : (
+                  ) : source?.preparationState === 'PREPARATION_REQUIRED' ? (
                     <button
                       type="button"
-                      disabled={disabledByOther || isStarting || !source}
+                      disabled={preparingSourceId !== null || globallyBusy}
+                      onClick={() => void prepare(source)}
+                    >
+                      {isPreparing ? 'Preparing…' : 'Prepare Source'}
+                    </button>
+                  ) : source?.preparationState === 'READY' ? (
+                    <button
+                      type="button"
+                      disabled={disabledByOther || isStarting || preparingSourceId !== null}
                       onClick={() => {
-                        if (source) void startAnalysis(source, isUncertain)
+                        void startAnalysis(source, isUncertain)
                       }}
                     >
                       {isStarting
@@ -776,6 +851,8 @@ export function SourcesPage() {
                           ? 'Retry request'
                           : 'Analyze Source'}
                     </button>
+                  ) : (
+                    <span className="source-active-label">Analysis unavailable</span>
                   )}
                 </article>
               )

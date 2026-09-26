@@ -290,7 +290,7 @@ The V5-only behavior below records the sequence that preceded the V6 cutover. Th
 
 - Require an explicit caller-selected new root and target context. Allow relocate-and-bind only from a structured-unbound Source with matching latest closed history for its old root, no open period, and zero ACTIVE memberships. Reject same-root requests in favor of fixed-root rebinding. Do not persist an unbound Source at the new root or infer relocation from filesystem similarities.
 - Reuse the APFS binding evidence validator with an explicit intended root. Require fresh accepted context/root evidence and the post-transition Source and context revisions. In one writer-reserved transaction, a dedicated guarded Source update changes root path/key and current context/evidence, advances Source revision once, verifies the bound result, and inserts a new open binding period for the new root. Closed periods remain historical; no V8 migration is needed.
-- Leave retired memberships and FileEntry/content/analysis history unchanged. A later trusted scan may publish current membership under the new root, but neither old relative paths nor old-context FileEntries imply equivalence. Stale old-root/context work fails current Source authority checks. Automatic remount recognition and context selection remain future work.
+- Leave retired memberships and FileEntry/content/analysis history unchanged. A later trusted scan may publish current membership under the new root, but neither old relative paths nor old-context FileEntries imply equivalence. Stale old-root/context work fails current Source authority checks. Automatic remount recognition and automatic context selection for relocation remain future work.
 
 ## Nested and Overlapping Source Acceptance
 
@@ -302,7 +302,13 @@ The V5-only behavior below records the sequence that preceded the V6 cutover. Th
 
 - Persist the user-visible logical APFS boundary as the LocationContext anchor so it structurally contains its Sources. It need not be the physical mount path reported by `df`; Source paths remain in the user-visible namespace.
 - Discover the boundary by walking upward from an existing Source root through exact visible parents while accepted APFS Volume UUID identity remains the same. A same-UUID parent with contradictory device or mount information is uncertain, while equal mount text alone cannot override different UUIDs. Recheck every observed path and spelling before trusting the result; unavailable, unsupported, uncertain, or inconsistent observations cannot establish an anchor. Reuse the existing APFS mount inspector; physical mount information remains continuity evidence.
-- Keep `LocationAnchorPolicy` and Source-binding structural containment rules unchanged. This discovery is not yet Source onboarding, and automatic remount recognition remains deferred. No schema migration is needed.
+- Keep `LocationAnchorPolicy` and Source-binding structural containment rules unchanged. Explicit first-time Source preparation now consumes this discovery; automatic remount recognition remains deferred. No schema migration is needed.
+
+## Explicit First-Time Source Preparation
+
+- Keep Source registration durable and independent of filesystem availability. Expose PREPARATION_REQUIRED for the original unbound shape, READY for valid current Source binding authority, and REBIND_REQUIRED for structured-unbound Sources. Malformed bound evidence cannot report READY.
+- Prepare only on explicit user action for the supported local macOS/APFS profile. Resolve the visible logical anchor, reuse one applicable ACTIVE context when its structured anchor and accepted APFS evidence support it, or create an ACTIVE REVIEW_REQUIRED context through guarded activation. Accept review-required contexts through the existing acceptance service. Capture fresh context and root evidence outside write transactions, then use guarded first binding and its binding-period write. Concurrent or contradictory state fails closed.
+- Keep Analyze gated on READY in the UI and on current Source/context authority in backend v3 admission. This milestone adds no automatic remount recognition, rebinding UI, or schema migration.
 
 ## Approved Future Catalog Boundaries
 
