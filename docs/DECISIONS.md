@@ -298,6 +298,12 @@ The V5-only behavior below records the sequence that preceded the V6 cutover. Th
 - The end-to-end production v3 path has acceptance coverage for the supported local macOS/APFS profile, including both parent/child scan orders, repeat scan stability, Source-local reconciliation, and duplicate/storage counting by distinct FileEntries. The original nested-folder fix is complete for this supported profile.
 - Keep missing reconciliation scoped to the Source whose trusted complete traversal produced the claim. Automatic remount recognition is explicitly deferred and is not part of this milestone; additional provider/platform support remains future work.
 
+## macOS/APFS Logical LocationContext Anchors
+
+- Persist the user-visible logical APFS boundary as the LocationContext anchor so it structurally contains its Sources. It need not be the physical mount path reported by `df`; Source paths remain in the user-visible namespace.
+- Discover the boundary by walking upward from an existing Source root through exact visible parents while accepted APFS Volume UUID identity remains the same. A same-UUID parent with contradictory device or mount information is uncertain, while equal mount text alone cannot override different UUIDs. Recheck every observed path and spelling before trusting the result; unavailable, unsupported, uncertain, or inconsistent observations cannot establish an anchor. Reuse the existing APFS mount inspector; physical mount information remains continuity evidence.
+- Keep `LocationAnchorPolicy` and Source-binding structural containment rules unchanged. This discovery is not yet Source onboarding, and automatic remount recognition remains deferred. No schema migration is needed.
+
 ## Approved Future Catalog Boundaries
 
 - Use one independent SQLite file per Catalog, with an immutable internal catalog UUID and a rebuildable known-catalog registry/settings store outside individual catalog databases. Initially allow exactly one active/open catalog; use controlled backend/context restart or reinitialization rather than hot DataSource switching. Do not silently query or reuse data across catalogs.

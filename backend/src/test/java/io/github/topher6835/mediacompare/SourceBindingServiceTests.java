@@ -163,6 +163,23 @@ class SourceBindingServiceTests {
     }
 
     @Test
+    void bindsVisibleSourceUnderLogicalDataVolumeAnchor() {
+        LocationPath logicalAnchor = LocationPathParser.parse(LocationDialect.UNIX, "/Users");
+        LocationPath logicalRoot = LocationPathParser.parse(LocationDialect.UNIX,
+                "/Users/chris/Pictures");
+        LocationContext context = acceptedContext(logicalAnchor);
+        Source source = legacySource("/Users/chris/Pictures");
+
+        Source bound = bind(source, context, capture(source, context, logicalRoot));
+
+        assertEquals("/Users/chris/Pictures", bound.rootPath());
+        assertEquals(logicalAnchor, pathCodec.decode(context.anchorLocationPath()));
+        assertEquals(VOLUME_UUID,
+                SourceBindingAuthority.requireCurrentBound(bound)
+                        .macOsApfsSourceRootEvidence().volumeUuid());
+    }
+
+    @Test
     void repeatedBindingConflictsWithoutChangingRows() {
         LocationContext context = acceptedContext(anchor());
         Source source = legacySource("/Volumes/Archive/Photos");
