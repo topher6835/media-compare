@@ -174,6 +174,16 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Report explicit member, present/missing occurrence, and Source counts. Estimate potential logical savings as `max(presentOccurrenceCount - 1, 0) * sizeBytes`; this is not actual recoverable filesystem allocation.
 - Keep ContentRecords separate. No merge, redirect, canonicalization, deletion, keeper selection, manual override, or cleanup behavior is implied by group membership.
 
+## ContentRecord Media Relationships and Dynamic Review Groups (V8)
+
+- Persist relationships between ContentRecords, each representing one immutable byte-version, rather than physical FileEntries or SourceMemberships. Multiple occurrences and overlapping Sources must not duplicate content relationship analysis; moves, renames, and loss of an occurrence must not invalidate an otherwise reusable result. Keep existing content/occurrence identity unchanged. Future presentation resolves content endpoints to current occurrences.
+- Store a canonical pair with `content_record_a_id < content_record_b_id`; reject self-relationships. Keep `UNDIRECTED`, `A_TO_B`, and `B_TO_A` direction independent of endpoint order, reversing it when canonicalizing reversed input. Do not enforce lineage rules per relationship type in SQLite.
+- Use the initial Java types `EXACT`, `RESIZED`, `CROP`, `EDITED`, `VIDEO_OVERLAP`, and `VIDEO_SEGMENT_SEQUENCE`; SQL leaves types extensible. Keep nullable normalized confidence and bounded JSON object evidence, without per-type evidence tables/codecs or invented deterministic scores.
+- Treat canonical pair + type + matcher ID/version + configuration version/hash as one unique durable result. Retain effective configuration JSON for provenance, outside uniqueness. Changed matcher/configuration identities coexist without automatic deletion, overwriting, or a broad lifecycle framework.
+- Derive connected components from enabled edges using one pure grouping algorithm. Direction is metadata and does not block connectivity. Type toggles alter grouping without reanalysis. Members/components have deterministic ID ordering; unconnected records are omitted. Persist no group ID, membership, or toggle combinations.
+- Keep existing `content_hash`-derived SHA-256 duplicate grouping and its API/UI authoritative and separate. V8 migrates no hash groups and publishes no `EXACT` rows. A future adapter/projection may feed exact equality into the relationship graph.
+- Keep preview/cache identity based on physical FileEntry/current file evidence rather than SourceMembership. Large assets belong in a managed filesystem cache rather than SQLite blobs unless a later design justifies otherwise. The album grid must not load originals. Thumbnail/preview pipeline design is the next foundational milestone before major album UI work; detailed schema/API remains undecided.
+
 ## Catalog-Correct Exact Duplicate Filtering
 
 - Persist nullable lowercase `file_entry.extension_key` through Flyway V2. Snapshot V2's basename-suffix extraction and locale-independent lowercase rules privately in the historical migration; runtime observations use `FileExtensionNormalizer`, and both currently implement the same rules. Keep path identity unchanged, preserve extension metadata when an occurrence becomes `MISSING`, and index `(extension_key, current_content_id)`. Any future change to persisted extension semantics requires a later migration.
@@ -386,7 +396,7 @@ V5 implements LocationContext/Source binding storage, and V6/v3 use the pure sca
 - Scheduling beyond the bounded v2 worker, public cancellation/retry, and future resume.
 - Detailed scan scope representation and source-specific progress.
 - Specialized result schemas beyond `content_hash`.
-- Matching, similarity, materialized relationship/grouping, and manual override schemas.
+- Candidate generation, relationship matcher/evidence designs, album query API, and manual override schemas. V8 establishes relationship persistence; groups are derived, not materialized.
 - Face/person schema and AI-provider architecture.
 - Application-managed cache locations and lifecycle.
 - Real-Windows ffprobe redirected-file/`fd:` qualification and acceptance.

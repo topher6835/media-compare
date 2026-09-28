@@ -53,7 +53,8 @@ class PersistenceFoundationTests {
             "analysis_record",
             "content_hash",
             "location_context",
-            "source_binding_period");
+            "source_binding_period",
+            "media_relationship");
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -91,7 +92,7 @@ class PersistenceFoundationTests {
     }
 
     @Test
-    void flywayCreatesExactlyTheFourteenApplicationTables() {
+    void flywayCreatesExactlyTheFifteenApplicationTables() {
         Set<String> actualTables = Set.copyOf(jdbcTemplate.queryForList("""
                 SELECT name
                 FROM sqlite_schema

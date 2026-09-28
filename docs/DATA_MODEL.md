@@ -4,6 +4,8 @@
 
 Flyway V1–V5 retain their historical schema meaning. Java migration `V6__source_membership_authority` establishes source-independent FileEntries and SourceMembership as the sole writable Source/FileEntry relationship and presence authority. Every V5 FileEntry keeps its ID, content association, byte evidence, extension, revision, and timestamps; it becomes `UNRESOLVED` with null absolute identity and exactly one backfilled membership. V7 adds durable Source binding-period history, bringing the schema to fourteen application tables. Neither migration probes the filesystem or merges apparently equal historical entries. The old v1/v2 execution rows remain readable, while new SCAN work uses execution version 3.
 
+V8 adds `media_relationship`, bringing the current schema to fifteen application tables. It changes no existing catalog rows and does not project exact hashes into relationship rows.
+
 ## Implemented Tables
 
 ### `source`
@@ -291,6 +293,39 @@ The exact duplicate view uses exact built-in AnalysisRecord provenance to derive
 
 Occurrence filters use `file_entry.extension_key` to select complete exact groups. Both `PRESENT` and `MISSING` retained occurrences can select a group; a ContentRecord without an occurrence remains a full member after another occurrence selects that group. Summary counts and savings remain whole-group values, while `filterMatch` counts only matching retained occurrences. Detail responses return the whole group and mark each occurrence against the filter. Filter options aggregate distinct digest-group and retained-occurrence counts by non-null extension across valid exact groups.
 
+### `media_relationship` (added by V8)
+
+Implemented fields:
+
+- `id INTEGER PRIMARY KEY`
+- `content_record_a_id INTEGER NOT NULL`, `content_record_b_id INTEGER NOT NULL`
+- `relationship_type TEXT NOT NULL` (nonblank; no rigid SQL type list)
+- `direction TEXT NOT NULL`: `UNDIRECTED`, `A_TO_B`, or `B_TO_A`
+- `confidence REAL NULL`: when present, numeric within `0.0..1.0`; Java also rejects NaN/infinity
+- `evidence_json TEXT NOT NULL`: JSON object, at most 128 KiB of UTF-8
+- `matcher_id TEXT NOT NULL`, `matcher_version TEXT NOT NULL` (nonblank)
+- `configuration_version INTEGER NOT NULL CHECK > 0`
+- `configuration_hash TEXT NOT NULL` (nonblank)
+- `configuration_json TEXT NOT NULL`: effective configuration JSON object, at most 128 KiB of UTF-8
+- `created_at_ms INTEGER NOT NULL`
+
+Both endpoints reference `content_record(id)` with `ON DELETE RESTRICT`. `CHECK (content_record_a_id < content_record_b_id)` rejects self-edges and reversed storage. Java canonicalizes supplied endpoints and reverses direction when swapping them. Direction describes lineage relative to canonical endpoints; it never depends on insertion order. No relationship type is required to be directed. The initial Java types are `EXACT`, `RESIZED`, `CROP`, `EDITED`, `VIDEO_OVERLAP`, and `VIDEO_SEGMENT_SEQUENCE`.
+
+One durable artifact is unique by:
+
+```text
+UNIQUE(content_record_a_id, content_record_b_id, relationship_type,
+       matcher_id, matcher_version, configuration_version, configuration_hash)
+```
+
+Direction, score, evidence, effective configuration JSON, and creation time are result/provenance data outside that identity. Resubmission, including reversed endpoints, fails uniqueness rather than overwriting an artifact. Different matcher/version/configuration identities coexist; none is automatically deleted or superseded. As with AnalysisRecord, callers supply the configuration hash for their effective settings; this foundation does not compute it or enforce a particular hash format.
+
+SQL validates JSON object shape and byte bounds. Java additionally rejects blank/malformed JSON, duplicate object keys, trailing tokens, and malformed Unicode while preserving the supplied text. Evidence remains an open JSON object; `{}` is valid when no specific evidence is needed. No per-type evidence tables/codecs or lifecycle framework exist.
+
+Indexes are `idx_media_relationship_a_type (content_record_a_id, relationship_type)`, `idx_media_relationship_b_type (content_record_b_id, relationship_type)`, and `idx_media_relationship_type_endpoints (relationship_type, content_record_a_id, content_record_b_id)`. The focused repository inserts, reads by ID, and reads all retained artifacts for enabled types in ascending ID order. It makes no newest-version or compatibility selection.
+
+`MediaRelationshipGrouping` derives connected components from supplied enabled edges without persistence. Members sort by ContentRecord ID; components sort by their smallest member. Direction does not limit connectivity, repeated artifacts do not repeat members, and records without enabled connections are omitted. Type toggles recompute groups from reusable edges without reanalysis. There is no durable group ID, membership table, or cached toggle combination. Existing `content_hash`-derived SHA-256 groups remain authoritative and separate; no matcher currently publishes relationship rows, including `EXACT`.
+
 ## Filesystem Timestamps
 
 Application lifecycle timestamps use epoch milliseconds stored as SQLite integers. Filesystem modification times preserve available Java `FileTime` precision with an epoch-second value and nanosecond component. The two values are both present or both absent; nanoseconds are constrained to `0..999999999`. Filesystems that provide less precision remain valid.
@@ -318,6 +353,7 @@ The current operational relationship is:
 ```text
 Source -> SourceMembership -> FileEntry -> ContentRecord -> AnalysisRecord
 Source -> LocationContext; resolved FileEntry -> LocationContext
+ContentRecord <-> media_relationship <-> ContentRecord (canonical pair)
 WorkingSet -> ContentRecord membership
 ScanRun -> ScanRunSource -> Source
 ScanRun -> Job -> JobStage
@@ -345,14 +381,14 @@ Immutable records represent the FileEntry, SourceMembership, and SourceBindingPe
 
 ## Explicitly Deferred
 
-V1 does not include:
+The current implementation does not include:
 
 - ContentRecord merge/redirect infrastructure.
 - Historical FileEntry path/content-version history.
 - Directory-level traversal checkpoints.
 - Analysis attempt-history or Job stage-instance tables.
 - Perceptual fingerprints, embeddings, vector infrastructure, face/person schemas, or video fingerprints.
-- Matching candidates, similarity relationships, materialized groups, or manual override schemas.
+- Matching candidates, actual relationship matchers, per-type evidence codecs, or manual override schemas. Groups are derived rather than persisted.
 - AI-specific result schemas and provider infrastructure.
 - Filesystem-action history.
 - Thumbnail/cache metadata.

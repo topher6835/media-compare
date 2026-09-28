@@ -18,6 +18,7 @@ The repository currently contains a working full-stack scaffold:
 - A synchronous command that publishes exact SHA-256 analysis for safe assigned-content candidates.
 - A background version-3 SCAN Job with DISCOVERY, RECONCILIATION, CONTENT_ASSIGNMENT, and CONTENT_HASHING under membership authority.
 - Read-only APIs that derive exact duplicate groups and retained occurrences from trusted SHA-256 artifacts, with catalog-correct file-category and extension filtering.
+- A V8 ContentRecord relationship table, focused JDBC repository, and pure dynamic grouping component; no matcher publishes edges yet.
 - Frontend `/sources`, `/duplicates`, `/duplicates/:digestHex`, and `/duplicates/plan` routes for Source registration/indexing, derived exact-group browsing, and session-only cleanup planning, in addition to the `/` health route.
 
 The reviewed persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the initial eleven application tables, structural constraints, foreign keys, and indexes. Java migration `V2__add_file_entry_extension_key` adds and backfills normalized FileEntry extension metadata plus its lookup index. SQL migration `V3__add_durable_indexing_foundation.sql` adds durable indexing fields and constraints, V4 adds nullable `analysis_record.result_json`, and V5 adds `location_context` plus nullable Source binding storage; transactional V6 replaces Source-owned FileEntries with source-independent FileEntries and `source_membership`. V7 adds `source_binding_period` and backfills one open period per currently bound Source, bringing the schema to fourteen tables. Explicit context creation, acceptance, retirement, same-anchor replacement, and first-time local APFS Source binding are implemented. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, `analysis`, and `matching` feature packages. Source registration/read, historical execution reads, the four-stage version-3 lifecycle, background execution/recovery, public indexing start/polling APIs, frontend polling, exact analysis, derived duplicate reporting/filtering, reusable media-metadata persistence/safety mechanics, pure ffprobe video-output interpretation, bounded ffprobe process execution, and backend read-only exact-duplicate cleanup preflight are implemented. Legacy v1/v2 execution records remain readable; old v1 discovery/reconciliation write endpoints reject new work.
@@ -35,7 +36,9 @@ Responsibilities remain meaningfully separated inside the applications without c
 
 ## Implemented Persistence Boundaries
 
-The implemented persistence schema contains these fourteen application tables:
+V8 adds `media_relationship` without changing existing rows or migrating SHA-256 duplicate groups.
+
+The implemented persistence schema contains these fifteen application tables:
 
 ```text
 source
@@ -52,6 +55,7 @@ content_hash
 location_context
 source_membership
 source_binding_period
+media_relationship
 ```
 
 The implemented fields, constraints, indexes, foreign-key direction, and remaining design boundaries are recorded in [`DATA_MODEL.md`](DATA_MODEL.md).
@@ -62,7 +66,7 @@ The initial Java package structure is:
 - `scan` — ScanRun, ScanRunSource, and reconciliation coordination.
 - `job` — generic durable execution and stage state.
 - `analysis` — AnalysisRecord and reusable specialized analysis artifacts.
-- `matching` — read-only exact byte-equality grouping and reporting projections.
+- `matching` — exact byte-equality reporting, durable typed ContentRecord relationships, and pure grouping.
 - `web` — thin REST controllers and later HTTP/SSE endpoints.
 
 The persistence foundation uses concrete Spring JDBC repositories per feature package, including `CatalogRepository`, the narrow `LocationContextRepository`, `ScanRepository`, `JobRepository`, `AnalysisRepository`, and `ExactDuplicateRepository`. The boundaries remain simple. `catalog` does not depend on the job runner; `job` remains generic; and `analysis` owns analysis provenance. Scan-specific orchestration that depends on both ScanRun and Job concepts stays in `scan`, not `job`. The web controllers are thin HTTP boundaries over small feature services, while `HealthController` remains unchanged. No generic repository framework, automatic interface/implementation pairs, or enterprise layering was introduced.
@@ -279,12 +283,27 @@ The design targets thousands, tens of thousands, and potentially hundreds of tho
 
 Exact byte-equality grouping is the first implemented matching behavior and uses indexed digest aggregation rather than pairwise comparison. Broader matching uses cheap candidate generation followed by deeper comparison for plausible candidates. Full pairwise comparison is not a V1 strategy. Candidate persistence and later matching algorithms remain open, while pending work must eventually support durable resume.
 
+### ContentRecord Relationship Graph
+
+V8 persists typed media relationships between immutable ContentRecords, independent of SourceMembership and FileEntry locations. Multiple physical occurrences and overlapping Sources do not duplicate a content relationship; moving, renaming, or losing one occurrence does not invalidate its reusable artifact. Future presentation code can resolve the content endpoints to current FileEntries and SourceMemberships.
+
+`MediaRelationship` canonicalizes pairs to `A < B` and reverses independent direction metadata when swapping endpoints. Nullable normalized confidence, bounded JSON evidence, matcher identity/version, configuration version/hash/effective JSON, and creation time accompany each edge. The pair/type/exact matcher/configuration identity is unique. Different identities coexist; there is no automatic supersession. `MediaRelationshipRepository` inserts, reads by ID, and filters by enabled types, retaining all versions/configurations. Matcher compatibility selection remains future query/adapter work.
+
+`MediaRelationshipGrouping` is database-independent. It builds connected components using only enabled types, regardless of direction. Transitive mixed-type paths connect, repeated edges do not duplicate members, and disabling/re-enabling types splits/reconnects components without media reanalysis. Output is deterministic: ascending member IDs, components ordered by smallest member. Only endpoints connected by an enabled edge appear. No groups, permanent memberships, or toggle combinations are persisted.
+
+The existing SHA-256 `content_hash` repository/service/API/UI remains separate and authoritative for exact duplicates. `EXACT` is available in the new domain for a future adapter/projection, but V8 neither migrates hashes nor populates exact relationship rows. No actual matcher or public relationship/album API is implemented.
+
+### Future Thumbnail and Preview Boundary
+
+Preview/cache identity will use physical FileEntry and current file evidence, rather than SourceMembership identity. This is distinct from the ContentRecord relationship graph. Large thumbnail/preview assets should live in a managed filesystem cache rather than SQLite blobs unless a later design establishes a compelling reason otherwise. The album grid must use thumbnails/previews rather than load originals. The thumbnail/preview pipeline foundation is the next milestone before major album UI work; detailed cache schema, paths, invalidation, generation, and API remain undecided.
+
 ## Current Implemented Relationship View
 
 ```text
 Source -> SourceMembership -> FileEntry -> ContentRecord -> AnalysisRecord -> specialized results
 Source -> LocationContext; resolved FileEntry -> LocationContext
 ContentRecord -> derived exact duplicate groups
+ContentRecord <-> media_relationship <-> ContentRecord -> derived enabled-edge components
 WorkingSet -> ContentRecord membership
 ScanRun -> Job -> stages/checkpoints
 ```
@@ -428,7 +447,7 @@ The following remain open after the V1 review:
 - Scheduling beyond the bounded v3 worker, public cancellation/retries, and future resume.
 - Detailed scan scope representation and source-specific progress.
 - Specialized result schemas beyond `content_hash`.
-- Candidate, similarity, materialized relationship/grouping, and manual override schemas.
+- Candidate generation, relationship matcher/evidence designs, album query API, and manual override schemas. Relationship groups are derived, not materialized.
 - Face/person schema and AI-provider architecture.
 - Application-managed cache locations and lifecycle.
 - Real-Windows ffprobe redirected-file/`fd:` qualification and acceptance.
