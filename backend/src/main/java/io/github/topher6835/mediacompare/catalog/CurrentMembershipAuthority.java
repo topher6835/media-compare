@@ -21,6 +21,23 @@ public class CurrentMembershipAuthority {
         this.memberships = memberships;
     }
 
+    /** Durable route eligibility shared by publication and read-only preflight. */
+    public static boolean isCurrentRoute(FileEntry entry, SourceMembership member,
+            Source source, LocationContext context) {
+        return context != null && "RESOLVED".equals(entry.locationIdentityStatus())
+                && context.id().equals(source.boundLocationContextId())
+                && context.id().equals(entry.locationContextId())
+                && entry.locationPath() != null && entry.locationKey() != null
+                && member.fileEntryId() == entry.id() && member.sourceId() == source.id()
+                && "ACTIVE".equals(member.applicabilityStatus())
+                && "PRESENT".equals(member.presenceStatus())
+                && member.observedFileEntryRevision() == entry.observationRevision()
+                && member.observedSourceLocationRevision() != null
+                && member.observedLocationContextRevision() != null
+                && member.observedSourceLocationRevision() == source.locationRevision()
+                && member.observedLocationContextRevision() == context.revision();
+    }
+
     public void reserveAndRequire(long sourceId, long sourceRevision,
             String contextId, long contextRevision, long fileEntryId, long membershipId) {
         contexts.reserveWrite();
@@ -40,17 +57,7 @@ public class CurrentMembershipAuthority {
         }
         FileEntry entry = memberships.findById(fileEntryId).orElseThrow();
         SourceMembership member = memberships.findMembershipById(membershipId).orElseThrow();
-        if (!"RESOLVED".equals(entry.locationIdentityStatus())
-                || !contextId.equals(entry.locationContextId())
-                || entry.locationPath() == null || entry.locationKey() == null
-                || member.fileEntryId() != fileEntryId || member.sourceId() != sourceId
-                || !"ACTIVE".equals(member.applicabilityStatus())
-                || !"PRESENT".equals(member.presenceStatus())
-                || member.observedFileEntryRevision() != entry.observationRevision()
-                || member.observedSourceLocationRevision() == null
-                || member.observedLocationContextRevision() == null
-                || member.observedSourceLocationRevision() != sourceRevision
-                || member.observedLocationContextRevision() != contextRevision) {
+        if (!isCurrentRoute(entry, member, source, context)) {
             throw new IllegalStateException("FileEntry lacks current trusted SourceMembership");
         }
         try {

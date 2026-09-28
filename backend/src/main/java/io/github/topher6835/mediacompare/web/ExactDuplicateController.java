@@ -1,6 +1,12 @@
 package io.github.topher6835.mediacompare.web;
 
 import java.util.List;
+import io.github.topher6835.mediacompare.matching.CleanupPreflightService;
+import io.github.topher6835.mediacompare.matching.CleanupPreflightRequest;
+import io.github.topher6835.mediacompare.matching.CleanupPreflightResponse;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.http.CacheControl;
 
 import io.github.topher6835.mediacompare.matching.ExactDuplicateFilter;
 import io.github.topher6835.mediacompare.matching.ExactDuplicateService;
@@ -19,8 +25,18 @@ public class ExactDuplicateController {
 
     private final ExactDuplicateService service;
 
-    public ExactDuplicateController(ExactDuplicateService service) {
+    private final CleanupPreflightService preflight;
+
+    public ExactDuplicateController(ExactDuplicateService service, CleanupPreflightService preflight) {
         this.service = service;
+        this.preflight = preflight;
+    }
+
+    @PostMapping("/{digestHex}/cleanup-preflight")
+    public ResponseEntity<CleanupPreflightResponse> cleanupPreflight(@PathVariable String digestHex,
+            @RequestBody CleanupPreflightRequest request) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(preflight.preflight(digestHex, request));
     }
 
     @GetMapping

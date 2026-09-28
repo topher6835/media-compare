@@ -1,6 +1,9 @@
 package io.github.topher6835.mediacompare.scan;
 
 import io.github.topher6835.mediacompare.catalog.CatalogRepository;
+import io.github.topher6835.mediacompare.catalog.Source;
+import io.github.topher6835.mediacompare.catalog.LocationContext;
+import io.github.topher6835.mediacompare.scan.authority.ScanAuthorityReason;
 import io.github.topher6835.mediacompare.catalog.LocationContextAcceptanceAuthority;
 import io.github.topher6835.mediacompare.catalog.LocationContextRepository;
 import io.github.topher6835.mediacompare.catalog.SourceBindingAuthority;
@@ -36,8 +39,13 @@ public class Version3AuthorityCapture {
         var source = catalog.findSourceById(sourceId).orElseThrow();
         var context = source.boundLocationContextId() == null ? null
                 : contexts.findById(source.boundLocationContextId()).orElse(null);
-        if (context == null) {
-            return ScanObservationAuthority.capture(source, null, null, null);
+        return capture(source, context);
+    }
+
+    public ScanAuthorityResult<ScanAuthoritySnapshot> capture(Source source, LocationContext context) {
+        var eligible = ScanObservationAuthority.capture(source, context, null, null);
+        if (context == null || eligible.reason() != ScanAuthorityReason.AUTHORITY_UNAVAILABLE) {
+            return eligible;
         }
         var acceptance = LocationContextAcceptanceAuthority.requireCurrentAccepted(context);
         var binding = SourceBindingAuthority.requireCurrentBound(source);

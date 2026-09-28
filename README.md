@@ -1,6 +1,6 @@
 # Media Compare
 
-Media Compare is an early-stage application for media comparison workflows. V6 moves Source/FileEntry relationships and presence to SourceMembership and routes new indexing through a four-stage v3 SCAN. Historical V5 FileEntries remain separate and unresolved after migration; trusted overlapping Sources can share one resolved physical FileEntry. Session-only exact-duplicate cleanup planning is available; broader comparison and filesystem cleanup remain deferred.
+Media Compare is an early-stage application for media comparison workflows. V6 moves Source/FileEntry relationships and presence to SourceMembership and routes new indexing through a four-stage v3 SCAN. Historical V5 FileEntries remain separate and unresolved after migration; trusted overlapping Sources can share one resolved physical FileEntry. Session-only exact-duplicate cleanup planning and a backend read-only cleanup preflight are available; broader comparison and filesystem cleanup remain deferred.
 
 ## Stack
 
@@ -58,6 +58,7 @@ During development:
 - Content assignment endpoint: `POST http://localhost:8080/api/scan-runs/{id}/content-assignment`
 - Content hashing endpoint: `POST http://localhost:8080/api/scan-runs/{id}/content-hashing`
 - Exact duplicate endpoints: `GET http://localhost:8080/api/exact-duplicate-groups`, `GET http://localhost:8080/api/exact-duplicate-groups/filter-options`, and `GET http://localhost:8080/api/exact-duplicate-groups/{digestHex}`. List and detail reads accept repeated `fileCategory` and `extension` query parameters.
+- Cleanup preflight: `POST http://localhost:8080/api/exact-duplicate-groups/{digestHex}/cleanup-preflight` (read-only; no Trash/delete/move).
 - Source management and indexing frontend: `http://localhost:5173/sources`
 - Exact duplicate frontend: `http://localhost:5173/duplicates`. Detail groups overlapping Source memberships by physical `FileEntry` and offers explicit keeper/removal preview decisions collected into a browser-session cleanup plan at `/duplicates/plan`. Multiple groups can be reviewed, updated, removed, or cleared. Entries represent physical FileEntries, not Source memberships, and disappear on reload. No decision is persisted and no filesystem mutation exists. Future file operations must revalidate backend/filesystem authority rather than trust these review snapshots.
 - The Vite development server proxies `/api` requests to the backend.
@@ -71,6 +72,17 @@ The configured `spring.datasource.url` also determines the catalog's `.lock` sid
 ## Source preparation API
 
 `POST /api/sources/{id}/prepare` has no request body. It returns the Source with `preparationState: READY` after successful first-time preparation, and returns the current Source unchanged if it was already ready. Source registration returns `PREPARATION_REQUIRED` without probing the path. A previously bound, currently unbound Source reports `REBIND_REQUIRED`; preparation returns `409` for that state because rebinding is a separate operation. Unknown Sources return `404`. Unavailable or unsupported local storage and uncertain APFS evidence return bounded `422` codes; probe infrastructure errors return `503`. The endpoint is currently for local macOS/APFS folders only.
+
+## Exact-duplicate cleanup preflight API
+
+`POST /api/exact-duplicate-groups/{digestHex}/cleanup-preflight` accepts
+`{"keeperFileEntryId":2,"candidateFileEntryIds":[3,4]}`. The digest must be lowercase SHA-256 hex; IDs must be positive, candidates unique, exclude the keeper, and number 1–250. Malformed requests return `400`. Well-formed stale/unsafe proposals return `200` with `BLOCKED`; a successful informational check returns `200` with `READY`. Responses send `Cache-Control: no-store`.
+
+The response includes `digestHex`, `status`, bounded `reason` (null on success), current catalog `sizeBytes` (null for an absent group), proposed `candidateCount`, `estimatedSavingsBytes` (null when blocked), and `keeper`/`candidates` results containing physical `fileEntryId`, `status`, and `reason`. Reasons are `GROUP_CHANGED`, `KEEPER_UNAVAILABLE`, `CANDIDATE_SET_CHANGED`, `AUTHORITY_UNAVAILABLE`, `AUTHORITY_CHANGED`, `FILESYSTEM_CHANGED`, `UNSAFE_PATH`, `HASH_MISMATCH`, and `IO_UNAVAILABLE`. Catalog integrity contradictions remain server failures.
+
+The backend rederives the group: any ACTIVE PRESENT membership makes its physical FileEntry present, overlaps count once, and submitted candidates must exactly equal all other present copies. Each file needs a current trusted membership route, fresh local macOS/APFS Source/context continuity, strict non-symlink path/file/storage evidence, and freshly recomputed SHA-256, including the keeper. Catalog authority is reread after filesystem IO; changes block the proposal. READY savings use checked multiplication of validated candidate count by current group size.
+
+Preflight changes no catalog rows or files and creates no token, job, approval, or durable plan. **READY does not authorize future filesystem mutation.** Results become stale immediately; future Trash execution must repeat the critical checks immediately before acting. No Trash/delete/move operation exists yet, and the frontend does not call this endpoint in this slice. Other host/storage profiles fail closed.
 
 ## Background indexing API
 

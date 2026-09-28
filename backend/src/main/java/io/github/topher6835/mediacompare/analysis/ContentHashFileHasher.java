@@ -36,9 +36,15 @@ public class ContentHashFileHasher {
 
         MessageDigest digest = newDigest();
         ByteBuffer buffer = ByteBuffer.allocate(BUFFER_SIZE);
+        long bytesRead = 0;
         try (SeekableByteChannel channel = Files.newByteChannel(
                 file, Set.of(StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS))) {
-            while (channel.read(buffer) != -1) {
+            int count;
+            while ((count = read(channel, buffer)) != -1) {
+                bytesRead += count;
+                if (bytesRead > candidate.sizeBytes()) {
+                    throw stale(candidate, "file grew during hashing");
+                }
                 IndexingInterruptedException.check();
                 buffer.flip();
                 digest.update(buffer);
@@ -46,9 +52,21 @@ public class ContentHashFileHasher {
             }
         }
 
+        if (bytesRead != candidate.sizeBytes()) {
+            throw stale(candidate, "file length changed during hashing");
+        }
+        resolveAbsoluteLocation(candidate);
         BasicFileAttributes after = readRegularFileAttributes(file, candidate);
+        if (!java.util.Objects.equals(before.fileKey(), after.fileKey())) {
+            throw stale(candidate, "file identity changed during hashing");
+        }
         requireExpectedMetadata(candidate, after, "metadata changed during hashing");
         return HexFormat.of().formatHex(digest.digest());
+    }
+
+    /** Small deterministic seam for interrupted/changing-file read tests. */
+    protected int read(SeekableByteChannel channel, ByteBuffer buffer) throws IOException {
+        return channel.read(buffer);
     }
 
     private static Path resolveAbsoluteLocation(ContentHashCandidate candidate)
