@@ -19,9 +19,10 @@ The repository currently contains a working full-stack scaffold:
 - A background version-3 SCAN Job with DISCOVERY, RECONCILIATION, CONTENT_ASSIGNMENT, and CONTENT_HASHING under membership authority.
 - Read-only APIs that derive exact duplicate groups and retained occurrences from trusted SHA-256 artifacts, with catalog-correct file-category and extension filtering.
 - A V8 ContentRecord relationship table, focused JDBC repository, and pure dynamic grouping component; no matcher publishes edges yet.
+- A V9 FileEntry preview-cache foundation with successful-asset metadata, deterministic keys/layout, current-evidence lookup, and read-only immutable serving; no generator exists yet.
 - Frontend `/sources`, `/duplicates`, `/duplicates/:digestHex`, and `/duplicates/plan` routes for Source registration/indexing, derived exact-group browsing, and session-only cleanup planning, in addition to the `/` health route.
 
-The reviewed persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the initial eleven application tables, structural constraints, foreign keys, and indexes. Java migration `V2__add_file_entry_extension_key` adds and backfills normalized FileEntry extension metadata plus its lookup index. SQL migration `V3__add_durable_indexing_foundation.sql` adds durable indexing fields and constraints, V4 adds nullable `analysis_record.result_json`, and V5 adds `location_context` plus nullable Source binding storage; transactional V6 replaces Source-owned FileEntries with source-independent FileEntries and `source_membership`. V7 adds `source_binding_period` and backfills one open period per currently bound Source, bringing the schema to fourteen tables. Explicit context creation, acceptance, retirement, same-anchor replacement, and first-time local APFS Source binding are implemented. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, `analysis`, and `matching` feature packages. Source registration/read, historical execution reads, the four-stage version-3 lifecycle, background execution/recovery, public indexing start/polling APIs, frontend polling, exact analysis, derived duplicate reporting/filtering, reusable media-metadata persistence/safety mechanics, pure ffprobe video-output interpretation, bounded ffprobe process execution, and backend read-only exact-duplicate cleanup preflight are implemented. Legacy v1/v2 execution records remain readable; old v1 discovery/reconciliation write endpoints reject new work.
+The reviewed persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the initial eleven application tables, structural constraints, foreign keys, and indexes. Java migration `V2__add_file_entry_extension_key` adds and backfills normalized FileEntry extension metadata plus its lookup index. SQL migration `V3__add_durable_indexing_foundation.sql` adds durable indexing fields and constraints, V4 adds nullable `analysis_record.result_json`, and V5 adds `location_context` plus nullable Source binding storage; transactional V6 replaces Source-owned FileEntries with source-independent FileEntries and `source_membership`. V7 adds `source_binding_period` and backfills one open period per currently bound Source, bringing its schema to fourteen tables. V8 adds ContentRecord relationships, and V9 adds successful preview-asset metadata, bringing the current schema to sixteen tables. Explicit context creation, acceptance, retirement, same-anchor replacement, and first-time local APFS Source binding are implemented. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, `analysis`, `matching`, and `preview` feature packages. Source registration/read, historical execution reads, the four-stage version-3 lifecycle, background execution/recovery, public indexing start/polling APIs, frontend polling, exact analysis, derived duplicate reporting/filtering, reusable media-metadata persistence/safety mechanics, pure ffprobe video-output interpretation, bounded ffprobe process execution, and backend read-only exact-duplicate cleanup preflight are implemented. Legacy v1/v2 execution records remain readable; old v1 discovery/reconciliation write endpoints reject new work.
 
 ## Architectural Style
 
@@ -38,7 +39,7 @@ Responsibilities remain meaningfully separated inside the applications without c
 
 V8 adds `media_relationship` without changing existing rows or migrating SHA-256 duplicate groups.
 
-The implemented persistence schema contains these fifteen application tables:
+The implemented persistence schema contains these sixteen application tables:
 
 ```text
 source
@@ -56,6 +57,7 @@ location_context
 source_membership
 source_binding_period
 media_relationship
+preview_asset
 ```
 
 The implemented fields, constraints, indexes, foreign-key direction, and remaining design boundaries are recorded in [`DATA_MODEL.md`](DATA_MODEL.md).
@@ -67,6 +69,7 @@ The initial Java package structure is:
 - `job` — generic durable execution and stage state.
 - `analysis` — AnalysisRecord and reusable specialized analysis artifacts.
 - `matching` — exact byte-equality reporting, durable typed ContentRecord relationships, and pure grouping.
+- `preview` — cache evidence/provenance, immutable asset keys, successful metadata persistence, and managed filesystem resolution.
 - `web` — thin REST controllers and later HTTP/SSE endpoints.
 
 The persistence foundation uses concrete Spring JDBC repositories per feature package, including `CatalogRepository`, the narrow `LocationContextRepository`, `ScanRepository`, `JobRepository`, `AnalysisRepository`, and `ExactDuplicateRepository`. The boundaries remain simple. `catalog` does not depend on the job runner; `job` remains generic; and `analysis` owns analysis provenance. Scan-specific orchestration that depends on both ScanRun and Job concepts stays in `scan`, not `job`. The web controllers are thin HTTP boundaries over small feature services, while `HealthController` remains unchanged. No generic repository framework, automatic interface/implementation pairs, or enterprise layering was introduced.
@@ -213,7 +216,7 @@ The probe invocation uses `ProcessBuilder` arguments without a shell, redirects 
 
 `content_hash` is the specialized exact-hash result. It uses canonical algorithm identifiers and lowercase hexadecimal digests. `(algorithm, digest_hex)` is indexed but not unique because temporary duplicate ContentRecords may exist. The exact duplicate view groups valid compatible artifacts dynamically by digest rather than assigning a durable group identity.
 
-Filesystem metadata belongs to FileEntry. Media-derived metadata belongs to ContentRecord analysis so moves and renames do not invalidate compatible analysis. Large derived files such as thumbnails, previews, extracted frames, and intermediates belong in a future managed cache rather than the SQLite catalog.
+Filesystem metadata belongs to FileEntry. Media-derived metadata belongs to ContentRecord analysis so moves and renames do not invalidate compatible analysis. V9 stores preview metadata in SQLite and large assets in a managed filesystem cache; future extracted frames/intermediates also belong outside SQLite.
 
 Face analyzer output, detected face instances, and embeddings remain conceptually separate from later human person or group classification. AI analysis follows the same provenance and versioning rules: it is optional and provider-independent, and local and cloud providers may coexist without making the rest of the catalog depend on one provider. Face/person schemas, AI result schemas, provider interfaces, and runtime architecture remain undecided.
 
@@ -293,9 +296,35 @@ V8 persists typed media relationships between immutable ContentRecords, independ
 
 The existing SHA-256 `content_hash` repository/service/API/UI remains separate and authoritative for exact duplicates. `EXACT` is available in the new domain for a future adapter/projection, but V8 neither migrates hashes nor populates exact relationship rows. No actual matcher or public relationship/album API is implemented.
 
-### Future Thumbnail and Preview Boundary
+### Thumbnail and Preview Cache Foundation (V9)
 
-Preview/cache identity will use physical FileEntry and current file evidence, rather than SourceMembership identity. This is distinct from the ContentRecord relationship graph. Large thumbnail/preview assets should live in a managed filesystem cache rather than SQLite blobs unless a later design establishes a compelling reason otherwise. The album grid must use thumbnails/previews rather than load originals. The thumbnail/preview pipeline foundation is the next milestone before major album UI work; detailed cache schema, paths, invalidation, generation, and API remain undecided.
+The focused `preview` package owns preview identity, provenance, successful metadata, deterministic layout, and read-only resolution. Relationships remain ContentRecord-based. Preview identity uses physical FileEntry ID, current ContentRecord ID, observation revision, size, complete modification-time second/nanosecond, preview kind, generator ID/version, and configuration version/hash. SourceMembership, Source, Source-relative path, and membership count are excluded: overlapping Sources reuse one physical occurrence's cache identity. Separate physical FileEntries are not optimized for shared previews even when their bytes match.
+
+`PreviewKind` currently defines `SMALL_THUMBNAIL` for album grids and `MEDIUM_PREVIEW` for group/detail and side-by-side browsing. Pixel-size policy and concrete generator configuration remain undecided. A versioned canonical binary serialization hashed with JDK SHA-256 produces the immutable 64-character lowercase asset key; the exact contract is in `DATA_MODEL.md`. `PreviewDefinition` preserves exact generator/configuration provenance and bounded valid object JSON. Domain construction verifies the key and deterministic path against their inputs.
+
+`preview_asset` contains only successfully published metadata, with unique key and logical-identity constraints. Reusable-current lookup joins FileEntry and compares every current evidence field plus exact kind/definition. Evidence changes select a different key and do not overwrite or delete the old asset. Stale rows/files remain disposable cache material until later cleanup. Cache lookup is independent of Source route authority; future original-file generation must still obtain validated current evidence through the existing membership/context and file-evidence safety concepts.
+
+The configurable `media-compare.preview-cache-root` defaults to `data/cache/previews`, relative to backend working directory. SQLite stores portable `/`-separated relative paths only. Layout is `<kind-directory>/<first-two-key-hex>/<next-two-key-hex>/<key>.<extension>`, for example `small-thumbnail/ab/cd/<key>.webp`. Two levels of bounded fan-out avoid one huge directory. Extension must already be normalized to 1–10 lowercase ASCII letters/digits without a dot. No output format is chosen here. Startup creates no cache directories or files.
+
+`GET /api/previews/{assetKey}` serves an immutable published asset; it does not select a FileEntry or trigger generation. Malformed keys return `400`; unknown keys, missing/wrong-size files, and unsafe/inconsistent metadata paths return `404` with no body or absolute path. The resolver validates portable syntax, anchors to the configured root's real path, and rejects a linked root or any linked cache-relative directory/final file. Trusted host aliases above the configured root (such as macOS `/var`) may resolve normally. Only regular files matching stored byte length are served. Opening uses `NOFOLLOW_LINKS` with evidence checks before/after opening. Output uses stored media type/length, a quoted asset-key ETag, and `Cache-Control: public, max-age=31536000, immutable`; matching conditional requests return `304` without opening a stream. GET performs no database writes or filesystem creation/deletion. Old immutable URLs remain readable even after their source evidence changes; future album responses obtain references through current lookup.
+
+The managed cache is application-owned. Explicit directory checks and final-file no-follow opening fail closed on observed links; Java's portable path/open operations cannot guarantee protection against an adversarial concurrent replacement of intermediate directories. Future publication must preserve cache-root ownership and immutable final files. Real Windows filesystem acceptance, including junction behavior, remains to be exercised; no OS-specific paths or executable assumptions are introduced.
+
+Future generators must follow this publication contract:
+
+1. Obtain validated current FileEntry/ContentRecord evidence using existing Source/context authority and pre/post file-evidence checks; `PreviewSourceEvidence` alone grants no original-file access.
+2. Compute the deterministic key for the exact kind and generator/configuration definition.
+3. Generate to a temporary file inside the managed cache filesystem.
+4. Validate the generated output, including media type, dimensions, byte length, and current source evidence.
+5. Publish/move to the deterministic final location without mutating an already published immutable asset.
+6. Persist the successful metadata row after the final usable file exists.
+7. If equivalent publication races, reuse the already-published identical identity rather than create duplicate logical rows. Interrupted filesystem/DB leftovers are disposable cache garbage for later cleanup.
+
+No generator or concurrency orchestration is implemented. Future image generation must honor EXIF/orientation before determining displayed dimensions, preserve aspect ratio, and avoid upscaling just to fill a tier unless later explicitly chosen. Supported input formats must be explicit; unsupported inputs fail gracefully without publishing corrupt rows. Future video may produce poster frames/contact representations. Generator/version/configuration provenance changes output identity when rendering rules change. Image-library selection and FFmpeg generation strategy remain undecided.
+
+The future album API will page/virtualize results and return individually addressable preview references only for requested cards. Album grids use small thumbnails, detail browsing uses medium previews, and originals load only on explicit high-resolution demand. Requests must not start uncontrolled per-card work. Future generation uses bounded backend queue/executor capacity similar in spirit to media analysis, with duplicate identities coalesced or safe publication collisions.
+
+Eviction/LRU/storage quotas and cleanup are future work. Cleanup may remove stale rows, orphan files, rows with missing files, superseded generator/configuration outputs, and assets outside a future storage policy. Cache cleanup must never alter original media.
 
 ## Current Implemented Relationship View
 
@@ -449,7 +478,7 @@ The following remain open after the V1 review:
 - Specialized result schemas beyond `content_hash`.
 - Candidate generation, relationship matcher/evidence designs, album query API, and manual override schemas. Relationship groups are derived, not materialized.
 - Face/person schema and AI-provider architecture.
-- Application-managed cache locations and lifecycle.
+- Preview generation libraries/configuration, bounded scheduling/publication orchestration, and cache eviction/storage policy. V9 establishes the managed cache root/layout and immutable serving boundary.
 - Real-Windows ffprobe redirected-file/`fd:` qualification and acceptance.
 - Safeguards and workflow for eventual filesystem-modifying operations.
 

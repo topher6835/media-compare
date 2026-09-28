@@ -182,7 +182,19 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Treat canonical pair + type + matcher ID/version + configuration version/hash as one unique durable result. Retain effective configuration JSON for provenance, outside uniqueness. Changed matcher/configuration identities coexist without automatic deletion, overwriting, or a broad lifecycle framework.
 - Derive connected components from enabled edges using one pure grouping algorithm. Direction is metadata and does not block connectivity. Type toggles alter grouping without reanalysis. Members/components have deterministic ID ordering; unconnected records are omitted. Persist no group ID, membership, or toggle combinations.
 - Keep existing `content_hash`-derived SHA-256 duplicate grouping and its API/UI authoritative and separate. V8 migrates no hash groups and publishes no `EXACT` rows. A future adapter/projection may feed exact equality into the relationship graph.
-- Keep preview/cache identity based on physical FileEntry/current file evidence rather than SourceMembership. Large assets belong in a managed filesystem cache rather than SQLite blobs unless a later design justifies otherwise. The album grid must not load originals. Thumbnail/preview pipeline design is the next foundational milestone before major album UI work; detailed schema/API remains undecided.
+- Keep preview/cache identity based on physical FileEntry/current file evidence rather than SourceMembership. V9 implements the filesystem-cache and SQLite-metadata boundary described below. The album grid must not load originals.
+
+## FileEntry Preview Cache Foundation (V9)
+
+- Base cache identity on FileEntry ID, current ContentRecord, observation revision, size, complete modification-time evidence, kind, and exact generator/configuration identity. Exclude Sources, memberships, paths, and membership counts so overlapping Sources reuse one occurrence's identity. Do not share previews across distinct FileEntries yet; ContentRecord-based relationship semantics are unchanged.
+- Persist only successfully published assets. No durable preview PENDING/RUNNING/FAILED model is introduced; generation failure publishes no reusable row and can be retried later.
+- Store large assets outside SQLite under configurable `media-compare.preview-cache-root` (default `data/cache/previews`); persist metadata and portable deterministic relative paths only. Use two levels of hex fan-out and a validated lowercase output extension without choosing a format or pixel policy.
+- Define immutable lowercase SHA-256 keys using the explicit `preview-cache-key-v1` binary contract. JDK hashing adds no dependency. Validate supplied key and path against evidence/definition. Preserve effective configuration JSON for provenance; callers own its exact version/hash.
+- Invalidate conservatively by matching current FileEntry evidence exactly during reusable lookup. Do not overwrite old assets or delete stale rows on reads. Evidence/provenance changes produce new identities; obsolete material waits for separate cache cleanup.
+- Cascade disposable preview metadata from explicit underlying FileEntry/ContentRecord deletion while preserving all existing catalog restrictions. Cascades do not delete cache files or authorize original-media deletion.
+- Serve immutable key URLs at `GET /api/previews/{assetKey}` with stored type/length, asset-key ETag, and long-lived immutable public caching. Resolve only safe managed-cache paths and regular non-symbolic-link files; reads neither mutate state nor start generation. Stale immutable URLs remain readable, while future album references use reusable-current lookup.
+- Future generation must publish a usable final file before metadata, preserve immutable files, and reuse equivalent identity after a race. Generation runs as bounded backend work with duplicate coalescing or safe publication collisions. No generation, background jobs, image library, FFmpeg generation, eviction, or album API/UI is chosen or implemented in this foundation.
+- Future rendering must honor orientation, preserve aspect ratio, and avoid automatic upscaling. Input format support is explicit and unsupported inputs publish no corrupt row; video poster/contact formats remain future work. Page/virtualize album reads, use small thumbnails for grids and medium previews for detail, and load originals only on explicit high-resolution demand. Cache cleanup must never change originals.
 
 ## Catalog-Correct Exact Duplicate Filtering
 
@@ -398,6 +410,6 @@ V5 implements LocationContext/Source binding storage, and V6/v3 use the pure sca
 - Specialized result schemas beyond `content_hash`.
 - Candidate generation, relationship matcher/evidence designs, album query API, and manual override schemas. V8 establishes relationship persistence; groups are derived, not materialized.
 - Face/person schema and AI-provider architecture.
-- Application-managed cache locations and lifecycle.
+- Preview generator libraries/configuration, publication orchestration, bounded scheduling, and cache eviction/storage policy. V9 establishes the cache location/layout and immutable serving boundary.
 - Real-Windows ffprobe redirected-file/`fd:` qualification and acceptance.
 - Safeguards for eventual filesystem-modifying operations.
