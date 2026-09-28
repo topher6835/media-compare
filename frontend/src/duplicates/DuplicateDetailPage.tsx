@@ -31,6 +31,7 @@ import {
 } from './duplicateSession.ts'
 
 import { DuplicatePhysicalCopies } from './DuplicatePhysicalCopies.tsx'
+import { invalidateUnavailableCleanupKeeper, removeCleanupPlanEntry } from './duplicateCleanupPlan.ts'
 
 type DetailFailure = 'bad-request' | 'not-found' | 'server'
 
@@ -158,6 +159,7 @@ export function DuplicateGroupDetail({
         key={detail.digestHex}
         detail={detail}
         filtersActive={filtersActive}
+        filterSearch={exactDuplicateFilterSearch(filters)}
       />
 
       <details className="technical-details">
@@ -205,7 +207,8 @@ export function DuplicateDetailPage() {
     requestKey: string
     detail: ExactDuplicateGroupDetail | null
     failure: DetailFailure | null
-  }>({ requestKey: '', detail: null, failure: null })
+    planInvalidated: boolean
+  }>({ requestKey: '', detail: null, failure: null, planInvalidated: false })
 
   useEffect(() => {
     if (rawSearch !== filterKey) {
@@ -226,14 +229,18 @@ export function DuplicateDetailPage() {
           digestHex: detail.digestHex,
           reference: duplicateReference(detail.digestHex),
         })
-        setResult({ requestKey, detail, failure: null })
+        const planInvalidated = invalidateUnavailableCleanupKeeper(detail)
+        setResult({ requestKey, detail, failure: null, planInvalidated })
       })
       .catch((error: unknown) => {
         if (!cancelled) {
+          const failure = detailFailure(error)
+          if (failure === 'not-found') removeCleanupPlanEntry(digestHex)
           setResult({
             requestKey,
             detail: null,
-            failure: detailFailure(error),
+            failure,
+            planInvalidated: false,
           })
         }
       })
@@ -288,7 +295,14 @@ export function DuplicateDetailPage() {
       )}
 
       {!isLoading && detail && (
-        <DuplicateGroupDetail detail={detail} filters={filters} />
+        <>
+          {result.planInvalidated && (
+            <p className="inline-error" role="status">
+              The saved cleanup decision was removed because its keeper is unavailable or the group has fewer than two present copies. Choose again to make a new plan.
+            </p>
+          )}
+          <DuplicateGroupDetail detail={detail} filters={filters} />
+        </>
       )}
 
       {trail.length > 1 && (

@@ -25,6 +25,7 @@ import {
   rememberDuplicateListScroll,
   rememberDuplicatePage,
 } from './duplicateSession.ts'
+import { aggregateCleanupPlan, formatCleanupSavings, getCleanupPlan, getCleanupPlanEntry } from './duplicateCleanupPlan.ts'
 
 const categoryChoices: Array<{
   value: TechnicalFileCategory
@@ -244,6 +245,7 @@ export function DuplicateGroupList({
               <div>
                 <p className="duplicate-reference">
                   {duplicateReference(group.digestHex)}
+                  {getCleanupPlanEntry(group.digestHex) && <span className="status-badge planned">PLANNED</span>}
                 </p>
                 <p className="size-value">{formatBytes(group.sizeBytes)} each</p>
               </div>
@@ -332,6 +334,7 @@ function DuplicateResults({
   )
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const planSummary = aggregateCleanupPlan(getCleanupPlan())
   useEffect(() => {
     let cancelled = false
 
@@ -381,6 +384,20 @@ function DuplicateResults({
 
   return (
     <>
+      {planSummary.groupCount > 0 && (
+        <div className="cleanup-plan-banner">
+          <p>
+            <strong>Cleanup plan</strong> · {pluralize(planSummary.groupCount, 'group')} ·{' '}
+            {pluralize(planSummary.candidateCount, 'removal candidate')} ·{' '}
+            {formatCleanupSavings(planSummary.estimatedSavingsBytes)} estimated
+          </p>
+          <Link
+            className="detail-link"
+            to={`/duplicates/plan${filterSearch}`}
+            onClick={() => rememberDuplicateListScroll(filterKey, window.scrollY)}
+          >Review cleanup plan</Link>
+        </div>
+      )}
       {isInitialLoading && (
         <div className="state-panel" role="status">
           <span className="spinner" aria-hidden="true" />

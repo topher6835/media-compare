@@ -1,6 +1,7 @@
 import { Link, Route, Routes } from 'react-router-dom'
 
 import { DuplicateDetailPage } from './duplicates/DuplicateDetailPage.tsx'
+import { DuplicateCleanupPlanPage } from './duplicates/DuplicateCleanupPlanPage.tsx'
 import { DuplicatesPage } from './duplicates/DuplicatesPage.tsx'
 import { HomePage } from './HomePage.tsx'
 import { SourcesPage } from './sources/SourcesPage.tsx'
@@ -28,6 +29,7 @@ function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/sources" element={<SourcesPage />} />
           <Route path="/duplicates" element={<DuplicatesPage />} />
+          <Route path="/duplicates/plan" element={<DuplicateCleanupPlanPage />} />
           <Route
             path="/duplicates/:digestHex"
             element={<DuplicateDetailPage />}

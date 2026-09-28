@@ -1607,6 +1607,92 @@ dd {
 }
 
 /* Read-only physical-copy planner. */
+.plan-actions,
+.cleanup-plan-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.cleanup-plan-banner {
+  justify-content: space-between;
+  margin: 18px 0;
+  padding: 16px 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  font-size: 0.86rem;
+}
+
+.cleanup-preview .plan-actions {
+  margin-top: 14px;
+}
+
+.cleanup-preview .plan-actions:first-child,
+.cleanup-preview .plan-actions button {
+  margin-top: 0;
+}
+
+.status-badge.planned {
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+}
+
+.duplicate-reference .planned {
+  margin-left: 10px;
+  vertical-align: middle;
+}
+
+.cleanup-plan-page .back-button {
+  display: inline-block;
+}
+
+.cleanup-plan-page .page-heading .planner-note {
+  max-width: 760px;
+  margin-top: 10px;
+  line-height: 1.5;
+}
+
+.plan-message:not(:empty) {
+  margin: 16px 0;
+}
+
+.cleanup-plan-summary {
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.cleanup-plan-copies {
+  padding: 0 20px 20px;
+}
+
+.cleanup-plan-copies h3 {
+  margin-bottom: 10px;
+  font-size: 0.9rem;
+}
+
+.planned-copy {
+  padding: 14px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  overflow-wrap: anywhere;
+}
+
+.planned-digest {
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.planned-digest summary {
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

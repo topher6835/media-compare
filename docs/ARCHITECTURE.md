@@ -18,7 +18,7 @@ The repository currently contains a working full-stack scaffold:
 - A synchronous command that publishes exact SHA-256 analysis for safe assigned-content candidates.
 - A background version-3 SCAN Job with DISCOVERY, RECONCILIATION, CONTENT_ASSIGNMENT, and CONTENT_HASHING under membership authority.
 - Read-only APIs that derive exact duplicate groups and retained occurrences from trusted SHA-256 artifacts, with catalog-correct file-category and extension filtering.
-- Frontend `/sources`, `/duplicates`, and `/duplicates/:digestHex` routes for Source registration/indexing and derived exact-group browsing, in addition to the `/` health route.
+- Frontend `/sources`, `/duplicates`, `/duplicates/:digestHex`, and `/duplicates/plan` routes for Source registration/indexing, derived exact-group browsing, and session-only cleanup planning, in addition to the `/` health route.
 
 The reviewed persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the initial eleven application tables, structural constraints, foreign keys, and indexes. Java migration `V2__add_file_entry_extension_key` adds and backfills normalized FileEntry extension metadata plus its lookup index. SQL migration `V3__add_durable_indexing_foundation.sql` adds durable indexing fields and constraints, V4 adds nullable `analysis_record.result_json`, and V5 adds `location_context` plus nullable Source binding storage; transactional V6 replaces Source-owned FileEntries with source-independent FileEntries and `source_membership`. V7 adds `source_binding_period` and backfills one open period per currently bound Source, bringing the schema to fourteen tables. Explicit context creation, acceptance, retirement, same-anchor replacement, and first-time local APFS Source binding are implemented. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, `analysis`, and `matching` feature packages. Source registration/read, historical execution reads, the four-stage version-3 lifecycle, background execution/recovery, public indexing start/polling APIs, frontend polling, exact analysis, derived duplicate reporting/filtering, reusable media-metadata persistence/safety mechanics, pure ffprobe video-output interpretation, and bounded ffprobe process execution are implemented. Legacy v1/v2 execution records remain readable; old v1 discovery/reconciliation write endpoints reject new work.
 
@@ -370,15 +370,24 @@ The frontend consumes that slice as:
     -> typed exact-duplicate API client
     -> URL-backed File Type and Extension controls
     -> filter-keyed digest-keyset Load more list with retained-occurrence match context
+    -> planned badges and aggregate summary across all session-planned groups
 /duplicates/:digestHex
     -> complete group summary, ContentRecord members, and retained SourceMembership path details for physical FileEntries
     -> ACTIVE memberships grouped by physical FileEntry, present when any membership is PRESENT
     -> transient keeper selection and removal preview over the complete group
     -> per-membership filter match context
     -> filter-keyed browser-memory list context and recent-visit trail
+/duplicates/plan
+    -> browser-memory snapshots keyed by full digest, independent of list filters
+    -> aggregate counts and logical savings, keeper/candidate Source paths
+    -> review-group links, individual removal, and in-page clear confirmation
 ```
 
-The exact-detail planner holds an explicit keeper FileEntry ID in local component state, reset on group changes. Other present physical copies are preview candidates; estimated logical savings equal candidate count × group size. Missing copies are excluded. Decisions are not persisted and no filesystem mutation exists. SHA-256 and ContentRecord members remain available under technical identity.
+The exact-detail planner holds an explicit keeper FileEntry ID in local component state. Saving explicitly adds or replaces a digest-keyed snapshot in `duplicateCleanupPlan.ts`, a small module-level Map adjacent to the existing list/trail session helper. Snapshots copy the keeper/candidate physical FileEntry IDs, readable labels, Source-path context, size, candidate count, and estimated savings. Store reads and writes copy nested objects/arrays; replacements preserve first-insertion order. Multiple groups can be collected and reviewed without changing filter semantics, list memory, scroll restoration, or the recent trail. Plan links carry active filters.
+
+On a fresh detail read, a saved PRESENT keeper initializes selection. An absent/MISSING keeper or fewer than two PRESENT copies removes the decision and requires a new choice; a not-found group also removes its entry. Other present physical copies are preview candidates, independent of membership filter matches; missing copies are excluded. Explicit updates resnapshot the complete group. Savings use exact integer multiplication and addition before formatting, and show an unavailable estimate for unsafe sizes or totals beyond JavaScript's safe integer range.
+
+All plan state is browser memory and disappears on full reload/application restart. No decision is persisted, no backend cleanup API or filesystem mutation exists, and these session review snapshots never authorize file operations. Any future file operation must revalidate current backend/filesystem authority. SHA-256 and ContentRecord members remain available under technical identity.
 
 Source registration and duplicate reads complete within their HTTP requests. Indexing runs in the backend and `/sources` polls durable state every 1.5 seconds only while active, without overlapping requests. Collection refresh uses `/api/indexing-runs/source-status` as indexing authority and one `/api/sources` request for names/paths; there is no per-Source status loop. Retry/resume, materialized equality decisions, and SSE remain deferred.
 

@@ -189,7 +189,16 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Store exact-duplicate filters in repeated URL `fileCategory` and `extension` parameters. Support multi-select Photos, Videos, Documents, and backend-provided extensions; keep selected stale extensions visible, and do not create Audio, Other, user Tag, or user Category semantics.
 - Retain loaded list pages and scroll position in browser memory only for the same order-insensitive canonical filter key. Keep a bounded recent duplicate-group trail in browser memory and preserve current filters on detail and trail navigation. Do not add persistent review state or a frontend state library for this workflow.
 - Use backend `filterMatch` and occurrence `matchesFilter` values to explain retained-occurrence matches. Preserve all whole-group summary values and keep every detail occurrence visible, including nonmatches.
-- Keep the workflow read-only. ContentRecord members have no preferred designation. Exact detail supports explicit, transient physical-FileEntry keeper selection for a removal preview; no decision is persisted and savings remain explicitly estimated.
+- Keep the workflow read-only. ContentRecord members have no preferred designation. Exact detail supports explicit physical-FileEntry keeper selection for a removal preview and session-only cleanup planning; no decision is persisted and savings remain explicitly estimated.
+
+## Session-Only Exact Duplicate Cleanup Plan
+
+- Collect explicitly saved decisions for multiple exact groups at `/duplicates/plan`, keyed by full SHA-256 digest. One entry per digest; saving again replaces that group's snapshot while retaining insertion order. Use a small module-level browser-memory Map with defensive copies, no state library or persistence. Reload/application restart clears all entries.
+- Snapshot one keeper physical FileEntry and the other PRESENT physical FileEntries as candidates, including readable labels and Source-path context. Any ACTIVE PRESENT membership makes a physical copy PRESENT; overlapping memberships never add candidate copies, and filters only highlight memberships. MISSING copies cannot be keepers or candidates. Selecting a keeper alone never saves a decision.
+- Restore a saved keeper on fresh detail load. Remove the entry when that keeper is absent/MISSING, fewer than two PRESENT copies remain, or the group returns not-found; never select a replacement automatically. Valid snapshots remain snapshots until an explicit update.
+- Show planned badges on loaded list groups and plan totals across all saved groups regardless of list filters. Preserve URL filters, list memory/scroll, and recent visits through plan navigation. Allow individual removal and an accessible in-page confirmation to clear browser-memory state.
+- Calculate logical savings as candidate physical FileEntry count × group size, then sum with exact integer arithmetic. Reject unsafe input sizes and show an unavailable estimate for results beyond JavaScript's safe integer range.
+- Treat every entry as a session review snapshot, never filesystem authority or deletion authorization. No decision is persisted and no filesystem mutation exists. Future file operations must revalidate current backend/filesystem authority rather than trust the plan; that validation and execution are outside this slice.
 
 ## Frontend Source Management and Indexing
 
