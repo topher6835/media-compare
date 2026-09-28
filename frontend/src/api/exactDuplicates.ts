@@ -67,6 +67,59 @@ export interface ExactDuplicateFilterOptions {
   extensions: ExactDuplicateFilterOption[]
 }
 
+export type CleanupPreflightStatus = 'READY' | 'BLOCKED'
+
+export type CleanupPreflightReason =
+  | 'GROUP_CHANGED'
+  | 'KEEPER_UNAVAILABLE'
+  | 'CANDIDATE_SET_CHANGED'
+  | 'AUTHORITY_UNAVAILABLE'
+  | 'AUTHORITY_CHANGED'
+  | 'FILESYSTEM_CHANGED'
+  | 'UNSAFE_PATH'
+  | 'HASH_MISMATCH'
+  | 'IO_UNAVAILABLE'
+
+export interface CleanupPreflightRequest {
+  keeperFileEntryId: number
+  candidateFileEntryIds: number[]
+}
+
+export interface CleanupPreflightFileResult {
+  fileEntryId: number
+  status: CleanupPreflightStatus
+  reason: CleanupPreflightReason | null
+}
+
+export interface CleanupPreflightResponse {
+  digestHex: string
+  status: CleanupPreflightStatus
+  reason: CleanupPreflightReason | null
+  sizeBytes: number | null
+  candidateCount: number
+  estimatedSavingsBytes: number | null
+  keeper: CleanupPreflightFileResult
+  candidates: CleanupPreflightFileResult[]
+}
+
+export function checkExactDuplicateCleanupSafety(
+  digestHex: string,
+  request: CleanupPreflightRequest,
+  signal?: AbortSignal,
+): Promise<CleanupPreflightResponse> {
+  return requestJson<CleanupPreflightResponse>(
+    `/api/exact-duplicate-groups/${encodeURIComponent(digestHex)}/cleanup-preflight`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        keeperFileEntryId: request.keeperFileEntryId,
+        candidateFileEntryIds: request.candidateFileEntryIds,
+      }),
+      signal,
+    },
+  )
+}
+
 const supportedCategories = new Set<TechnicalFileCategory>([
   'PHOTO',
   'VIDEO',

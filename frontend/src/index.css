@@ -1669,6 +1669,55 @@ dd {
   padding: 0 20px 20px;
 }
 
+.cleanup-safety-summary {
+  margin: 20px 0;
+}
+
+.cleanup-safety-result {
+  margin: 0 20px 20px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  overflow-wrap: anywhere;
+}
+
+.cleanup-safety-result p,
+.file-safety-result {
+  margin-top: 8px;
+  line-height: 1.5;
+}
+
+.status-badge.safety-ready {
+  color: var(--present);
+  background: var(--present-bg);
+}
+
+.status-badge.safety-blocked {
+  color: var(--missing);
+  background: var(--missing-bg);
+}
+
+.status-badge.safety-check_failed,
+.status-badge.safety-not_checked {
+  color: var(--text-muted);
+  background: var(--surface-subtle);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.status-badge.safety-checking {
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+}
+
+.cleanup-plan-page .card-footer {
+  flex-wrap: wrap;
+}
+
+.cleanup-plan-page .cleanup-stats {
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+}
+
 .cleanup-plan-copies h3 {
   margin-bottom: 10px;
   font-size: 0.9rem;

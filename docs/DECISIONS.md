@@ -209,7 +209,15 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Freshly hash every candidate and keeper using SHA-256 and NOFOLLOW, with before/after metadata, read-length, ancestor, and available file-key checks. Do not publish hashes/analyses or change FileEntry evidence.
 - Capture and reread coherent catalog snapshots in short read-only transactions surrounding filesystem work. Changes to group membership, Source/context authority, membership revisions/presence, FileEntry observation/content/path evidence block the proposal. Use no dummy UPDATE or long transaction spanning IO. Retain integrity failures as server errors.
 - Return checked current candidate count × current group size only for READY; BLOCKED savings are null. Add no schema, durable plan, job, cleanup ID, approval, token, or lock between preflight and execution. Preflight performs no filesystem or catalog mutation.
-- READY does not authorize future mutation and becomes stale immediately. Future Trash execution must repeat the same critical checks immediately before acting. No Trash/delete/move operation or frontend preflight integration exists yet.
+- READY does not authorize future mutation and becomes stale immediately. Future Trash execution must repeat the same critical checks immediately before acting. Frontend preflight integration is implemented below. No Trash/delete/move operation exists.
+
+## Frontend Read-Only Cleanup Safety Review
+
+- Let `/duplicates/plan` explicitly check one saved group or the whole plan through the existing preflight API. Send only the keeper and complete candidate physical FileEntry ID set; browser snapshot paths, sizes, counts, and savings never supply backend authority. Mirror backend status/reason types exactly.
+- Keep results in page component state only. Show NOT CHECKED, CHECKING, READY NOW, BLOCKED, or CHECK FAILED. Navigation/remount clears results; removal and clear discard corresponding results. Add no persistence, durable validation token, approval, background job, or polling.
+- Await whole-plan checks sequentially to avoid concurrent file hashing. Continue after BLOCKED and request failures, expose current/total progress, and disable conflicting check/edit controls. Abort the browser request and stop the sequence on leaving the page.
+- Annotate physical-copy cards only by returned `fileEntryId`. Keep backend BLOCKED reasons separate from request failures, allow retry, and direct the user to Review group for explicit plan updates. Preflight never silently removes groups, replaces keepers, or rewrites candidates.
+- Preserve browser-plan totals and add separate safety counts. Show backend-confirmed current candidates and estimated savings only on individual READY results. READY NOW remains informational and immediately stale; future Trash execution must repeat critical validation immediately before mutation. No filesystem mutation exists.
 
 ## Frontend Source Management and Indexing
 
