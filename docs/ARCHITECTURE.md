@@ -372,9 +372,13 @@ The frontend consumes that slice as:
     -> filter-keyed digest-keyset Load more list with retained-occurrence match context
 /duplicates/:digestHex
     -> complete group summary, ContentRecord members, and retained SourceMembership path details for physical FileEntries
+    -> ACTIVE memberships grouped by physical FileEntry, present when any membership is PRESENT
+    -> transient keeper selection and removal preview over the complete group
     -> per-membership filter match context
     -> filter-keyed browser-memory list context and recent-visit trail
 ```
+
+The exact-detail planner holds an explicit keeper FileEntry ID in local component state, reset on group changes. Other present physical copies are preview candidates; estimated logical savings equal candidate count × group size. Missing copies are excluded. Decisions are not persisted and no filesystem mutation exists. SHA-256 and ContentRecord members remain available under technical identity.
 
 Source registration and duplicate reads complete within their HTTP requests. Indexing runs in the backend and `/sources` polls durable state every 1.5 seconds only while active, without overlapping requests. Collection refresh uses `/api/indexing-runs/source-status` as indexing authority and one `/api/sources` request for names/paths; there is no per-Source status loop. Retry/resume, materialized equality decisions, and SSE remain deferred.
 

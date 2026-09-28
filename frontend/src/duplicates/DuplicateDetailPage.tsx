@@ -21,7 +21,6 @@ import {
 } from '../api/exactDuplicates.ts'
 import {
   duplicateReference,
-  filenameFromPath,
   formatBytes,
   occurrenceExtensions,
   pluralize,
@@ -30,6 +29,8 @@ import {
   getDuplicateTrail,
   recordDuplicateVisit,
 } from './duplicateSession.ts'
+
+import { DuplicatePhysicalCopies } from './DuplicatePhysicalCopies.tsx'
 
 type DetailFailure = 'bad-request' | 'not-found' | 'server'
 
@@ -132,11 +133,11 @@ export function DuplicateGroupDetail({
           <dd>{formatBytes(detail.sizeBytes)}</dd>
         </div>
         <div>
-          <dt>Present physical occurrences</dt>
+          <dt>Present physical copies</dt>
           <dd>{detail.presentOccurrenceCount.toLocaleString()}</dd>
         </div>
         <div>
-          <dt>Missing physical occurrences</dt>
+          <dt>Missing physical copies</dt>
           <dd>{detail.missingOccurrenceCount.toLocaleString()}</dd>
         </div>
         <div>
@@ -153,107 +154,11 @@ export function DuplicateGroupDetail({
         it is not guaranteed recoverable filesystem space.
       </p>
 
-      <section className="content-section" aria-labelledby="members-heading">
-        <div className="section-heading-row">
-          <div>
-            <h2 id="members-heading">ContentRecord members</h2>
-            <p>
-              Distinct catalog records sharing this exact digest. No member is
-              selected as a keeper.
-            </p>
-          </div>
-          <span>{pluralize(detail.members.length, 'member')}</span>
-        </div>
-        <div className="member-list">
-          {detail.members.map((member) => (
-            <div className="member-row" key={member.contentRecordId}>
-              <span>
-                ContentRecord <strong>#{member.contentRecordId}</strong>
-              </span>
-              <span>{formatBytes(member.sizeBytes)}</span>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="content-section" aria-labelledby="occurrences-heading">
-        <div className="section-heading-row">
-          <div>
-            <h2 id="occurrences-heading">Retained Source paths</h2>
-            <p>
-              Source relationships for retained FileEntries, in catalog order.
-              One physical FileEntry can appear under multiple Sources. Filters
-              highlight matches without removing exact-group context.
-            </p>
-          </div>
-          <span>{pluralize(detail.occurrences.length, 'source path')}</span>
-        </div>
-        {detail.occurrences.length === 0 ? (
-          <p className="subtle-empty">No retained Source paths.</p>
-        ) : (
-          <div className="occurrence-list">
-            {detail.occurrences.map((occurrence) => {
-              const isMissing = occurrence.presenceStatus === 'MISSING'
-                || occurrence.applicabilityStatus === 'RETIRED'
-              const matchClass = filtersActive
-                ? occurrence.matchesFilter
-                  ? ' is-filter-match'
-                  : ' is-filter-nonmatch'
-                : ''
-              return (
-                <article
-                  className={`occurrence-row${isMissing ? ' is-missing' : ''}${matchClass}`}
-                  key={occurrence.membershipId}
-                >
-                  <div className="occurrence-main">
-                    <div className="filename-row">
-                      <h3>{filenameFromPath(occurrence.relativePath)}</h3>
-                      <span
-                        className={`status-badge ${isMissing ? 'missing' : 'present'}`}
-                      >
-                        {occurrence.applicabilityStatus === 'RETIRED'
-                          ? 'RETIRED'
-                          : occurrence.presenceStatus}
-                      </span>
-                      {filtersActive && occurrence.matchesFilter && (
-                        <span className="status-badge filter-match">FILTER MATCH</span>
-                      )}
-                    </div>
-                    <p className="file-path" title={occurrence.relativePath}>
-                      {occurrence.relativePath}
-                    </p>
-                  </div>
-                  <dl className="occurrence-meta">
-                    <div>
-                      <dt>Source</dt>
-                      <dd>
-                        {occurrence.sourceName}{' '}
-                        <span>#{occurrence.sourceId}</span>
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>ContentRecord</dt>
-                      <dd>#{occurrence.contentRecordId}</dd>
-                    </div>
-                    <div>
-                      <dt>Extension</dt>
-                      <dd>{occurrence.extension ?? 'None'}</dd>
-                    </div>
-                    <div>
-                      <dt>File type</dt>
-                      <dd>
-                        {occurrence.fileCategory
-                          ? categoryLabel(occurrence.fileCategory).replace(/s$/, '')
-                          : 'Unclassified'}
-                      </dd>
-                    </div>
-                  </dl>
-                </article>
-              )
-            })}
-          </div>
-        )}
-      </section>
+      <DuplicatePhysicalCopies
+        key={detail.digestHex}
+        detail={detail}
+        filtersActive={filtersActive}
+      />
 
       <details className="technical-details">
         <summary>Technical identity</summary>
@@ -265,6 +170,15 @@ export function DuplicateGroupDetail({
             </dd>
           </div>
         </dl>
+        <h3>ContentRecord members</h3>
+        <div className="member-list">
+          {detail.members.map((member) => (
+            <div className="member-row" key={member.contentRecordId}>
+              <span>ContentRecord <strong>#{member.contentRecordId}</strong></span>
+              <span>{formatBytes(member.sizeBytes)}</span>
+            </div>
+          ))}
+        </div>
       </details>
     </>
   )

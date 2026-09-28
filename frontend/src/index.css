@@ -1605,3 +1605,151 @@ dd {
     max-width: 100%;
   }
 }
+
+/* Read-only physical-copy planner. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.cleanup-preview {
+  padding: 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-subtle);
+}
+
+.cleanup-preview p {
+  margin-top: 8px;
+}
+
+.cleanup-preview button {
+  margin-top: 14px;
+}
+
+.planner-note {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 450;
+}
+
+.cleanup-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin: 16px 0;
+}
+
+.cleanup-stats dd {
+  color: var(--accent-dark);
+  font-size: 1.25rem;
+  font-weight: 650;
+}
+
+.physical-copy-list {
+  min-width: 0;
+  margin: 0;
+  padding: 16px;
+  border: 0;
+}
+
+.physical-copy {
+  margin-bottom: 16px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.physical-copy:last-child {
+  margin-bottom: 0;
+}
+
+.physical-copy.is-keeper {
+  border-color: var(--present);
+}
+
+.physical-copy.is-keeper .physical-copy-heading {
+  background: var(--present-bg);
+}
+
+.physical-copy.is-candidate {
+  border-color: var(--missing);
+}
+
+.physical-copy.is-candidate .physical-copy-heading,
+.status-badge.candidate {
+  color: var(--missing);
+  background: var(--missing-bg);
+}
+
+.physical-copy.is-missing .physical-copy-heading {
+  color: var(--text-muted);
+  background: var(--surface-subtle);
+}
+
+.physical-copy-heading,
+.physical-copy-actions,
+.source-path-heading,
+.keeper-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.physical-copy-heading {
+  justify-content: space-between;
+  padding: 16px;
+}
+
+.physical-copy-heading > div {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.physical-copy-heading h3,
+.keeper-description,
+.source-path-heading strong {
+  overflow-wrap: anywhere;
+}
+
+.physical-copy-heading h3 {
+  font-size: 0.95rem;
+}
+
+.keeper-control {
+  cursor: pointer;
+  font-size: 0.84rem;
+}
+
+.keeper-control input {
+  accent-color: var(--present);
+}
+
+.physical-copy-paths {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.physical-copy-path {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.source-path-heading {
+  font-size: 0.84rem;
+}
+
+.physical-copy-path.is-filter-match {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.physical-copy-path.is-filter-nonmatch {
+  background: var(--surface-subtle);
+}

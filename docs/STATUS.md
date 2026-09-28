@@ -22,6 +22,10 @@ Nested/overlapping Source acceptance: `mvn -q -Dtest=Version3ExecutionTests,Sour
 
 The current operational relationship is `Source -> SourceMembership -> FileEntry -> ContentRecord -> AnalysisRecord`. FileEntry has no Source ownership or persisted presence. V5 FileEntries migrate one-for-one to UNRESOLVED rows with one historical membership each and no invented absolute identity. New trusted observations under overlapping Sources can share one RESOLVED FileEntry. Storage savings count physical FileEntries, not memberships.
 
+Exact-duplicate detail now provides a transient, read-only physical-copy keeper/removal preview. ACTIVE Source memberships are grouped by physical `FileEntry`, with all Source paths and filter highlights retained. Any PRESENT membership makes its copy present; missing copies cannot be keepers or removal candidates. Explicit keeper selection previews other present copies and their logical size. Decisions are not persisted and no filesystem mutation exists.
+
+Physical-copy preview validation: `npm run lint && npm run build` passed in `frontend/`; `git diff --check` passed. Dependency-free Node assertions passed for overlapping memberships, mixed presence, retired exclusion, first-appearance order, filter nonmatches, empty/single-copy input, and input immutability. Browser visual/keyboard review remains manual. No backend gate was run for this frontend-only slice.
+
 ## Documentation
 
 `docs/ARCHITECTURE.md` describes current boundaries and v3 flow. `docs/DATA_MODEL.md` describes V7 fields, constraints, and backfill. `docs/DECISIONS.md` records durable V6/v3 and V7 decisions. This status records the current validation state and next work.
@@ -42,7 +46,7 @@ The current operational relationship is `Source -> SourceMembership -> FileEntry
 - V3 retains `DISCOVERY -> RECONCILIATION -> CONTENT_ASSIGNMENT -> CONTENT_HASHING -> COMPLETED`. Fresh context/root probes and a mount-aware directory walk run outside write transactions. Structured `df` mount-point evidence plus `diskutil` APFS identity reject child mounts even if the UUID matches; uncertain storage and symbolic links fail closed. The pure scan authority contract qualifies exact resolved candidates and complete-traversal missing claims.
 - Writer-reserved short transactions reread Source/context authority, resolve FileEntry by `(location_context_id, location_key)`, validate canonical structured location and containment, and publish a SourceMembership. Legacy unresolved active-path collisions are retired atomically without retargeting history. Byte evidence change advances FileEntry revision and clears content; membership presence alone does not. Trusted reconciliation changes only the scanned Source's ACTIVE memberships and never makes a missing claim after incomplete traversal.
 - Assignment, exact hashing, and media-metadata live candidate selection require a current ACTIVE/PRESENT trusted membership and RESOLVED FileEntry. Publication rechecks the persisted authority, path relationship, and candidate revisions. Hashing and media metadata use resolved absolute paths with file-evidence checks. Historical content/analysis remains readable.
-- Exact duplicate grouping counts distinct FileEntries for physical copies and savings; Source counts and relative path details use memberships. The frontend duplicate detail view identifies Source paths separately from physical counts.
+- Exact duplicate grouping counts distinct FileEntries for physical copies and savings; Source counts and relative path details use memberships. The frontend duplicate detail view groups Source paths by physical FileEntry and offers a temporary keeper/removal preview for the complete group, independent of filter matches.
 - Historical v1/v2 Jobs and ScanRuns remain readable. Their old discovery/reconciliation writers are closed after V6; startup recovery fails incompatible active v1/v2 work and interrupted v3 work. The public indexing start/polling path routes new work to v3.
 
 ## Known Limitations / Not Yet Implemented
@@ -54,4 +58,4 @@ The current operational relationship is `Source -> SourceMembership -> FileEntry
 
 ## Next Recommended Step
 
-Review the first-time Source preparation flow and choose the next product step. Rebinding UI and automatic remount recognition remain deferred.
+Manually review the physical-copy planner with overlapping Sources, missing copies, and active filters, then choose the next product step. Rebinding UI and automatic remount recognition remain deferred.

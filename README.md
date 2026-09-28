@@ -59,7 +59,7 @@ During development:
 - Content hashing endpoint: `POST http://localhost:8080/api/scan-runs/{id}/content-hashing`
 - Exact duplicate endpoints: `GET http://localhost:8080/api/exact-duplicate-groups`, `GET http://localhost:8080/api/exact-duplicate-groups/filter-options`, and `GET http://localhost:8080/api/exact-duplicate-groups/{digestHex}`. List and detail reads accept repeated `fileCategory` and `extension` query parameters.
 - Source management and indexing frontend: `http://localhost:5173/sources`
-- Exact duplicate frontend: `http://localhost:5173/duplicates`
+- Exact duplicate frontend: `http://localhost:5173/duplicates`. Detail groups overlapping Source memberships by physical `FileEntry` and offers a transient, read-only keeper/removal preview. Decisions are not persisted; no filesystem mutation exists.
 - The Vite development server proxies `/api` requests to the backend.
 
 The V6 schema and v3 indexing cutover are implemented. SourceMembership owns the Source/FileEntry relationship and presence; trusted overlapping Sources can share one source-independent FileEntry. Historical v1/v2 indexing executions remain readable, and new indexing uses v3. On supported local macOS/APFS storage, register a folder on `/sources`, select **Prepare Source**, then select **Analyze Source** once it shows Ready. Registration stores the path without checking that it exists; preparation checks the filesystem and binds the Source to an accepted logical LocationContext. See [`docs/STATUS.md`](docs/STATUS.md) for current validation results.
