@@ -17,7 +17,7 @@ public class ExactDuplicateRepository {
 
     private static final String COMPLETED_STATUS = "COMPLETED";
 
-    private static final String EXACT_MEMBERS_CTE = """
+    private static final String EXACT_HASH_MEMBERS_CTE = """
             WITH exact_members AS (
                 SELECT content_hash.digest_hex,
                        analysis_record.content_record_id,
@@ -35,7 +35,11 @@ public class ExactDuplicateRepository {
                   AND content_hash.algorithm = ?
                   AND length(content_hash.digest_hex) = 64
                   AND content_hash.digest_hex NOT GLOB '*[^0-9a-f]*'
-            ), physical_entries AS (
+            )
+            """;
+
+    private static final String EXACT_MEMBERS_CTE = EXACT_HASH_MEMBERS_CTE + """
+            , physical_entries AS (
                 SELECT file_entry.id, file_entry.current_content_id, file_entry.extension_key,
                        CASE WHEN EXISTS (
                            SELECT 1 FROM source_membership AS membership
@@ -56,6 +60,19 @@ public class ExactDuplicateRepository {
 
     public ExactDuplicateRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
+    }
+
+    /** Shared fail-closed checks for exact duplicate reads and the transient graph projection. */
+    public void validateIntegrity() {
+        OptionalLong invalidArtifactId = findFirstInvalidCompletedExactArtifactId();
+        if (invalidArtifactId.isPresent()) {
+            throw new ExactDuplicateIntegrityException(
+                    "Completed exact AnalysisRecord " + invalidArtifactId.getAsLong() + " is invalid");
+        }
+        findFirstSizeMismatchedDigest().ifPresent(digest -> {
+            throw new ExactDuplicateIntegrityException(
+                    "ContentRecords in exact digest group " + digest + " disagree on size");
+        });
     }
 
     public OptionalLong findFirstInvalidCompletedExactArtifactId() {
@@ -83,7 +100,7 @@ public class ExactDuplicateRepository {
     }
 
     public Optional<String> findFirstSizeMismatchedDigest() {
-        return jdbcTemplate.query(EXACT_MEMBERS_CTE + """
+        return jdbcTemplate.query(EXACT_HASH_MEMBERS_CTE + """
                 SELECT digest_hex
                 FROM exact_members
                 GROUP BY digest_hex
@@ -93,6 +110,28 @@ public class ExactDuplicateRepository {
                 LIMIT 1
                 """, (resultSet, rowNumber) -> resultSet.getString("digest_hex"),
                 exactDefinitionParameters()).stream().findFirst();
+    }
+
+    /**
+     * After integrity validation, emit N-1 star edges per digest in digest/anchor/member order.
+     * All grouping happens in SQL; physical occurrences and durable relationships are irrelevant.
+     */
+    List<ExactHashRelationshipEdge> findExactRelationshipEdges() {
+        return jdbcTemplate.query(EXACT_HASH_MEMBERS_CTE + """
+                , distinct_members AS (
+                    SELECT DISTINCT digest_hex, content_record_id FROM exact_members
+                ), anchored_members AS (
+                    SELECT digest_hex, content_record_id,
+                           MIN(content_record_id) OVER (PARTITION BY digest_hex) AS anchor_id
+                    FROM distinct_members
+                )
+                SELECT anchor_id, content_record_id
+                FROM anchored_members
+                WHERE content_record_id > anchor_id
+                ORDER BY digest_hex, anchor_id, content_record_id
+                """, (resultSet, rowNumber) -> new ExactHashRelationshipEdge(
+                        resultSet.getLong("anchor_id"), resultSet.getLong("content_record_id")),
+                exactDefinitionParameters());
     }
 
     public List<ExactDuplicateGroupCounts> findGroupCounts(

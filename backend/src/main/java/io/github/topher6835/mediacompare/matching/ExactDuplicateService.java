@@ -5,7 +5,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalLong;
 
 import io.github.topher6835.mediacompare.analysis.Sha256AnalysisDefinition;
 import io.github.topher6835.mediacompare.catalog.FileCategory;
@@ -32,7 +31,7 @@ public class ExactDuplicateService {
             String afterDigestHex, Integer requestedLimit, ExactDuplicateFilter filter) {
         String cursor = validateOptionalDigest(afterDigestHex);
         int limit = validateLimit(requestedLimit);
-        validateIntegrity();
+        repository.validateIntegrity();
 
         if (filter.active() && filter.effectiveExtensionKeys().isEmpty()) {
             return new ExactDuplicateGroupPage(List.of(), null);
@@ -60,7 +59,7 @@ public class ExactDuplicateService {
     public Optional<ExactDuplicateGroupDetails> findGroup(
             String digestHex, ExactDuplicateFilter filter) {
         validateDigest(digestHex);
-        validateIntegrity();
+        repository.validateIntegrity();
         return repository.findGroupCounts(digestHex)
                 .map(counts -> toSummary(counts, null))
                 .map(summary -> new ExactDuplicateGroupDetails(
@@ -72,20 +71,8 @@ public class ExactDuplicateService {
     }
 
     public List<ExactDuplicateFilterOption> findFilterOptions() {
-        validateIntegrity();
+        repository.validateIntegrity();
         return List.copyOf(repository.findFilterOptions());
-    }
-
-    private void validateIntegrity() {
-        OptionalLong invalidArtifactId = repository.findFirstInvalidCompletedExactArtifactId();
-        if (invalidArtifactId.isPresent()) {
-            throw new ExactDuplicateIntegrityException(
-                    "Completed exact AnalysisRecord " + invalidArtifactId.getAsLong() + " is invalid");
-        }
-        repository.findFirstSizeMismatchedDigest().ifPresent(digest -> {
-            throw new ExactDuplicateIntegrityException(
-                    "ContentRecords in exact digest group " + digest + " disagree on size");
-        });
     }
 
     private Map<String, ExactDuplicateFilterMatch> findFilterMatches(

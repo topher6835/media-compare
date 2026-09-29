@@ -18,11 +18,11 @@ public final class MediaRelationshipGrouping {
 
     /** Members are ascending IDs; components are ordered by their smallest member. */
     public List<List<Long>> group(
-            Collection<MediaRelationship> relationships, Set<MediaRelationshipType> enabledTypes) {
+            Collection<? extends MediaRelationshipEdge> relationships, Set<MediaRelationshipType> enabledTypes) {
         Objects.requireNonNull(relationships, "relationships");
         Objects.requireNonNull(enabledTypes, "enabledTypes");
         Map<Long, Set<Long>> neighbors = new HashMap<>();
-        for (MediaRelationship relationship : relationships) {
+        for (MediaRelationshipEdge relationship : relationships) {
             if (!enabledTypes.contains(relationship.relationshipType())) {
                 continue;
             }

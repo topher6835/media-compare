@@ -20,7 +20,7 @@ public record MediaRelationship(
         long configurationVersion,
         String configurationHash,
         String configurationJson,
-        long createdAtMs) {
+        long createdAtMs) implements MediaRelationshipEdge {
 
     public static final int MAX_JSON_UTF8_BYTES = MediaRelationshipValidation.MAX_JSON_UTF8_BYTES;
 

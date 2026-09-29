@@ -18,7 +18,7 @@ The repository currently contains a working full-stack scaffold:
 - A synchronous command that publishes exact SHA-256 analysis for safe assigned-content candidates.
 - A background version-3 SCAN Job with DISCOVERY, RECONCILIATION, CONTENT_ASSIGNMENT, and CONTENT_HASHING under membership authority.
 - Read-only APIs that derive exact duplicate groups and retained occurrences from trusted SHA-256 artifacts, with catalog-correct file-category and extension filtering.
-- A V8 ContentRecord relationship table, exact definition/selection values, focused JDBC queries, and a safe selection-to-pure-grouping service; no matcher publishes edges yet.
+- A V8 ContentRecord relationship table, exact definition/selection values, focused JDBC queries, and a safe grouping service combining transient SHA-derived EXACT edges with explicitly selected durable definitions; no non-exact matcher publishes edges yet.
 - A V9 FileEntry preview-cache foundation with successful-asset metadata, deterministic keys/layout, current-evidence lookup, read-only immutable serving, and an internal synchronous JPEG/PNG SMALL_THUMBNAIL generator.
 - A database-only keyset media-library item projection and explicit transient thumbnail scheduler (one worker, queue 64) under `/api/media-library`.
 - Frontend `/library`, `/sources`, `/duplicates`, `/duplicates/:digestHex`, and `/duplicates/plan` routes for item-level image browsing, Source registration/indexing, derived exact-group browsing, and session-only cleanup planning, in addition to the `/` health route.
@@ -302,11 +302,17 @@ V8 persists typed media relationships between immutable ContentRecords, independ
 
 `MediaRelationshipDefinition` identifies an exact relationship type, matcher ID/version, and configuration version/hash/JSON. The JSON must be a bounded valid object under the same strict rules as relationship evidence/configuration; supplied text is preserved. Compatibility requires all six fields to match, including exact configuration JSON even when hashes agree. `MediaRelationshipSelection` is immutable and deterministically ordered by type declaration order. Current policy accepts at most one definition per type (including rejecting repeated identical definitions); empty selection is legal. Enabled types derive only from selected definitions. There is no automatic latest inference from row ID, timestamps, version ordering, configuration version, or row counts.
 
-`MediaRelationshipGroupService.group(selection)` is the safe production boundary: `repository.findBySelection(selection)` queries only exact selected definitions in one parameterized, bounded OR query ordered by relationship ID, then passes those rows and the selection's enabled types to pure grouping. Empty selection returns empty groups without a database query. Reads preserve every historical artifact. No global current-definition registry exists; future concrete matchers/adapters will supply their exact accepted definitions to this boundary.
+`MediaRelationshipGroupService.group(selection)` is the safe production boundary. Selecting exactly `ExactHashRelationshipProjection.DEFINITION` activates the SHA adapter and removes that definition from the persistent selection. All remaining definitions use `repository.findBySelection` in one parameterized OR query ordered by relationship ID. Other explicitly selected EXACT definitions remain ordinary durable selections and never substitute SHA edges. Empty selection reads neither source; SHA-only selection reads no `media_relationship` rows. Combined edges and selected enabled types feed pure grouping in one read transaction, preserving every historical artifact. There is no global current-definition registry.
 
-`MediaRelationshipGrouping` is database-independent. It builds connected components using only enabled types, regardless of direction. Transitive mixed-type paths connect, repeated edges do not duplicate members, and disabling/re-enabling types splits/reconnects components without media reanalysis. Output is deterministic: ascending member IDs, components ordered by smallest member. Only endpoints connected by an enabled edge appear. No groups, permanent memberships, or toggle combinations are persisted.
+`MediaRelationshipGrouping` is database-independent and consumes the minimal `MediaRelationshipEdge` interface shared by durable rows and transient exact edges. It builds connected components using only enabled types, regardless of direction. Transitive mixed-type paths connect, repeated edges do not duplicate members, and disabling/re-enabling types splits/reconnects components without media reanalysis. Output is deterministic: ascending member IDs, components ordered by smallest member. Only endpoints connected by an enabled edge appear. No groups, permanent memberships, or toggle combinations are persisted.
 
-The existing SHA-256 `content_hash` repository/service/API/UI remains separate and authoritative for exact duplicates. `EXACT` is available in the new domain for a future adapter/projection, but V8 neither migrates hashes nor populates exact relationship rows. No actual matcher or public relationship/group API is implemented. The item-level media-library projection is separate from relationship grouping.
+`AnalysisRecord` + `content_hash` remains the sole durable authority for SHA-256 exact equality. `ExactHashRelationshipProjection` supplies the explicit relationship-producing definition `EXACT / builtin.sha256.exact-projection / 1 / configuration version 1 / {}` with SHA-256 of that exact JSON (`44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a`). This identifies the projection mechanism; hashes independently require the exact current `Sha256AnalysisDefinition`, COMPLETED status, SHA-256 algorithm, and valid lowercase 64-character digest.
+
+The adapter reuses `ExactDuplicateRepository` integrity checks and exact-member SQL. Wrong current configuration JSON, missing/wrong/malformed specialized hashes, and same-digest size disagreements fail the whole projection with the existing integrity exception. Validation and projection share a read snapshot. One focused SQL window query emits a deterministic spanning star: smallest ContentRecord ID anchors N−1 edges per digest, ordered by digest/anchor/member, with singleton groups omitted and distinct members selected defensively. No all-pairs expansion, per-digest query, or Java hash grouping occurs.
+
+Projected `ExactHashRelationshipEdge` values contain only canonical positive distinct ContentRecord endpoints and the constant EXACT type. They have no row identity or creation timestamp and are never inserted or backfilled into `media_relationship`. No schema/index migration is needed. Valid hashes remain reusable regardless of missing/no physical occurrences, ACTIVE memberships, mounted Sources, media metadata, or previews. Generalized grouping can combine these transient edges with explicitly selected persistent CROP/RESIZED/etc. artifacts.
+
+The exact duplicate repository/service/API/UI remains separately authoritative for occurrence, Source, filter, and savings semantics. It does not use generalized relationship grouping. No non-exact matcher or public relationship/group API is implemented; the item-level media library remains separate.
 
 ### Thumbnail and Preview Cache Foundation (V9)
 
@@ -354,7 +360,7 @@ Thumbnail projection left-joins the exact `SmallThumbnailDefinition` and all cur
 
 Shutdown stops admission, allows at most 30 seconds for completion, then interrupts active work and discards queued tasks while releasing their coalescing entries. Closed admission returns QUEUE_FULL. Unfinished/uninterruptible work conservatively retains CatalogOwnership until process exit, following existing executor conventions. A narrow package-private callback constructor supports deterministic latch-based tests without a generic job framework.
 
-Explicit V8 definition selection precedes grouping; actual matchers/adapters and matched-group projection remain later work. The item grid neither reads relationships nor invents singleton/fake groups. Medium previews and original high-resolution demand remain later work.
+Explicit definition selection precedes grouping; the SHA EXACT adapter is implemented, while non-exact matchers and matched-group presentation remain later work. The item grid neither reads relationships nor invents singleton/fake groups. Medium previews and original high-resolution demand remain later work.
 
 ### React Media Library
 
@@ -376,7 +382,8 @@ Eviction/LRU/storage quotas and cleanup are future work. Cleanup may remove stal
 Source -> SourceMembership -> FileEntry -> ContentRecord -> AnalysisRecord -> specialized results
 Source -> LocationContext; resolved FileEntry -> LocationContext
 ContentRecord -> derived exact duplicate groups
-ContentRecord <-> media_relationship <-> ContentRecord -> exact definition selection -> derived components
+ContentRecord -> AnalysisRecord + content_hash -> selected transient EXACT edges -> derived components
+ContentRecord <-> media_relationship <-> ContentRecord -> selected durable definitions -> derived components
 WorkingSet -> ContentRecord membership
 ScanRun -> Job -> stages/checkpoints
 ```

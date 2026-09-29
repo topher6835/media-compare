@@ -181,7 +181,7 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Use the initial Java types `EXACT`, `RESIZED`, `CROP`, `EDITED`, `VIDEO_OVERLAP`, and `VIDEO_SEGMENT_SEQUENCE`; SQL leaves types extensible. Keep nullable normalized confidence and bounded JSON object evidence, without per-type evidence tables/codecs or invented deterministic scores.
 - Treat canonical pair + type + matcher ID/version + configuration version/hash as one unique durable result. Retain effective configuration JSON for provenance, outside uniqueness. Changed matcher/configuration identities coexist without automatic deletion, overwriting, or a broad lifecycle framework.
 - Derive connected components from enabled edges using one pure grouping algorithm. Direction is metadata and does not block connectivity. Type toggles alter grouping without reanalysis. Members/components have deterministic ID ordering; unconnected records are omitted. Persist no group ID, membership, or toggle combinations.
-- Keep existing `content_hash`-derived SHA-256 duplicate grouping and its API/UI authoritative and separate. V8 migrates no hash groups and publishes no `EXACT` rows. A future adapter/projection may feed exact equality into the relationship graph.
+- Keep existing `content_hash`-derived SHA-256 duplicate grouping and its API/UI authoritative and separate. V8 migrates no hash groups and publishes no `EXACT` rows. The transient SHA adapter described below feeds exact equality into the relationship graph.
 - Keep preview/cache identity based on physical FileEntry/current file evidence rather than SourceMembership. V9 implements the filesystem-cache and SQLite-metadata boundary described below. The album grid must not load originals.
 
 ## Explicit Relationship Definition Selection Before Grouping
@@ -191,6 +191,15 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Accept at most one selected definition per type, rejecting even repeated identical definitions. Multi-producer compatibility for one semantic type requires a deliberate later design. Empty selection is valid; immutable definitions/types use type declaration order.
 - Infer no compatibility from row ID, creation time, matcher/configuration version ordering, or row counts. No fake current definitions or global registry exists before actual matchers/adapters.
 - Use one parameterized selection query followed by database-independent connected-component grouping through `MediaRelationshipGroupService`. Enabled types come from the selection; historical rows and schema stay unchanged. Future matcher/adapter definitions feed this boundary.
+
+## Authoritative SHA EXACT Relationship Projection
+
+- Keep `AnalysisRecord` + `content_hash` as the sole durable SHA exact-equality authority. Do not duplicate or backfill it in V8, change hash identity, or add a migration. The exact duplicate API/UI remains separate.
+- Use transient `ExactHashRelationshipEdge` ContentRecord pairs through the minimal grouping-edge interface. Emit deterministic spanning stars in SQL: smallest ContentRecord ID anchors N−1 edges per digest; singletons produce none. This preserves connectivity without quadratic expansion or fake row IDs/timestamps.
+- Give the implemented adapter a stable explicit relationship definition: `EXACT / builtin.sha256.exact-projection / 1 / configuration version 1 / {}` and the existing SHA-256 empty-configuration hash. This defines projection provenance independently of the required current SHA analysis definition.
+- Activate projection only when that complete definition is selected; query durable relationships only for the remaining selected definitions. Other EXACT definitions remain ordinary explicitly selected persistent definitions. Empty selection reads neither source, and projection-only grouping needs no V8 rows.
+- Reuse authoritative exact-artifact SQL and fail-closed integrity checks. Current configuration JSON disagreement, missing/wrong/malformed hashes, and same-digest size disagreement reject the projection; reads share a transaction snapshot and publish no artifacts.
+- Exact equality belongs to ContentRecord and does not require current filesystem occurrences, PRESENT/ACTIVE memberships, mounted Sources, or media/preview metadata. Missing physical copies do not invalidate retained exact equality.
 
 ## FileEntry Preview Cache Foundation (V9)
 

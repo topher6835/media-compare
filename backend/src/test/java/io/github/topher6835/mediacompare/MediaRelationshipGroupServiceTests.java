@@ -6,8 +6,13 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 
+import io.github.topher6835.mediacompare.analysis.AnalysisRecord;
+import io.github.topher6835.mediacompare.analysis.AnalysisRepository;
+import io.github.topher6835.mediacompare.analysis.ContentHash;
+import io.github.topher6835.mediacompare.analysis.Sha256AnalysisDefinition;
 import io.github.topher6835.mediacompare.catalog.CatalogRepository;
 import io.github.topher6835.mediacompare.catalog.ContentRecord;
+import io.github.topher6835.mediacompare.matching.ExactHashRelationshipProjection;
 import io.github.topher6835.mediacompare.matching.MediaRelationship;
 import io.github.topher6835.mediacompare.matching.MediaRelationshipDefinition;
 import io.github.topher6835.mediacompare.matching.MediaRelationshipDirection;
@@ -31,10 +36,13 @@ class MediaRelationshipGroupServiceTests {
     @Autowired private CatalogRepository catalog;
     @Autowired private MediaRelationshipRepository relationships;
     @Autowired private MediaRelationshipGroupService groups;
+    @Autowired private AnalysisRepository analyses;
 
     @AfterEach
     void clearRows() {
         jdbcTemplate.update("DELETE FROM media_relationship");
+        jdbcTemplate.update("DELETE FROM content_hash");
+        jdbcTemplate.update("DELETE FROM analysis_record");
         jdbcTemplate.update("DELETE FROM content_record");
     }
 
@@ -99,6 +107,88 @@ class MediaRelationshipGroupServiceTests {
             insert(b, c, crop, direction, 1);
             assertEquals(List.of(a, b, c), groups.group(selection).getLast());
         }
+    }
+
+    @Test
+    void exactOnlyGroupsShaContentWithoutDurableEdgesAndOmittingExactExcludesIt() {
+        long a = hashed(10);
+        long b = hashed(10);
+        long c = hashed(10);
+        long d = hashed(20);
+        long e = hashed(20);
+        MediaRelationshipDefinition crop = definition(MediaRelationshipType.CROP);
+        long f = content();
+        long g = content();
+        insert(f, g, crop, MediaRelationshipDirection.UNDIRECTED, 1);
+        List<MediaRelationship> before = history();
+
+        assertEquals(List.of(List.of(a, b, c), List.of(d, e)),
+                groups.group(new MediaRelationshipSelection(List.of(ExactHashRelationshipProjection.DEFINITION))));
+        assertEquals(List.of(), groups.group(new MediaRelationshipSelection(List.of())));
+        assertEquals(List.of(List.of(f, g)), groups.group(new MediaRelationshipSelection(List.of(crop))));
+        assertEquals(before, history());
+    }
+
+    @Test
+    void projectedExactCombinesWithSelectedDirectedCropWhileHistoricalCropAndResizedCannotBridge() {
+        MediaRelationshipDefinition crop = definition(MediaRelationshipType.CROP);
+        MediaRelationshipDefinition resized = definition(MediaRelationshipType.RESIZED);
+        MediaRelationshipDefinition oldCrop = new MediaRelationshipDefinition(
+                crop.relationshipType(), crop.matcherId(), "old", 1, crop.configurationHash(), "{}");
+        MediaRelationshipDefinition oldResized = new MediaRelationshipDefinition(
+                resized.relationshipType(), resized.matcherId(), "old", 1, resized.configurationHash(), "{}");
+        List<List<Long>> expected = new ArrayList<>();
+        for (MediaRelationshipDirection direction : MediaRelationshipDirection.values()) {
+            long a = hashed(10 + direction.ordinal() * 2);
+            long b = hashed(10 + direction.ordinal() * 2);
+            long c = hashed(11 + direction.ordinal() * 2);
+            long d = hashed(11 + direction.ordinal() * 2);
+            long e = content();
+            long f = content();
+            insert(b, c, crop, direction, 1);
+            insert(d, e, oldCrop, direction, 999);
+            insert(e, f, oldResized, direction, 999);
+            expected.add(List.of(a, b, c, d));
+        }
+        List<MediaRelationship> before = history();
+        assertEquals(expected, groups.group(new MediaRelationshipSelection(
+                List.of(ExactHashRelationshipProjection.DEFINITION, crop, resized))));
+        assertEquals(before, history());
+    }
+
+    @Test
+    void selectingAnotherExactUsesOnlyItsDurableRowsAndSelectingShaIgnoresThoseRows() {
+        long a = hashed(10);
+        long b = hashed(10);
+        long c = content();
+        MediaRelationshipDefinition otherExact = definition(MediaRelationshipType.EXACT);
+        insert(b, c, otherExact, MediaRelationshipDirection.A_TO_B, 1);
+        List<MediaRelationship> before = history();
+
+        assertEquals(List.of(List.of(b, c)), groups.group(new MediaRelationshipSelection(List.of(otherExact))));
+        assertEquals(List.of(List.of(a, b)), groups.group(new MediaRelationshipSelection(
+                List.of(ExactHashRelationshipProjection.DEFINITION))));
+        // Matching the producer ID alone is insufficient; even JSON text is part of selection.
+        MediaRelationshipDefinition sha = ExactHashRelationshipProjection.DEFINITION;
+        MediaRelationshipDefinition otherJson = new MediaRelationshipDefinition(sha.relationshipType(),
+                sha.matcherId(), sha.matcherVersion(), sha.configurationVersion(), sha.configurationHash(), " {} ");
+        insert(a, c, otherJson, MediaRelationshipDirection.UNDIRECTED, 1);
+        assertEquals(List.of(List.of(a, c)), groups.group(new MediaRelationshipSelection(List.of(otherJson))));
+        assertEquals(List.of(List.of(a, b)), groups.group(new MediaRelationshipSelection(List.of(sha))));
+        assertEquals(before.getFirst(), relationships.findById(before.getFirst().id()).orElseThrow());
+        assertEquals(2, history().size());
+    }
+
+    private long hashed(long digestValue) {
+        long id = content();
+        AnalysisRecord analysis = analyses.insert(new AnalysisRecord(null, id,
+                Sha256AnalysisDefinition.ANALYSIS_TYPE, Sha256AnalysisDefinition.ANALYZER_ID,
+                Sha256AnalysisDefinition.ANALYZER_VERSION, Sha256AnalysisDefinition.CONFIGURATION_VERSION,
+                Sha256AnalysisDefinition.CONFIGURATION_HASH, Sha256AnalysisDefinition.CONFIGURATION_JSON,
+                null, "COMPLETED", 1, 1, 1L, 2L, null));
+        analyses.insert(new ContentHash(analysis.id(), Sha256AnalysisDefinition.ALGORITHM,
+                "%064x".formatted(digestValue)));
+        return id;
     }
 
     private long content() {
