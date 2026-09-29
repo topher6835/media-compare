@@ -7,16 +7,12 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import javax.imageio.ImageIO;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-
 /** Write companion to the resolver. Only operates within the application-owned cache. */
-@Component
 public class PreviewCacheWriter {
     private final Path configuredRoot;
     private final PreviewCacheResolver resolver;
 
-    public PreviewCacheWriter(@Value("${media-compare.preview-cache-root:data/cache/previews}") String cacheRoot,
+    public PreviewCacheWriter(String cacheRoot,
             PreviewCacheResolver resolver) {
         if (cacheRoot == null || cacheRoot.isBlank()) {
             throw new IllegalArgumentException("preview-cache-root must not be blank");

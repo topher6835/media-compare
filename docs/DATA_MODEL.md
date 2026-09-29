@@ -1,5 +1,7 @@
 # Data Model
 
+The portable Session folder owns one catalog database and its preview cache outside the SQLite schema. The Session manifest contains only `type` and `formatVersion`; V1–V9 catalog tables remain Session-agnostic, with no `session_id` or catalog UUID added.
+
 ## Status and Scope
 
 Flyway V1–V5 retain their historical schema meaning. Java migration `V6__source_membership_authority` establishes source-independent FileEntries and SourceMembership as the sole writable Source/FileEntry relationship and presence authority. Every V5 FileEntry keeps its ID, content association, byte evidence, extension, revision, and timestamps; it becomes `UNRESOLVED` with null absolute identity and exactly one backfilled membership. V7 adds durable Source binding-period history, bringing the schema to fourteen application tables. Neither migration probes the filesystem or merges apparently equal historical entries. The old v1/v2 execution rows remain readable, while new SCAN work uses execution version 3.

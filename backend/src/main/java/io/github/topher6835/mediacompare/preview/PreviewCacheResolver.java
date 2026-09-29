@@ -12,15 +12,11 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Objects;
 import java.util.Set;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-
 /** Read-only managed-cache resolution. Creates no directories or files. */
-@Component
 public class PreviewCacheResolver {
     private final Path configuredRoot;
 
-    public PreviewCacheResolver(@Value("${media-compare.preview-cache-root:data/cache/previews}") String cacheRoot) {
+    public PreviewCacheResolver(String cacheRoot) {
         if (cacheRoot == null || cacheRoot.isBlank()) {
             throw new IllegalArgumentException("preview-cache-root must not be blank");
         }

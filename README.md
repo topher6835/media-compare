@@ -24,17 +24,28 @@ Maven does not need to be installed separately because the backend includes Mave
 
 ## Run Locally
 
-Start the backend from `backend/`.
+Create a Session folder with a `session.json` containing exactly this manifest before starting the backend:
+
+```json
+{
+  "type": "media-compare-session",
+  "formatVersion": 1
+}
+```
+
+Select that existing folder through the `MEDIA_COMPARE_SESSION_ROOT` environment variable. The backend fails startup if no valid Session is selected. Start the backend from `backend/`.
 
 macOS/Linux:
 
 ```sh
+export MEDIA_COMPARE_SESSION_ROOT="/path/to/My Session"
 ./mvnw spring-boot:run
 ```
 
 Windows:
 
 ```bat
+set "MEDIA_COMPARE_SESSION_ROOT=C:\path\to\My Session"
 mvnw.cmd spring-boot:run
 ```
 
@@ -67,9 +78,9 @@ During development:
 
 The V6 schema and v3 indexing cutover are implemented. SourceMembership owns the Source/FileEntry relationship and presence; trusted overlapping Sources can share one source-independent FileEntry. Historical v1/v2 indexing executions remain readable, and new indexing uses v3. On supported local macOS/APFS storage, register a folder on `/sources`, select **Prepare Source**, then select **Analyze Source** once it shows Ready. Registration stores the path without checking that it exists; preparation checks the filesystem and binds the Source to an accepted logical LocationContext. See [`docs/STATUS.md`](docs/STATUS.md) for current validation results.
 
-The SQLite database is created locally at `backend/data/media-compare.db` when the backend is run from `backend/`. Local database files are ignored by Git and are not committed.
+The selected Session owns `catalog.db`, `catalog.db.lock`, and `cache/previews`. SQLite/Flyway creates the catalog on first startup; previews are created on demand. Original media remains at its registered Source paths. The old `backend/data/media-compare.db` is legacy smoke-test data and is never selected automatically. Local database files are ignored by Git and are not committed.
 
-The configured `spring.datasource.url` also determines the catalog's `.lock` sidecar. A Java NIO OS lock prevents a second backend from using the same local catalog; do not delete the lock file to try to release ownership. Locking precedes Flyway and startup recovery. Keep the catalog on a local filesystem and use one canonical catalog location, not hard-link aliases.
+The Session-derived catalog URL also determines its `.lock` sidecar. A Java NIO OS lock prevents a second backend from using the same local catalog; do not delete the lock file to try to release ownership. Locking precedes Flyway and startup recovery. Keep the Session on a local filesystem and use one canonical catalog location, not hard-link aliases.
 
 ## Source preparation API
 

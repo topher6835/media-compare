@@ -6,7 +6,7 @@ The repository currently contains a working full-stack scaffold:
 
 - A React single-page frontend in `frontend/`.
 - A Spring Boot REST backend in `backend/`.
-- One local SQLite database configured through Spring JDBC and Flyway.
+- One Session-selected SQLite database configured through Spring JDBC and Flyway.
 - `GET /api/health`, returning plain text `ok`.
 - REST endpoints to register and read Sources under `/api/sources`.
 - An explicit `POST /api/sources/{id}/prepare` flow for first-time local macOS/APFS Source preparation.
@@ -31,7 +31,7 @@ Media Compare will begin as a modular monolith:
 
 - One Spring Boot backend.
 - One React frontend.
-- One SQLite catalog in the current implementation.
+- One active Session with one SQLite catalog in the current implementation.
 - No microservices, message queues, Docker requirement, or separate worker process initially.
 
 Responsibilities remain meaningfully separated inside the applications without creating elaborate layered architecture. The initial responsibility areas are catalog/indexing, scanning/reconciliation, analysis, matching, jobs/progress, organization/manual decisions, filesystem operations, media tooling, and AI integrations.
@@ -164,7 +164,7 @@ The V3 schema migration added `scan_run.request_key` for durable public start-re
 
 ## Current Background Execution and Startup Safety
 
-`CatalogConfiguration` acquires `CatalogOwnership` before constructing the datasource, so even Flyway writes require ownership. The lock derives from `spring.datasource.url`: resolve the local catalog path (including existing symlinks), append `.lock`, and hold a Java NIO `FileChannel.tryLock()` OS lock. A second backend fails startup clearly. The file is not deleted on release. Plain SQLite paths and local `file:` URIs are supported; in-memory SQLite catalogs have no cross-process persistence and need no file lock. Local filesystem use is required; hard-link aliases are not a supported way to configure the same catalog.
+`CatalogConfiguration` validates the selected Session and acquires `CatalogOwnership` before constructing the datasource, so even Flyway writes require ownership. The lock derives from the Session-derived JDBC URL: resolve the local catalog path, append `.lock`, and hold a Java NIO `FileChannel.tryLock()` OS lock. A second backend fails startup clearly. The file is not deleted on release. Isolated tests may use plain SQLite paths or in-memory SQLite catalogs, which need no file lock. Local filesystem use is required; hard-link aliases are not a supported way to configure the same catalog.
 
 After Flyway, `Version2IndexingStartup` calls transaction-proxied recovery for active v1, v2, and v3 SCAN Jobs. The executor depends on successful startup recovery, making ownership → schema → recovery → submission deterministic. Impossible lifecycle state aborts startup and logs Job/ScanRun/stage IDs rather than guessing a repair.
 
@@ -230,11 +230,13 @@ Person/scene/action clusters are derived, recomputable interpretations of observ
 
 ## Catalog Architecture and Remaining Lifecycle Work
 
-The current operational model is `Source -> SourceMembership -> FileEntry -> ContentRecord -> AnalysisRecord`. V6 makes FileEntry source-independent and puts Source relationship and presence on SourceMembership. V3 is the current four-stage SCAN execution. Context creation, acceptance, retirement, same-anchor replacement, first-time Source binding, explicit Source unbinding, fixed-root rebinding, and explicit relocate-and-bind are available. Automatic remount recognition, multiple independent catalogs, and other provider profiles remain future work.
+The current operational model is `Session -> Catalog -> Source -> SourceMembership -> FileEntry -> ContentRecord -> AnalysisRecord`. V6 makes FileEntry source-independent and puts Source relationship and presence on SourceMembership. V3 is the current four-stage SCAN execution. Context creation, acceptance, retirement, same-anchor replacement, first-time Source binding, explicit Source unbinding, fixed-root rebinding, and explicit relocate-and-bind are available. Automatic remount recognition and other provider profiles remain future work.
 
 ### Catalogs and Location Contexts
 
-A Catalog will be one independent durable collection, initially stored in its own SQLite file with an immutable internal `catalog_uuid`. Many catalogs may be known through settings outside their database files, but exactly one will be active/open at a time initially. Switching should use controlled backend/context restart or reinitialization, not a live routing-DataSource swap. Cross-catalog query/reuse, simultaneous active catalogs, and a catalog manager UI are deferred.
+A Session is one portable folder above one catalog. It contains `session.json`, `catalog.db`, its `catalog.db.lock` sidecar once opened, and generated `cache/previews` beneath the folder. Original media remains at Source paths outside the Session. The minimal manifest declares type `media-compare-session` and format version 1; it contains no identity or absolute Session path. The catalog schema remains Session-agnostic with no `session_id` or catalog UUID added. A closed Session can be moved or copied as a folder.
+
+At startup, `media-compare.session-root` selects one existing Session. Manifest and Session-owned path validation run before the catalog lock, DataSource, Flyway, and startup recovery. The selected Session supplies both the `catalog.db` JDBC URL (with `foreign_keys=on`) and preview-cache root. `CatalogOwnership` still acquires the catalog `.lock` before Flyway writes; the ordinary single DataSource and background executor lifecycle remain. Absent/invalid selection fails startup. Tests may explicitly opt into isolated catalog paths through `media-compare.test-catalog-override`; production has no global database/cache fallback. One Session/catalog is active for the runtime; switching requires a controlled restart or later reinitialization, not a routing DataSource. Frontend selection, Recents, deletion, import, and registry remain future work.
 
 V5 can persist a `LocationContext` representing one continuity period for one address/binding domain. It is neither the whole catalog, necessarily one Source, nor a physical-volume identifier. The table stores an application-issued UUID as canonical text, anchor path/key, `ACTIVE`/`RETIRED` lifecycle, `ACCEPTED`/`REVIEW_REQUIRED` continuity status, revision, nullable continuity evidence, and timestamps. The repository supports supplied-row insertion, ID lookup, exact active-anchor lookup, ordered ACTIVE lookup, a no-op SQLite writer reservation, bound-Source existence checks, and guarded acceptance/retirement. `LocationContextActivationService` reserves the writer, validates all ACTIVE anchors, rejects structural overlap, and inserts a new ACTIVE REVIEW_REQUIRED row without evidence. `LocationContextRetirementService` validates and retires an unbound ACTIVE row at its expected revision. `LocationContextReplacementService` uses one writer-reserved transaction to retire an unbound ACTIVE row and insert a caller-supplied, different-UUID ACTIVE row at the same decoded anchor. The new row begins `REVIEW_REQUIRED` without evidence; its creation timestamp equals the transition timestamp. Other ACTIVE anchors are validated before either write, and insertion failure rolls back retirement. Explicit Source unbinding removes the current Source reference so its former context can be retired or replaced; binding-period history remains restrictively referenced. Resolver integration and reacceptance remain planned. A New Catalog starts with zero contexts.
 
@@ -322,7 +324,7 @@ The focused `preview` package owns preview identity, provenance, successful meta
 
 `preview_asset` contains only successfully published metadata, with unique key and logical-identity constraints. Reusable-current lookup joins FileEntry and compares every current evidence field plus exact kind/definition. Evidence changes select a different key and do not overwrite or delete the old asset. Stale rows/files remain disposable cache material until later cleanup. Cache lookup is independent of Source route authority; original-file generation obtains validated current evidence through the shared metadata candidate query, membership/context authority, and unchanged file-evidence validator.
 
-The configurable `media-compare.preview-cache-root` defaults to `data/cache/previews`, relative to backend working directory. SQLite stores portable `/`-separated relative paths only. Layout is `<kind-directory>/<first-two-key-hex>/<next-two-key-hex>/<key>.<extension>`, for example `small-thumbnail/ab/cd/<key>.png`. Two levels of bounded fan-out avoid one huge directory. Extension must already be normalized to 1–10 lowercase ASCII letters/digits without a dot. The first renderer uses PNG output. Startup creates no cache directories or files.
+The production preview-cache root is derived from the active Session as `cache/previews`. SQLite stores portable `/`-separated relative paths only. Layout is `<kind-directory>/<first-two-key-hex>/<next-two-key-hex>/<key>.<extension>`, for example `small-thumbnail/ab/cd/<key>.png`. Two levels of bounded fan-out avoid one huge directory. Extension must already be normalized to 1–10 lowercase ASCII letters/digits without a dot. The first renderer uses PNG output. Startup creates no cache directories or files.
 
 `GET /api/previews/{assetKey}` serves an immutable published asset; it does not select a FileEntry or trigger generation. Malformed keys return `400`; unknown keys, missing/wrong-size files, and unsafe/inconsistent metadata paths return `404` with no body or absolute path. The resolver validates portable syntax, anchors to the configured root's real path, and rejects a linked root or any linked cache-relative directory/final file. Trusted host aliases above the configured root (such as macOS `/var`) may resolve normally. Only regular files matching stored byte length are served. Opening uses `NOFOLLOW_LINKS` with evidence checks before/after opening. Output uses stored media type/length, a quoted asset-key ETag, and `Cache-Control: public, max-age=31536000, immutable`; matching conditional requests return `304` without opening a stream. GET performs no database writes or filesystem creation/deletion. Old immutable URLs remain readable even after their source evidence changes; future album responses obtain references through current lookup.
 
@@ -416,7 +418,7 @@ React application on Vite :5173
     -> request to /api
 Vite development proxy
     -> Spring Boot :8080
-    -> SQLite at backend/data/media-compare.db
+    -> selected Session's catalog.db
 ```
 
 REST remains the API direction. SSE is planned for later server-to-client live/progress updates; endpoint, event, and recovery design remain open.
