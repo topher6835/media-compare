@@ -24,6 +24,7 @@ class MediaLibraryTests {
     @Autowired MediaMetadataResultCodec codec;
     @Autowired MediaLibraryRepository repository;
     @Autowired MediaLibraryService library;
+    @Autowired MediaLibraryGroupService groups;
     @Autowired PreviewAssetRepository assets;
     MediaLibraryTestFixtures fixture;
 
@@ -93,6 +94,7 @@ class MediaLibraryTests {
             case "no-membership" -> jdbc.update("DELETE FROM source_membership");
         }
         assertTrue(library.findItems(null, null).items().isEmpty());
+        assertTrue(groups.findGroups(null, null, null).groups().isEmpty());
     }
 
     @ParameterizedTest
@@ -113,6 +115,7 @@ class MediaLibraryTests {
                     MediaKind.VIDEO, null, new VideoMediaMetadata(List.of("mov"), null, "h264", 600, 400, 1, null, 0))));
         }
         assertTrue(library.findItems(null, null).items().isEmpty());
+        assertTrue(groups.findGroups(null, null, null).groups().isEmpty());
     }
 
     @ParameterizedTest
@@ -129,6 +132,7 @@ class MediaLibraryTests {
         };
         jdbc.update("UPDATE analysis_record SET result_json = ?", json);
         assertThrows(InvalidMediaMetadataResultException.class, () -> library.findItems(null, null));
+        assertThrows(InvalidMediaMetadataResultException.class, () -> groups.findGroups(null, null, null));
     }
 
     @ParameterizedTest
@@ -139,6 +143,7 @@ class MediaLibraryTests {
         assertNull(item.extensionKey());
         assertEquals(format.equals("jpeg") || format.equals("png") ? MediaLibraryItem.GenerationSupport.SUPPORTED
                 : MediaLibraryItem.GenerationSupport.UNSUPPORTED, item.generationSupport());
+        assertEquals(item, groups.findGroups(null, null, null).groups().getFirst().representative());
     }
 
     @Test
@@ -151,6 +156,7 @@ class MediaLibraryTests {
         assertEquals("/api/previews/" + asset.assetKey(), thumbnail.url());
         assertEquals(120, thumbnail.width());
         assertEquals(80, thumbnail.height());
+        assertEquals(thumbnail, groups.findGroups(null, null, null).groups().getFirst().representative().thumbnail());
     }
 
     @ParameterizedTest
@@ -174,6 +180,8 @@ class MediaLibraryTests {
         }
         assets.insert(PreviewTestFixtures.asset(evidence, kind, definition, 6));
         assertEquals(ThumbnailReference.missing(), library.findItems(null, null).items().getFirst().thumbnail());
+        assertEquals(ThumbnailReference.missing(),
+                groups.findGroups(null, null, null).groups().getFirst().representative().thumbnail());
     }
 
     @Test

@@ -41,7 +41,7 @@ class ThumbnailSchedulingApiTests {
             catch (InterruptedException failure) { Thread.currentThread().interrupt(); }
             return new ThumbnailGenerationResult(ThumbnailGenerationResult.Outcome.UNSUPPORTED, null);
         });
-        mvc = MockMvcBuilders.standaloneSetup(new MediaLibraryController(null, scheduler)).build();
+        mvc = MockMvcBuilders.standaloneSetup(new MediaLibraryController(null, null, scheduler)).build();
     }
 
     @AfterEach

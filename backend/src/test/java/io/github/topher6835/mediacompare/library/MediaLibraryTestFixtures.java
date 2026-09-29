@@ -38,15 +38,28 @@ public final class MediaLibraryTestFixtures {
     }
 
     FileEntry image(String format, String relativePath) {
-        var location = anchor;
-        for (String component : relativePath.split("/")) location = location.append(component);
         var content = catalog.insert(new ContentRecord(null, 42, 1));
-        var entry = catalog.insert(new FileEntry(null, "RESOLVED", contextId,
-                new LocationPathCodec().encode(location), LocationKeyCodec.encode(location).value(), content.id(),
-                42, 1700000000L, 123456789, FileExtensionNormalizer.fromRelativePath(relativePath), 3, 1, 1));
-        membership(primary, entry, relativePath);
+        var entry = occurrence(content.id(), relativePath);
         imageMetadata(analysis, codec, content.id(), format);
         return entry;
+    }
+
+    FileEntry occurrence(long contentId, String relativePath) {
+        var location = anchor;
+        for (String component : relativePath.split("/")) location = location.append(component);
+        var entry = catalog.insert(new FileEntry(null, "RESOLVED", contextId,
+                new LocationPathCodec().encode(location), LocationKeyCodec.encode(location).value(), contentId,
+                42, 1700000000L, 123456789, FileExtensionNormalizer.fromRelativePath(relativePath), 3, 1, 1));
+        membership(primary, entry, relativePath);
+        return entry;
+    }
+
+    void hash(long contentId, String digest) {
+        var record = analysis.insert(new AnalysisRecord(null, contentId, Sha256AnalysisDefinition.ANALYSIS_TYPE,
+                Sha256AnalysisDefinition.ANALYZER_ID, Sha256AnalysisDefinition.ANALYZER_VERSION,
+                Sha256AnalysisDefinition.CONFIGURATION_VERSION, Sha256AnalysisDefinition.CONFIGURATION_HASH,
+                Sha256AnalysisDefinition.CONFIGURATION_JSON, null, "COMPLETED", 1, 1, 1L, 2L, null));
+        analysis.insert(new ContentHash(record.id(), Sha256AnalysisDefinition.ALGORITHM, digest));
     }
 
     public static void imageMetadata(AnalysisRepository analysis, MediaMetadataResultCodec codec,

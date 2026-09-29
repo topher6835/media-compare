@@ -20,7 +20,7 @@ The repository currently contains a working full-stack scaffold:
 - Read-only APIs that derive exact duplicate groups and retained occurrences from trusted SHA-256 artifacts, with catalog-correct file-category and extension filtering.
 - A V8 ContentRecord relationship table, exact definition/selection values, focused JDBC queries, and a safe grouping service combining transient SHA-derived EXACT edges with explicitly selected durable definitions; no non-exact matcher publishes edges yet.
 - A V9 FileEntry preview-cache foundation with successful-asset metadata, deterministic keys/layout, current-evidence lookup, read-only immutable serving, and an internal synchronous JPEG/PNG SMALL_THUMBNAIL generator.
-- A database-only keyset media-library item projection and explicit transient thumbnail scheduler (one worker, queue 64) under `/api/media-library`.
+- Database-only item and derived group projections plus an explicit transient thumbnail scheduler (one worker, queue 64) under `/api/media-library`.
 - Frontend `/library`, `/sources`, `/duplicates`, `/duplicates/:digestHex`, and `/duplicates/plan` routes for item-level image browsing, Source registration/indexing, derived exact-group browsing, and session-only cleanup planning, in addition to the `/` health route.
 
 The reviewed persistence foundation is implemented. Flyway migration `V1__create_core_schema.sql` creates the initial eleven application tables, structural constraints, foreign keys, and indexes. Java migration `V2__add_file_entry_extension_key` adds and backfills normalized FileEntry extension metadata plus its lookup index. SQL migration `V3__add_durable_indexing_foundation.sql` adds durable indexing fields and constraints, V4 adds nullable `analysis_record.result_json`, and V5 adds `location_context` plus nullable Source binding storage; transactional V6 replaces Source-owned FileEntries with source-independent FileEntries and `source_membership`. V7 adds `source_binding_period` and backfills one open period per currently bound Source, bringing its schema to fourteen tables. V8 adds ContentRecord relationships, and V9 adds successful preview-asset metadata, bringing the current schema to sixteen tables. Explicit context creation, acceptance, retirement, same-anchor replacement, and first-time local APFS Source binding are implemented. Simple immutable records and Spring JDBC repositories provide focused persistence under the `catalog`, `scan`, `job`, `analysis`, `matching`, and `preview` feature packages. Source registration/read, historical execution reads, the four-stage version-3 lifecycle, background execution/recovery, public indexing start/polling APIs, frontend polling, exact analysis, derived duplicate reporting/filtering, reusable media-metadata persistence/safety mechanics, pure ffprobe video-output interpretation, bounded ffprobe process execution, and backend read-only exact-duplicate cleanup preflight are implemented. Legacy v1/v2 execution records remain readable; old v1 discovery/reconciliation write endpoints reject new work.
@@ -102,7 +102,7 @@ In V1–V5, when a FileEntry recorded `last_seen_scan_run_source_id`, that ScanR
 
 The path policy is cross-platform and lossless: preserve observed case and Unicode spelling, use `/` between persisted relative path segments, do not globally lowercase or Unicode-normalize, and do not resolve symlinks or call `toRealPath()` to construct occurrence identity. Where filesystem equivalence is uncertain, preserve separate observations.
 
-A `ContentRecord` represents one immutable byte-version independently of location. It has a stable internal ID rather than a hash primary key. Initial assignment creates one distinct record for each eligible unassigned FileEntry occurrence/version; equal size, modification metadata, or bytes do not cause records to be shared. Exact hashes attach to those identities as analysis artifacts. Equal digests do not merge records; later equality grouping and merge/deduplication behavior remain deferred. V1 has no canonical redirect or merge table, and transformed copies have separate ContentRecords.
+A `ContentRecord` represents one immutable byte-version independently of location. It has a stable internal ID rather than a hash primary key. Initial assignment creates one distinct record for each eligible unassigned FileEntry occurrence/version; equal size, modification metadata, or bytes do not cause records to be shared. Exact hashes attach to those identities as analysis artifacts. Equal digests do not merge records; exact equality feeds derived duplicate and library grouping, while merge/deduplication remains deferred. V1 has no canonical redirect or merge table, and transformed copies have separate ContentRecords.
 
 ## Historical V1–V5 Reconciliation and Execution
 
@@ -312,7 +312,7 @@ The adapter reuses `ExactDuplicateRepository` integrity checks and exact-member 
 
 Projected `ExactHashRelationshipEdge` values contain only canonical positive distinct ContentRecord endpoints and the constant EXACT type. They have no row identity or creation timestamp and are never inserted or backfilled into `media_relationship`. No schema/index migration is needed. Valid hashes remain reusable regardless of missing/no physical occurrences, ACTIVE memberships, mounted Sources, media metadata, or previews. Generalized grouping can combine these transient edges with explicitly selected persistent CROP/RESIZED/etc. artifacts.
 
-The exact duplicate repository/service/API/UI remains separately authoritative for occurrence, Source, filter, and savings semantics. It does not use generalized relationship grouping. No non-exact matcher or public relationship/group API is implemented; the item-level media library remains separate.
+The exact duplicate repository/service/API/UI remains separately authoritative for occurrence, Source, filter, and savings semantics. It does not use generalized relationship grouping. No non-exact matcher or generic relationship API is implemented. The item endpoint remains separate; the grouped-library presentation API described below consumes the selected graph.
 
 ### Thumbnail and Preview Cache Foundation (V9)
 
@@ -360,7 +360,21 @@ Thumbnail projection left-joins the exact `SmallThumbnailDefinition` and all cur
 
 Shutdown stops admission, allows at most 30 seconds for completion, then interrupts active work and discards queued tasks while releasing their coalescing entries. Closed admission returns QUEUE_FULL. Unfinished/uninterruptible work conservatively retains CatalogOwnership until process exit, following existing executor conventions. A narrow package-private callback constructor supports deterministic latch-based tests without a generic job framework.
 
-Explicit definition selection precedes grouping; the SHA EXACT adapter is implemented, while non-exact matchers and matched-group presentation remain later work. The item grid neither reads relationships nor invents singleton/fake groups. Medium previews and original high-resolution demand remain later work.
+Explicit definition selection precedes grouping; the SHA EXACT adapter and grouped-library backend projection are implemented, while non-exact matchers and grouped frontend/detail presentation remain later work. The item grid neither reads relationships nor invents singleton/fake groups. Medium previews and original high-resolution demand remain later work.
+
+### Derived Current Media Library Groups
+
+`GET /api/media-library/groups` projects the full selected ContentRecord graph onto current physical image FileEntries. The library-specific `MediaLibraryRelationshipPolicy` defaults omitted `relationshipType` to EXACT and maps EXACT only to `ExactHashRelationshipProjection.DEFINITION`; duplicate EXACT values deduplicate. Known unavailable types (RESIZED/CROP/etc.) and malformed enum input return empty no-store 400 responses. HTTP never supplies matcher/version/configuration identities. Future concrete matchers can deliberately extend this explicit presentation policy; there is no latest-definition registry or version inference.
+
+`MediaLibraryGroupService` resolves policy and calls the safe relationship grouping service before scanning current items. Full components include hidden/missing/non-library ContentRecords, so a graph-only node can connect current images and supply their smallest component key. Each eligible current item maps to exactly one group; unconnected images use their own ContentRecord ID, and multiple eligible FileEntries for the same ContentRecord group together without a synthetic self-edge. Components with no eligible current items produce no tile.
+
+Each `MediaLibraryGroupSummary` contains exactly `groupKeyContentRecordId`, `representative`, and `currentItemCount`. The key is the smallest ContentRecord ID of the full selected component (or the unconnected item's ContentRecord ID), potentially with no eligible occurrence. It is derived and may change with graph membership; it is not a durable group ID. The representative is the full unchanged `MediaLibraryItem` with the lowest eligible FileEntry ID, including its own thumbnail/reference, Source/path, detected format/dimensions, and generation support. Count measures eligible current physical FileEntries only, never memberships, Sources, hidden nodes, or missing/historical occurrences.
+
+A read-only transaction keeps graph and item reads in one snapshot. Current eligibility and thumbnail projection reuse `MediaLibraryRepository.findPage` exactly, in ascending-ID batches of at most 500 from cursor zero. The small pure `MediaLibraryGroupProjection` retains only a component-key map and one representative/count per group, not a second list of all current items. There are no per-item/group/digest application queries. Existing indexed item SQL and selected graph queries suffice; no schema/index change, caching, group/member table, or materialization is introduced.
+
+Groups order by representative FileEntry ID. Only after complete aggregation does the service apply optional nonnegative `afterRepresentativeFileEntryId`, default limit 50/max 200, and one lookahead group. `nextCursor` is the final returned representative ID when another group exists, otherwise null. Starting the internal scan from zero prevents later interleaved members of an already-returned group from reappearing as another group. Pagination reflects each request's current snapshot; no durable group membership is implied.
+
+Responses are `{groups:[...], nextCursor:...}` with `Cache-Control: no-store`. Invalid cursor/limit input returns 400; corrupt compatible image/preview data or current SHA authority returns a safe empty 500. GET is database-only: no filesystem access, cache existence check, rendering, thumbnail scheduling, or writes. `/items`, explicit thumbnail POST, preview serving, and the duplicate-specific API/UI remain separate and unchanged. Group detail/member endpoints and the grouped frontend remain deferred.
 
 ### React Media Library
 
@@ -384,6 +398,7 @@ Source -> LocationContext; resolved FileEntry -> LocationContext
 ContentRecord -> derived exact duplicate groups
 ContentRecord -> AnalysisRecord + content_hash -> selected transient EXACT edges -> derived components
 ContentRecord <-> media_relationship <-> ContentRecord -> selected durable definitions -> derived components
+Derived components + current image FileEntries -> derived Media Library groups
 WorkingSet -> ContentRecord membership
 ScanRun -> Job -> stages/checkpoints
 ```
@@ -527,7 +542,7 @@ The following remain open after the V1 review:
 - Scheduling beyond the bounded v3 worker, public cancellation/retries, and future resume.
 - Detailed scan scope representation and source-specific progress.
 - Specialized result schemas beyond `content_hash`.
-- Candidate generation, concrete relationship matcher/evidence designs, multi-producer compatibility per type, matched-group projection, album UX ordering, and manual override schemas. Explicit exact definition selection is implemented; the item-level library API is separate and relationship groups remain derived, not materialized.
+- Candidate generation, concrete relationship matcher/evidence designs, multi-producer compatibility per type, group detail/member projection, album UX ordering, and manual override schemas. Explicit exact definition selection is implemented; the item-level library API is separate and relationship groups remain derived, not materialized.
 - Face/person schema and AI-provider architecture.
 - Additional preview renderers/formats, medium-preview policy, future scheduling performance/capacity changes, and cache eviction/storage policy. V9 supports the first synchronous small-thumbnail generator and immutable serving boundary.
 - Real-Windows ffprobe redirected-file/`fd:` qualification and acceptance.

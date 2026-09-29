@@ -387,6 +387,14 @@ Preview state is derived from all six current V9 evidence fields and exact kind/
 
 Keyset pages use ascending FileEntry ID, optional nonnegative cursor, default 50/max 200 items, and one lookahead row. Queue state is process-local only: one worker, 64 pending slots, and bounded queued/running ID coalescing. Completion/failure drops transient state with no failure row or automatic retry. Restart discards queued work; only successfully published V9 assets survive. V8 relationships remain separate from this item projection and unchanged.
 
+## Derived Grouped Media Library Projection
+
+No schema changes accompany `/api/media-library/groups`. There is no group/member table, durable group ID, cache, or materialized view. Current eligible physical FileEntries project onto full selected ContentRecord components; singleton ContentRecords and multiple current occurrences of one ContentRecord require no relationship row.
+
+`MediaLibraryGroupSummary` has only `groupKeyContentRecordId`, `representative` (`MediaLibraryItem`), and `currentItemCount`. The key is the smallest ContentRecord ID in the full selected component, potentially a hidden node with no current eligible FileEntry; unconnected content uses its own ID. Keys are derived and may change when the graph changes. The representative is the lowest current eligible FileEntry ID and retains its exact item/thumbnail metadata. Count includes physical eligible current FileEntries only; missing/graph-only content and extra Source memberships do not inflate it. Components without current items are omitted.
+
+The public library policy currently selects only the implemented SHA EXACT projection; unavailable types fail rather than invent definitions. One read snapshot combines full graph connectivity with the unchanged current-image eligibility query, scanned from zero in batches of at most 500. Aggregation retains only one representative/count per group. After aggregation, groups order/page by representative FileEntry ID (optional nonnegative cursor, default 50/max 200, one lookahead, nullable `nextCursor`). This prevents interleaved later members from duplicating a previously returned component. `/items`, thumbnail scheduling, V8/V9 storage, and exact duplicate reporting remain unchanged.
+
 ## Filesystem Timestamps
 
 Application lifecycle timestamps use epoch milliseconds stored as SQLite integers. Filesystem modification times preserve available Java `FileTime` precision with an epoch-second value and nanosecond component. The two values are both present or both absent; nanoseconds are constrained to `0..999999999`. Filesystems that provide less precision remain valid.

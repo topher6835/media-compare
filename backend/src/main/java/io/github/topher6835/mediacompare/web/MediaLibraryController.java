@@ -1,7 +1,12 @@
 package io.github.topher6835.mediacompare.web;
 
+import java.util.List;
+
+import io.github.topher6835.mediacompare.library.MediaLibraryGroupPage;
+import io.github.topher6835.mediacompare.library.MediaLibraryGroupService;
 import io.github.topher6835.mediacompare.library.MediaLibraryPage;
 import io.github.topher6835.mediacompare.library.MediaLibraryService;
+import io.github.topher6835.mediacompare.matching.MediaRelationshipType;
 import io.github.topher6835.mediacompare.preview.ThumbnailScheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,10 +27,13 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 public class MediaLibraryController {
     private static final Logger log = LoggerFactory.getLogger(MediaLibraryController.class);
     private final MediaLibraryService library;
+    private final MediaLibraryGroupService groups;
     private final ThumbnailScheduler scheduler;
 
-    public MediaLibraryController(MediaLibraryService library, ThumbnailScheduler scheduler) {
+    public MediaLibraryController(MediaLibraryService library, MediaLibraryGroupService groups,
+            ThumbnailScheduler scheduler) {
         this.library = library;
+        this.groups = groups;
         this.scheduler = scheduler;
     }
 
@@ -35,6 +43,16 @@ public class MediaLibraryController {
             @RequestParam(required = false) Integer limit) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
                 .body(library.findItems(afterFileEntryId, limit));
+    }
+
+    /** Database-only groups: current items projected onto explicitly selected full content components. */
+    @GetMapping("/groups")
+    public ResponseEntity<MediaLibraryGroupPage> groups(
+            @RequestParam(name = "relationshipType", required = false) List<MediaRelationshipType> relationshipTypes,
+            @RequestParam(required = false) Long afterRepresentativeFileEntryId,
+            @RequestParam(required = false) Integer limit) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(groups.findGroups(relationshipTypes, afterRepresentativeFileEntryId, limit));
     }
 
     /** Admission only: the worker evaluates then-current source evidence asynchronously. */
