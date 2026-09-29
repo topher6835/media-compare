@@ -375,6 +375,14 @@ The first actual generator maps directly onto V9: `preview_kind = SMALL_THUMBNAI
 
 Publication revalidates the temporary membership/Source/context access snapshot plus all current FileEntry and ContentRecord evidence under SQLite writer reservation. Those route fields remain outside `PreviewSourceEvidence` and `preview_asset`; overlapping Sources reuse one physical identity. Equivalent publication reuses the stored successful row. Missing-file regeneration must agree with existing output metadata and preserves its ID/creation time. Unsafe or inconsistent immutable files and incompatible winners fail closed. Failed DB publication may retain an orphan final cache file for future cleanup.
 
+## Media-Library and Thumbnail Scheduling Projections
+
+No schema change accompanies this API. `MediaLibraryItem` identity is the existing physical FileEntry ID; no album, item, task, Job, group, or singleton-group table is added. One database page joins existing FileEntry, ContentRecord, current LocationContext/SourceMembership/Source authority, exact current completed ImageIO AnalysisRecord, and exact current SMALL_THUMBNAIL PreviewAsset metadata. The lowest eligible membership supplies display route data; `sourceCount` counts distinct trusted Sources independently of item identity. Compatible result JSON is materialized through the existing strict codec. Encoded image dimensions are raw analysis dimensions, separate from displayed thumbnail dimensions.
+
+Preview state is derived from all six current V9 evidence fields and exact kind/generator/configuration identity. PUBLISHED indicates a matching successful metadata row, with immutable asset-key URL and output dimensions; MISSING has null reference fields. No filesystem existence check occurs during library reads. Missing physical cache files remain repairable by explicitly scheduling the FileEntry, using existing generator/republication behavior without duplicate metadata.
+
+Keyset pages use ascending FileEntry ID, optional nonnegative cursor, default 50/max 200 items, and one lookahead row. Queue state is process-local only: one worker, 64 pending slots, and bounded queued/running ID coalescing. Completion/failure drops transient state with no failure row or automatic retry. Restart discards queued work; only successfully published V9 assets survive. V8 relationships remain separate from this item projection and unchanged.
+
 ## Filesystem Timestamps
 
 Application lifecycle timestamps use epoch milliseconds stored as SQLite integers. Filesystem modification times preserve available Java `FileTime` precision with an epoch-second value and nanosecond component. The two values are both present or both absent; nanoseconds are constrained to `0..999999999`. Filesystems that provide less precision remain valid.
@@ -443,7 +451,7 @@ The current implementation does not include:
 - Matching candidates, actual relationship matchers, per-type evidence codecs, or manual override schemas. Groups are derived rather than persisted.
 - AI-specific result schemas and provider infrastructure.
 - Filesystem-action history.
-- Medium previews, additional image formats, video previews, bulk/background preview scheduling, and cache eviction/cleanup.
+- Medium previews, additional image formats, video previews, automatic whole-library scheduling, future scheduler performance changes, and cache eviction/cleanup.
 - Final FFmpeg/ffprobe discovery strategy.
 - WAL-specific architecture.
 - Final symlink/junction traversal behavior.
