@@ -1,6 +1,6 @@
 # Media Compare
 
-Media Compare is an early-stage application for media comparison workflows. V6 moves Source/FileEntry relationships and presence to SourceMembership and routes new indexing through a four-stage v3 SCAN. Historical V5 FileEntries remain separate and unresolved after migration; trusted overlapping Sources can share one resolved physical FileEntry. Session-only exact-duplicate cleanup planning with frontend read-only cleanup preflight is available; broader comparison and filesystem cleanup remain deferred.
+Media Compare is an early-stage application for media comparison workflows. V6 moves Source/FileEntry relationships and presence to SourceMembership and routes new indexing through a four-stage v3 SCAN. Historical V5 FileEntries remain separate and unresolved after migration; trusted overlapping Sources can share one resolved physical FileEntry. An item-level image library and session-only exact-duplicate cleanup planning with frontend read-only cleanup preflight are available; broader comparison and filesystem cleanup remain deferred.
 
 ## Stack
 
@@ -60,6 +60,7 @@ During development:
 - Exact duplicate endpoints: `GET http://localhost:8080/api/exact-duplicate-groups`, `GET http://localhost:8080/api/exact-duplicate-groups/filter-options`, and `GET http://localhost:8080/api/exact-duplicate-groups/{digestHex}`. List and detail reads accept repeated `fileCategory` and `extension` query parameters.
 - Cleanup preflight: `POST http://localhost:8080/api/exact-duplicate-groups/{digestHex}/cleanup-preflight` (read-only; no Trash/delete/move).
 - Source management and indexing frontend: `http://localhost:5173/sources`
+- Media Library frontend: `http://localhost:5173/library`. Browse current catalog images in a responsive grid with progressive 50-item pages. Only visible missing JPEG/PNG thumbnails are scheduled; queued previews refresh within a bounded window. Published previews whose cache files cannot load offer an explicit Repair preview action. Current image metadata is required for items to appear; grouped browsing and detail/compare remain deferred.
 - Exact duplicate frontend: `http://localhost:5173/duplicates`. Detail groups overlapping Source memberships by physical `FileEntry` and offers explicit keeper/removal preview decisions collected into a browser-session cleanup plan at `/duplicates/plan`. Multiple groups can be reviewed, updated, removed, or cleared. Use `Check safety` for one group or `Check cleanup plan` to check every group sequentially. The page shows transient READY NOW/BLOCKED results per physical FileEntry, separate CHECK FAILED request errors with retry, and safety counts alongside the unchanged browser-plan totals. Only individual READY results show backend-confirmed current candidate counts and savings; BLOCKED checks never rewrite the plan. Entries represent physical FileEntries, not Source memberships, and disappear on reload. No decision is persisted and no filesystem mutation exists. Future file operations must revalidate backend/filesystem authority rather than trust these review snapshots.
 - The Vite development server proxies `/api` requests to the backend.
 

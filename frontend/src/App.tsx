@@ -4,6 +4,7 @@ import { DuplicateDetailPage } from './duplicates/DuplicateDetailPage.tsx'
 import { DuplicateCleanupPlanPage } from './duplicates/DuplicateCleanupPlanPage.tsx'
 import { DuplicatesPage } from './duplicates/DuplicatesPage.tsx'
 import { HomePage } from './HomePage.tsx'
+import { MediaLibraryPage } from './library/MediaLibraryPage.tsx'
 import { SourcesPage } from './sources/SourcesPage.tsx'
 
 function AppHeader() {
@@ -14,6 +15,7 @@ function AppHeader() {
       </Link>
       <nav aria-label="Primary navigation">
         <Link to="/sources">Sources</Link>
+        <Link to="/library">Library</Link>
         <Link to="/duplicates">Exact Duplicates</Link>
       </nav>
     </header>
@@ -28,6 +30,7 @@ function App() {
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/sources" element={<SourcesPage />} />
+          <Route path="/library" element={<MediaLibraryPage />} />
           <Route path="/duplicates" element={<DuplicatesPage />} />
           <Route path="/duplicates/plan" element={<DuplicateCleanupPlanPage />} />
           <Route

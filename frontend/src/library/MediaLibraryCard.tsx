@@ -1,0 +1,95 @@
+import { memo, useEffect, useRef, useState } from 'react'
+import type { MediaLibraryItem } from '../api/mediaLibrary.ts'
+import type { ThumbnailWork } from './mediaLibraryState.ts'
+
+interface CardProps {
+  item: MediaLibraryItem
+  work?: ThumbnailWork
+  observeCard: (node: HTMLElement, id: number) => () => void
+  onRetry: (item: MediaLibraryItem, purpose: 'generation' | 'repair') => void
+  onRepairLoaded: (id: number) => void
+}
+
+export const MediaLibraryCard = memo(function MediaLibraryCard({ item, work, observeCard, onRetry, onRepairLoaded }: CardProps) {
+  const card = useRef<HTMLElement>(null)
+  const [brokenUrl, setBrokenUrl] = useState<string | null>(null)
+  const url = item.thumbnail.url
+  const broken = url !== null && brokenUrl === url
+  const active = work && ['scheduling', 'awaiting', 'deferred'].includes(work.phase)
+  const repairing = active && work.purpose === 'repair'
+  const retryRequest = repairing && work.reload > 0
+  const imageUrl = url && retryRequest
+    ? `${url}${url.includes('?') ? '&' : '?'}repair=${work.startedAt}-${work.reload}` : url
+
+  useEffect(() => {
+    const node = card.current
+    if (node) return observeCard(node, item.fileEntryId)
+  }, [observeCard, item.fileEntryId])
+
+  let label = 'Preview not generated'
+  if (broken) label = 'Preview file missing'
+  else if (item.generationSupport === 'UNSUPPORTED') label = 'Preview unavailable'
+  else if (work?.phase === 'paused') label = 'Preview still pending'
+  else if (work?.phase === 'failed') label = 'Preview request failed'
+  if (active) {
+    label = work.phase === 'deferred' ? 'Waiting for preview queue'
+      : repairing ? 'Repairing preview…' : 'Preparing preview…'
+  }
+
+  return (
+    <article ref={card} className="library-card" aria-label={item.displayName}>
+      <div className="library-tile">
+        <div className="library-tile-content">
+          {url && (!broken || retryRequest) && (
+            <img
+              key={imageUrl}
+              src={imageUrl ?? undefined}
+              alt={item.displayName}
+              loading="lazy"
+              decoding="async"
+              className={broken ? 'library-image-retry' : undefined}
+              onError={(event) => {
+                if (event.currentTarget.isConnected) setBrokenUrl(url)
+              }}
+              onLoad={(event) => {
+                if (!event.currentTarget.isConnected) return
+                setBrokenUrl(null)
+                if (work?.purpose === 'repair') onRepairLoaded(item.fileEntryId)
+              }}
+            />
+          )}
+          {(!url || broken) && (
+            <div className="library-placeholder">
+              <svg viewBox="0 0 32 32" aria-hidden="true" className="library-image-symbol">
+                <rect x="4" y="4" width="24" height="24" rx="3" />
+                <circle cx="12" cy="12" r="2" />
+                <path d="m5 24 7-7 5 5 5-9 6 11" />
+              </svg>
+              <span>{label}</span>
+              {active && <span className="library-pulse" aria-hidden="true" />}
+              {item.generationSupport === 'SUPPORTED' && !active
+                && (broken || work?.phase === 'paused' || work?.phase === 'failed') && (
+                <button
+                  type="button"
+                  className="library-retry-button"
+                  aria-label={`${broken ? 'Repair preview' : 'Retry preview'} for ${item.displayName}`}
+                  onClick={() => onRetry(item, broken ? 'repair' : 'generation')}
+                >
+                  {broken ? 'Repair preview' : 'Retry preview'}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="library-card-caption">
+        <h2 title={item.relativePath}>{item.displayName}</h2>
+        <p className="library-source" title={`${item.sourceName} · ${item.relativePath}`}>
+          {item.sourceName}
+          <span className="library-accessible-path"> · {item.relativePath}</span>
+        </p>
+        <p className="library-format">{item.format.toUpperCase()} · {item.encodedWidth} × {item.encodedHeight}</p>
+      </div>
+    </article>
+  )
+})

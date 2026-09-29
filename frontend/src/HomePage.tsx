@@ -21,8 +21,8 @@ export function HomePage() {
       <p className="eyebrow">Catalog tools</p>
       <h1>Media Compare</h1>
       <p className="page-intro">
-        Register local media folders, analyze their catalog contents, and review
-        exact byte-for-byte duplicates. Media Compare does not change files.
+        Register local media folders, browse catalog images, and review exact
+        byte-for-byte duplicates. Media Compare leaves original files unchanged.
       </p>
       <div className="home-actions">
         <article>
@@ -30,6 +30,13 @@ export function HomePage() {
           <p>Register a folder and run discovery through exact hashing.</p>
           <Link className="primary-link" to="/sources">
             Index media
+          </Link>
+        </article>
+        <article>
+          <h2>Media Library</h2>
+          <p>Browse current catalog images with small previews and source context.</p>
+          <Link className="secondary-link" to="/library">
+            Browse images
           </Link>
         </article>
         <article>

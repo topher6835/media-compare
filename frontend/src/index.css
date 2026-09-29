@@ -188,9 +188,188 @@ main {
 
 .home-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   gap: 14px;
   margin-top: 28px;
+}
+
+/* Item-level image browsing; the observed card keeps its geometry even when
+   browser-native containment skips painting the preview contents. */
+.library-header {
+  margin-bottom: 28px;
+}
+
+.library-count {
+  margin-bottom: 12px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 18px 12px;
+}
+
+.library-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  contain: layout style;
+}
+
+.library-tile {
+  position: relative;
+  aspect-ratio: 1;
+  background: var(--surface-subtle);
+}
+
+.library-tile-content {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 180px;
+}
+
+.library-tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.library-tile .library-image-retry {
+  position: absolute;
+  opacity: 0;
+}
+
+.library-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 9px;
+  height: 100%;
+  padding: 12px;
+  color: var(--text-muted);
+  background: linear-gradient(145deg, var(--surface-subtle), var(--bg));
+  font-size: 0.75rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.library-image-symbol {
+  width: 32px;
+  height: 32px;
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 1.5;
+}
+
+.library-pulse {
+  width: 24px;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--accent);
+  animation: library-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes library-pulse {
+  50% { opacity: 0.3; }
+}
+
+.library-retry-button {
+  min-height: 32px;
+  max-width: 100%;
+  padding: 5px 9px;
+  border-color: var(--border-strong);
+  color: var(--accent-dark);
+  background: var(--surface);
+  font-size: 0.72rem;
+}
+
+.library-retry-button:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.library-card-caption {
+  min-width: 0;
+  padding: 10px 11px 12px;
+}
+
+.library-card-caption h2,
+.library-card-caption p {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.library-card-caption h2 {
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.library-source {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.library-format {
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  line-height: 1.5;
+}
+
+.library-accessible-path {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.library-pagination {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 12px;
+  padding: 28px 0 4px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.library-load-more {
+  border-color: var(--border-strong);
+  color: var(--accent-dark);
+  background: var(--surface);
+}
+
+.library-load-more:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .library-pulse { animation: none; }
+}
+
+@media (max-width: 430px) {
+  .library-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 8px;
+  }
+
+  .library-card-caption { padding: 8px; }
+  .library-placeholder { padding: 8px; gap: 7px; font-size: 0.7rem; }
 }
 
 .home-actions article {
@@ -1404,7 +1583,9 @@ dd {
 
 @media (max-width: 720px) {
   .app-header {
-    padding: 0 18px;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    padding: 12px 18px;
   }
 
   main {
