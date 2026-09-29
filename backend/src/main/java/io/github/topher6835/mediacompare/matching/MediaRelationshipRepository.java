@@ -5,6 +5,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
@@ -66,7 +67,10 @@ public class MediaRelationshipRepository {
                 (resultSet, rowNumber) -> mapRelationship(resultSet), id).stream().findFirst();
     }
 
-    /** Returns all retained matcher versions/configurations for the requested types, in ID order. */
+    /**
+     * Returns retained history for the requested types in ID order, including every matcher/configuration.
+     * Must not be used directly for current grouping; use {@link #findBySelection} instead.
+     */
     public List<MediaRelationship> findByTypes(Set<MediaRelationshipType> enabledTypes) {
         Objects.requireNonNull(enabledTypes, "enabledTypes");
         if (enabledTypes.isEmpty()) {
@@ -80,6 +84,31 @@ public class MediaRelationshipRepository {
                 ORDER BY id
                 """.formatted(placeholders),
                 (resultSet, rowNumber) -> mapRelationship(resultSet), types.toArray());
+    }
+
+    /** Reads only exact explicitly accepted definitions in one query, in ascending relationship ID order. */
+    public List<MediaRelationship> findBySelection(MediaRelationshipSelection selection) {
+        Objects.requireNonNull(selection, "selection");
+        if (selection.definitions().isEmpty()) {
+            return List.of();
+        }
+        List<String> predicates = new ArrayList<>();
+        List<Object> parameters = new ArrayList<>();
+        for (MediaRelationshipDefinition definition : selection.definitions()) {
+            predicates.add("""
+                    (relationship_type = ? AND matcher_id = ? AND matcher_version = ?
+                     AND configuration_version = ? AND configuration_hash = ? AND configuration_json = ?)
+                    """);
+            parameters.add(definition.relationshipType().name());
+            parameters.add(definition.matcherId());
+            parameters.add(definition.matcherVersion());
+            parameters.add(definition.configurationVersion());
+            parameters.add(definition.configurationHash());
+            parameters.add(definition.configurationJson());
+        }
+        return jdbcTemplate.query("SELECT * FROM media_relationship WHERE "
+                + String.join(" OR ", predicates) + " ORDER BY id",
+                (resultSet, rowNumber) -> mapRelationship(resultSet), parameters.toArray());
     }
 
     private static MediaRelationship mapRelationship(ResultSet resultSet) throws SQLException {

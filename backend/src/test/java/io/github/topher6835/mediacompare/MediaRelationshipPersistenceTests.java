@@ -12,8 +12,10 @@ import java.util.Set;
 import io.github.topher6835.mediacompare.catalog.CatalogRepository;
 import io.github.topher6835.mediacompare.catalog.ContentRecord;
 import io.github.topher6835.mediacompare.matching.MediaRelationship;
+import io.github.topher6835.mediacompare.matching.MediaRelationshipDefinition;
 import io.github.topher6835.mediacompare.matching.MediaRelationshipDirection;
 import io.github.topher6835.mediacompare.matching.MediaRelationshipRepository;
+import io.github.topher6835.mediacompare.matching.MediaRelationshipSelection;
 import io.github.topher6835.mediacompare.matching.MediaRelationshipType;
 
 import org.junit.jupiter.api.AfterEach;
@@ -104,6 +106,63 @@ class MediaRelationshipPersistenceTests {
 
     private long content() {
         return catalog.insert(new ContentRecord(null, 42, 1)).id();
+    }
+
+    @Test
+    void selectionMatchesEveryDefinitionFieldAndRetainsAllHistoryInIdOrder() {
+        long a = content();
+        long b = content();
+        long c = content();
+        MediaRelationshipDefinition selected = new MediaRelationshipDefinition(
+                MediaRelationshipType.CROP, "test.crop", "1", 1, "hash", "{\"x\":1}");
+        MediaRelationshipDefinition resized = new MediaRelationshipDefinition(
+                MediaRelationshipType.RESIZED, "test.crop", "1", 1, "hash", "{\"x\":1}");
+        MediaRelationship first = relationships.insert(definedRelationship(a, b, selected));
+        List<MediaRelationshipDefinition> otherDefinitions = List.of(
+                new MediaRelationshipDefinition(MediaRelationshipType.CROP, "other.crop", "1", 1, "hash", "{\"x\":1}"),
+                new MediaRelationshipDefinition(MediaRelationshipType.CROP, "test.crop", "99", 1, "hash", "{\"x\":1}"),
+                new MediaRelationshipDefinition(MediaRelationshipType.CROP, "test.crop", "1", 99, "hash", "{\"x\":1}"),
+                new MediaRelationshipDefinition(MediaRelationshipType.CROP, "test.crop", "1", 1, "other-hash", "{\"x\":1}"),
+                new MediaRelationshipDefinition(MediaRelationshipType.CROP, "test.crop", "1", 1, "hash", "{\"x\":2}"),
+                new MediaRelationshipDefinition(MediaRelationshipType.CROP, "test.crop", "1", 1, "hash", " {\"x\":1} "));
+        for (MediaRelationshipDefinition definition : otherDefinitions) {
+            // V8 uniqueness excludes JSON; each historical definition uses its own pair.
+            relationships.insert(definedRelationship(b, content(), definition));
+        }
+        MediaRelationship mixedType = relationships.insert(definedRelationship(a, b, resized));
+        MediaRelationship last = relationships.insert(definedRelationship(a, c, selected));
+        List<MediaRelationship> history = relationships.findByTypes(EnumSet.allOf(MediaRelationshipType.class));
+
+        assertEquals(List.of(first, last), relationships.findBySelection(
+                new MediaRelationshipSelection(List.of(selected))));
+        assertEquals(List.of(first, mixedType, last), relationships.findBySelection(
+                new MediaRelationshipSelection(List.of(selected, resized))));
+        assertEquals(List.of(), relationships.findBySelection(new MediaRelationshipSelection(List.of())));
+        assertEquals(8, relationships.findByTypes(Set.of(MediaRelationshipType.CROP)).size());
+        assertEquals(history, relationships.findByTypes(EnumSet.allOf(MediaRelationshipType.class)));
+        for (MediaRelationship row : history) {
+            assertEquals(row, relationships.findById(row.id()).orElseThrow());
+        }
+    }
+
+    @Test
+    void selectionParameterizesProvenanceContainingSqlPunctuation() {
+        long a = content();
+        long b = content();
+        relationships.insert(relationship(a, b, MediaRelationshipType.CROP,
+                MediaRelationshipDirection.UNDIRECTED, "1", 1, "hash", null));
+        MediaRelationshipDefinition definition = new MediaRelationshipDefinition(MediaRelationshipType.CROP,
+                "test.crop' OR 1=1 --", "version'", 1, "hash'", "{\"label\":\"it's exact\"}");
+        MediaRelationship selected = relationships.insert(definedRelationship(a, b, definition));
+        assertEquals(List.of(selected), relationships.findBySelection(
+                new MediaRelationshipSelection(List.of(definition))));
+    }
+
+    private static MediaRelationship definedRelationship(long a, long b, MediaRelationshipDefinition definition) {
+        return new MediaRelationship(null, a, b, definition.relationshipType(),
+                MediaRelationshipDirection.UNDIRECTED, null, "{}", definition.matcherId(),
+                definition.matcherVersion(), definition.configurationVersion(), definition.configurationHash(),
+                definition.configurationJson(), 100);
     }
 
     private static MediaRelationship relationship(long a, long b, MediaRelationshipType type,

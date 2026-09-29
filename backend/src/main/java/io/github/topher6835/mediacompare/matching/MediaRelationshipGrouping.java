@@ -10,7 +10,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-/** Pure connected components over enabled edges; direction and matcher provenance are metadata. */
+/**
+ * Pure connected components over supplied enabled edges; direction and matcher provenance are metadata.
+ * Production callers must select compatible definitions first through {@link MediaRelationshipGroupService}.
+ */
 public final class MediaRelationshipGrouping {
 
     /** Members are ascending IDs; components are ordered by their smallest member. */

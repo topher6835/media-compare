@@ -184,6 +184,14 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Keep existing `content_hash`-derived SHA-256 duplicate grouping and its API/UI authoritative and separate. V8 migrates no hash groups and publishes no `EXACT` rows. A future adapter/projection may feed exact equality into the relationship graph.
 - Keep preview/cache identity based on physical FileEntry/current file evidence rather than SourceMembership. V9 implements the filesystem-cache and SQLite-metadata boundary described below. The album grid must not load originals.
 
+## Explicit Relationship Definition Selection Before Grouping
+
+- Preserve V8 historical artifacts when matcher/configuration definitions change. Raw `findByTypes` remains available for history/inspection and must not feed current grouping directly.
+- Require explicit exact provenance selection: relationship type, matcher ID/version, configuration version/hash, and configuration JSON must all match. Preserve supplied JSON text without canonicalization; matching hash alone does not establish compatibility.
+- Accept at most one selected definition per type, rejecting even repeated identical definitions. Multi-producer compatibility for one semantic type requires a deliberate later design. Empty selection is valid; immutable definitions/types use type declaration order.
+- Infer no compatibility from row ID, creation time, matcher/configuration version ordering, or row counts. No fake current definitions or global registry exists before actual matchers/adapters.
+- Use one parameterized selection query followed by database-independent connected-component grouping through `MediaRelationshipGroupService`. Enabled types come from the selection; historical rows and schema stay unchanged. Future matcher/adapter definitions feed this boundary.
+
 ## FileEntry Preview Cache Foundation (V9)
 
 - Base cache identity on FileEntry ID, current ContentRecord, observation revision, size, complete modification-time evidence, kind, and exact generator/configuration identity. Exclude Sources, memberships, paths, and membership counts so overlapping Sources reuse one occurrence's identity. Do not share previews across distinct FileEntries yet; ContentRecord-based relationship semantics are unchanged.
@@ -214,7 +222,7 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Derive thumbnail references from exact current V9 evidence and SMALL_THUMBNAIL definition. PUBLISHED describes successful DB metadata, not physical cache availability. Library GET is database-only and never checks cache/original files or generates/schedules work. Preserve immutable preview GET behavior.
 - Admit explicit visible-item work through POST `/api/media-library/thumbnails`, with 1–100 distinct positive IDs, ordered per-ID statuses, no-store 202, and partial acceptance retained. Scheduling does not require page membership or snapshot cache identity; execution resolves then-current evidence. The React grid schedules only visible missing supported items, while explicit rescheduling can repair a missing physical cache file behind a published row.
 - Use one non-daemon worker and ArrayBlockingQueue capacity 64, with bounded queued/running FileEntry coalescing. Keep the generator's existing synchronization. Completion/failure releases state; unsupported input is normal. Persist no tasks/failures, add no automatic retries or whole-library scans, and do not introduce a generic job framework. Follow the existing 30-second shutdown/interrupt/discard/catalog-ownership retention conventions.
-- Leave V8 relationships and matched-group projection unwired until compatible/current matcher-version selection is designed. No fake singleton or duplicate groups are persisted or projected by this item API.
+- Keep the item API separate from V8 relationship selection/grouping and future matched-group projection. Explicit definition selection is now implemented; no fake singleton or duplicate groups are persisted or projected by this item API.
 
 ## First React Media Library Grid
 

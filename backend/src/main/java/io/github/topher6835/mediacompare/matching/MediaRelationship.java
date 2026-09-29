@@ -1,13 +1,10 @@
 package io.github.topher6835.mediacompare.matching;
 
-import java.nio.charset.StandardCharsets;
-import java.util.Objects;
+import static io.github.topher6835.mediacompare.matching.MediaRelationshipValidation.requireConfigurationVersion;
+import static io.github.topher6835.mediacompare.matching.MediaRelationshipValidation.requireJsonObject;
+import static io.github.topher6835.mediacompare.matching.MediaRelationshipValidation.requireNonBlank;
 
-import tools.jackson.core.JacksonException;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.json.JsonMapper;
+import java.util.Objects;
 
 /** One durable matcher result between immutable content identities, independent of file locations. */
 public record MediaRelationship(
@@ -25,11 +22,7 @@ public record MediaRelationship(
         String configurationJson,
         long createdAtMs) {
 
-    public static final int MAX_JSON_UTF8_BYTES = 128 * 1_024;
-    private static final JsonMapper JSON_MAPPER = JsonMapper.builder()
-            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-            .build();
+    public static final int MAX_JSON_UTF8_BYTES = MediaRelationshipValidation.MAX_JSON_UTF8_BYTES;
 
     /** Input direction refers to the supplied endpoints; swapping them reverses direction. */
     public MediaRelationship {
@@ -52,45 +45,9 @@ public record MediaRelationship(
         }
         requireNonBlank(matcherId, "matcherId");
         requireNonBlank(matcherVersion, "matcherVersion");
-        if (configurationVersion <= 0) {
-            throw new IllegalArgumentException("configurationVersion must be positive");
-        }
+        requireConfigurationVersion(configurationVersion);
         requireNonBlank(configurationHash, "configurationHash");
         requireJsonObject(evidenceJson, "evidenceJson");
         requireJsonObject(configurationJson, "configurationJson");
-    }
-
-    private static void requireNonBlank(String value, String fieldName) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException(fieldName + " must not be blank");
-        }
-    }
-
-    private static void requireJsonObject(String json, String fieldName) {
-        requireNonBlank(json, fieldName);
-        if (json.length() > MAX_JSON_UTF8_BYTES
-                || json.getBytes(StandardCharsets.UTF_8).length > MAX_JSON_UTF8_BYTES) {
-            throw new IllegalArgumentException(fieldName + " exceeds 128 KiB of UTF-8");
-        }
-        // JDBC must be able to preserve the supplied JSON as UTF-8 without replacement characters.
-        for (int index = 0; index < json.length(); index++) {
-            char character = json.charAt(index);
-            if (Character.isHighSurrogate(character)) {
-                if (index + 1 >= json.length() || !Character.isLowSurrogate(json.charAt(index + 1))) {
-                    throw new IllegalArgumentException(fieldName + " contains malformed Unicode");
-                }
-                index++;
-            } else if (Character.isLowSurrogate(character)) {
-                throw new IllegalArgumentException(fieldName + " contains malformed Unicode");
-            }
-        }
-        try {
-            JsonNode root = JSON_MAPPER.readTree(json);
-            if (root == null || !root.isObject()) {
-                throw new IllegalArgumentException(fieldName + " must be a JSON object");
-            }
-        } catch (JacksonException exception) {
-            throw new IllegalArgumentException(fieldName + " must be a valid JSON object", exception);
-        }
     }
 }

@@ -18,7 +18,7 @@ The repository currently contains a working full-stack scaffold:
 - A synchronous command that publishes exact SHA-256 analysis for safe assigned-content candidates.
 - A background version-3 SCAN Job with DISCOVERY, RECONCILIATION, CONTENT_ASSIGNMENT, and CONTENT_HASHING under membership authority.
 - Read-only APIs that derive exact duplicate groups and retained occurrences from trusted SHA-256 artifacts, with catalog-correct file-category and extension filtering.
-- A V8 ContentRecord relationship table, focused JDBC repository, and pure dynamic grouping component; no matcher publishes edges yet.
+- A V8 ContentRecord relationship table, exact definition/selection values, focused JDBC queries, and a safe selection-to-pure-grouping service; no matcher publishes edges yet.
 - A V9 FileEntry preview-cache foundation with successful-asset metadata, deterministic keys/layout, current-evidence lookup, read-only immutable serving, and an internal synchronous JPEG/PNG SMALL_THUMBNAIL generator.
 - A database-only keyset media-library item projection and explicit transient thumbnail scheduler (one worker, queue 64) under `/api/media-library`.
 - Frontend `/library`, `/sources`, `/duplicates`, `/duplicates/:digestHex`, and `/duplicates/plan` routes for item-level image browsing, Source registration/indexing, derived exact-group browsing, and session-only cleanup planning, in addition to the `/` health route.
@@ -69,7 +69,7 @@ The initial Java package structure is:
 - `scan` — ScanRun, ScanRunSource, and reconciliation coordination.
 - `job` — generic durable execution and stage state.
 - `analysis` — AnalysisRecord and reusable specialized analysis artifacts.
-- `matching` — exact byte-equality reporting, durable typed ContentRecord relationships, and pure grouping.
+- `matching` — exact byte-equality reporting, durable typed ContentRecord relationships, explicit definition selection, and pure grouping.
 - `preview` — cache evidence/provenance, immutable asset keys, successful metadata persistence, managed filesystem resolution, guarded small-thumbnail generation/publication, and transient bounded scheduling.
 - `library` — database-only current-image item projection, current thumbnail references, and FileEntry keyset pagination.
 - `web` — thin REST controllers and later HTTP/SSE endpoints.
@@ -222,6 +222,12 @@ Filesystem metadata belongs to FileEntry. Media-derived metadata belongs to Cont
 
 Face analyzer output, detected face instances, and embeddings remain conceptually separate from later human person or group classification. AI analysis follows the same provenance and versioning rules: it is optional and provider-independent, and local and cloud providers may coexist without making the rest of the catalog depend on one provider. Face/person schemas, AI result schemas, provider interfaces, and runtime architecture remain undecided.
 
+### Future Semantic Analysis
+
+Semantic analysis targets `ContentRecord`, not `SourceMembership`. AI observations and embeddings remain separate from typed media-to-media relationships (`EXACT`, `RESIZED`, `CROP`, `EDITED`, etc.). Model/provider outputs will be normalized into Media Compare-owned observation schemas; every artifact carries model/version/configuration provenance, and changed models/configurations preserve old results rather than overwrite them. Embeddings belong to explicit model/version-specific embedding spaces; vectors from different spaces must never be assumed directly comparable.
+
+Person/scene/action clusters are derived, recomputable interpretations of observations, not raw model truth. No speculative person/face/body embedding tables are introduced. Concrete semantic/embedding schemas remain deferred until the semantic-analysis milestone and actual candidate models have been selected and tested; this note does not change the current roadmap.
+
 ## Catalog Architecture and Remaining Lifecycle Work
 
 The current operational model is `Source -> SourceMembership -> FileEntry -> ContentRecord -> AnalysisRecord`. V6 makes FileEntry source-independent and puts Source relationship and presence on SourceMembership. V3 is the current four-stage SCAN execution. Context creation, acceptance, retirement, same-anchor replacement, first-time Source binding, explicit Source unbinding, fixed-root rebinding, and explicit relocate-and-bind are available. Automatic remount recognition, multiple independent catalogs, and other provider profiles remain future work.
@@ -292,7 +298,11 @@ Exact byte-equality grouping is the first implemented matching behavior and uses
 
 V8 persists typed media relationships between immutable ContentRecords, independent of SourceMembership and FileEntry locations. Multiple physical occurrences and overlapping Sources do not duplicate a content relationship; moving, renaming, or losing one occurrence does not invalidate its reusable artifact. Future presentation code can resolve the content endpoints to current FileEntries and SourceMemberships.
 
-`MediaRelationship` canonicalizes pairs to `A < B` and reverses independent direction metadata when swapping endpoints. Nullable normalized confidence, bounded JSON evidence, matcher identity/version, configuration version/hash/effective JSON, and creation time accompany each edge. The pair/type/exact matcher/configuration identity is unique. Different identities coexist; there is no automatic supersession. `MediaRelationshipRepository` inserts, reads by ID, and filters by enabled types, retaining all versions/configurations. Matcher compatibility selection remains future query/adapter work.
+`MediaRelationship` canonicalizes pairs to `A < B` and reverses independent direction metadata when swapping endpoints. Nullable normalized confidence, bounded JSON evidence, matcher identity/version, configuration version/hash/effective JSON, and creation time accompany each edge. The pair/type/matcher/configuration version/hash identity is unique. Different definitions coexist durably as historical artifacts; there is no automatic supersession. `MediaRelationshipRepository.findByTypes` returns retained history across all definitions and must not be used directly for current grouping: obsolete edges could bridge otherwise separate components.
+
+`MediaRelationshipDefinition` identifies an exact relationship type, matcher ID/version, and configuration version/hash/JSON. The JSON must be a bounded valid object under the same strict rules as relationship evidence/configuration; supplied text is preserved. Compatibility requires all six fields to match, including exact configuration JSON even when hashes agree. `MediaRelationshipSelection` is immutable and deterministically ordered by type declaration order. Current policy accepts at most one definition per type (including rejecting repeated identical definitions); empty selection is legal. Enabled types derive only from selected definitions. There is no automatic latest inference from row ID, timestamps, version ordering, configuration version, or row counts.
+
+`MediaRelationshipGroupService.group(selection)` is the safe production boundary: `repository.findBySelection(selection)` queries only exact selected definitions in one parameterized, bounded OR query ordered by relationship ID, then passes those rows and the selection's enabled types to pure grouping. Empty selection returns empty groups without a database query. Reads preserve every historical artifact. No global current-definition registry exists; future concrete matchers/adapters will supply their exact accepted definitions to this boundary.
 
 `MediaRelationshipGrouping` is database-independent. It builds connected components using only enabled types, regardless of direction. Transitive mixed-type paths connect, repeated edges do not duplicate members, and disabling/re-enabling types splits/reconnects components without media reanalysis. Output is deterministic: ascending member IDs, components ordered by smallest member. Only endpoints connected by an enabled edge appear. No groups, permanent memberships, or toggle combinations are persisted.
 
@@ -344,7 +354,7 @@ Thumbnail projection left-joins the exact `SmallThumbnailDefinition` and all cur
 
 Shutdown stops admission, allows at most 30 seconds for completion, then interrupts active work and discards queued tasks while releasing their coalescing entries. Closed admission returns QUEUE_FULL. Unfinished/uninterruptible work conservatively retains CatalogOwnership until process exit, following existing executor conventions. A narrow package-private callback constructor supports deterministic latch-based tests without a generic job framework.
 
-V8 matcher/version compatibility and matched-group projection remain undecided and separate. The item grid neither reads relationships nor invents singleton/fake groups. Medium previews and original high-resolution demand remain later work.
+Explicit V8 definition selection precedes grouping; actual matchers/adapters and matched-group projection remain later work. The item grid neither reads relationships nor invents singleton/fake groups. Medium previews and original high-resolution demand remain later work.
 
 ### React Media Library
 
@@ -366,7 +376,7 @@ Eviction/LRU/storage quotas and cleanup are future work. Cleanup may remove stal
 Source -> SourceMembership -> FileEntry -> ContentRecord -> AnalysisRecord -> specialized results
 Source -> LocationContext; resolved FileEntry -> LocationContext
 ContentRecord -> derived exact duplicate groups
-ContentRecord <-> media_relationship <-> ContentRecord -> derived enabled-edge components
+ContentRecord <-> media_relationship <-> ContentRecord -> exact definition selection -> derived components
 WorkingSet -> ContentRecord membership
 ScanRun -> Job -> stages/checkpoints
 ```
@@ -510,7 +520,7 @@ The following remain open after the V1 review:
 - Scheduling beyond the bounded v3 worker, public cancellation/retries, and future resume.
 - Detailed scan scope representation and source-specific progress.
 - Specialized result schemas beyond `content_hash`.
-- Candidate generation, relationship matcher/evidence compatibility and matched-group projection, album UX ordering, and manual override schemas. The item-level library API is implemented; relationship groups remain derived, not materialized.
+- Candidate generation, concrete relationship matcher/evidence designs, multi-producer compatibility per type, matched-group projection, album UX ordering, and manual override schemas. Explicit exact definition selection is implemented; the item-level library API is separate and relationship groups remain derived, not materialized.
 - Face/person schema and AI-provider architecture.
 - Additional preview renderers/formats, medium-preview policy, future scheduling performance/capacity changes, and cache eviction/storage policy. V9 supports the first synchronous small-thumbnail generator and immutable serving boundary.
 - Real-Windows ffprobe redirected-file/`fd:` qualification and acceptance.
