@@ -8,7 +8,7 @@ import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-/** Exact generator/configuration provenance; this milestone supplies no generator. */
+/** Exact generator/configuration provenance. */
 public record PreviewDefinition(
         String generatorId,
         String generatorVersion,

@@ -4,12 +4,51 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
 public class MediaMetadataCandidateRepository {
+
+    // One deterministic trusted membership per physical FileEntry, shared by metadata and previews.
+    private static final String OCCURRENCE_SELECT = """
+                SELECT file_entry.id AS file_entry_id,
+                       file_entry.current_content_id,
+                       content_record.size_bytes AS content_size_bytes,
+                       membership.id AS membership_id,
+                       membership.source_id,
+                       source.location_revision,
+                       file_entry.location_context_id,
+                       context.revision AS context_revision,
+                       membership.membership_revision,
+                       file_entry.location_path,
+                       file_entry.location_key,
+                       file_entry.observation_revision,
+                       file_entry.size_bytes,
+                       file_entry.modified_time_epoch_second,
+                       file_entry.modified_time_nano
+                FROM file_entry
+                JOIN source_membership AS membership ON membership.id = (
+                    SELECT MIN(eligible.id) FROM source_membership AS eligible
+                    JOIN source AS eligible_source ON eligible_source.id = eligible.source_id
+                    JOIN location_context AS eligible_context
+                      ON eligible_context.id = file_entry.location_context_id
+                    WHERE eligible.file_entry_id = file_entry.id
+                      AND eligible.applicability_status = 'ACTIVE'
+                      AND eligible.presence_status = 'PRESENT'
+                      AND eligible.observed_file_entry_revision = file_entry.observation_revision
+                      AND eligible.observed_source_location_revision = eligible_source.location_revision
+                      AND eligible.observed_location_context_revision = eligible_context.revision
+                      AND eligible_source.bound_location_context_id = eligible_context.id
+                      AND eligible_context.lifecycle_status = 'ACTIVE'
+                      AND eligible_context.continuity_status = 'ACCEPTED'
+                )
+                JOIN source ON source.id = membership.source_id
+                JOIN location_context AS context ON context.id = file_entry.location_context_id
+                JOIN content_record ON content_record.id = file_entry.current_content_id
+            """;
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -73,41 +112,7 @@ public class MediaMetadataCandidateRepository {
         Objects.requireNonNull(candidate, "candidate");
         requirePositiveLimit(limit);
 
-        return jdbcTemplate.query("""
-                SELECT file_entry.id AS file_entry_id,
-                       file_entry.current_content_id,
-                       content_record.size_bytes AS content_size_bytes,
-                       membership.id AS membership_id,
-                       membership.source_id,
-                       source.location_revision,
-                       file_entry.location_context_id,
-                       context.revision AS context_revision,
-                       membership.membership_revision,
-                       file_entry.location_path,
-                       file_entry.location_key,
-                       file_entry.observation_revision,
-                       file_entry.size_bytes,
-                       file_entry.modified_time_epoch_second,
-                       file_entry.modified_time_nano
-                FROM file_entry
-                JOIN source_membership AS membership ON membership.id = (
-                    SELECT MIN(eligible.id) FROM source_membership AS eligible
-                    JOIN source AS eligible_source ON eligible_source.id = eligible.source_id
-                    JOIN location_context AS eligible_context
-                      ON eligible_context.id = file_entry.location_context_id
-                    WHERE eligible.file_entry_id = file_entry.id
-                      AND eligible.applicability_status = 'ACTIVE'
-                      AND eligible.presence_status = 'PRESENT'
-                      AND eligible.observed_file_entry_revision = file_entry.observation_revision
-                      AND eligible.observed_source_location_revision = eligible_source.location_revision
-                      AND eligible.observed_location_context_revision = eligible_context.revision
-                      AND eligible_source.bound_location_context_id = eligible_context.id
-                      AND eligible_context.lifecycle_status = 'ACTIVE'
-                      AND eligible_context.continuity_status = 'ACCEPTED'
-                )
-                JOIN source ON source.id = membership.source_id
-                JOIN location_context AS context ON context.id = file_entry.location_context_id
-                JOIN content_record ON content_record.id = file_entry.current_content_id
+        return jdbcTemplate.query(OCCURRENCE_SELECT + """
                 WHERE file_entry.current_content_id = ?
                   AND content_record.size_bytes = ?
                   AND file_entry.location_identity_status = 'RESOLVED'
@@ -117,6 +122,20 @@ public class MediaMetadataCandidateRepository {
                 """, MediaMetadataCandidateRepository::mapFileCandidate,
                 candidate.contentRecordId(), candidate.expectedContentSizeBytes(),
                 afterFileEntryId, limit);
+    }
+
+    /** Original-file access snapshot for one current trusted occurrence; no analysis filtering. */
+    public Optional<MediaMetadataFileCandidate> findCurrentOccurrence(long fileEntryId) {
+        if (fileEntryId <= 0) {
+            throw new IllegalArgumentException("fileEntryId must be positive");
+        }
+        return jdbcTemplate.query(OCCURRENCE_SELECT + """
+                WHERE file_entry.id = ?
+                  AND file_entry.location_identity_status = 'RESOLVED'
+                  AND file_entry.size_bytes = content_record.size_bytes
+                  AND file_entry.modified_time_epoch_second IS NOT NULL
+                  AND file_entry.modified_time_nano IS NOT NULL
+                """, MediaMetadataCandidateRepository::mapFileCandidate, fileEntryId).stream().findFirst();
     }
 
     public int verifyCandidate(MediaMetadataFileCandidate candidate) {

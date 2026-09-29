@@ -369,7 +369,11 @@ Two UNIQUE indexes enforce `asset_key` and the logical identity `(file_entry_id,
 
 `PreviewAssetRepository` inserts successful metadata, looks up immutable keys, and finds one current reusable asset for a FileEntry/kind/exact definition. Current lookup joins the actual FileEntry and requires equal current content, revision, size, epoch second, and nanosecond. Null current content/time or changed evidence returns no match. It neither requires nor hashes SourceMembership identity, and never deletes stale rows during reads. Immutable key lookup can still return stale historical assets; callers presenting current files use current lookup first.
 
-The final file must exist before metadata insertion; future publication owns that ordering. Old rows/files are disposable stale cache material, retained until future cleanup. Cascading metadata removal when an underlying catalog identity is explicitly deleted does not delete cache files or alter existing catalog deletion restrictions.
+The final file must exist before metadata insertion; `ThumbnailPublisher` enforces that ordering under the current-authority transaction guard. Old rows/files are disposable stale cache material, retained until future cleanup. Cascading metadata removal when an underlying catalog identity is explicitly deleted does not delete cache files or alter existing catalog deletion restrictions.
+
+The first actual generator maps directly onto V9: `preview_kind = SMALL_THUMBNAIL`, `generator_id = builtin.imageio.small-thumbnail`, `generator_version = 1`, and `configuration_version = 1`. `SmallThumbnailDefinition` stores stable effective configuration JSON and derives `configuration_hash` as lowercase SHA-256 of its exact UTF-8 bytes. Rules include JPEG/PNG content input, PNG output, 320px maximum displayed edge, no upscaling, all JPEG EXIF orientations, bicubic quality final scaling, bounded decode subsampling, and a 65,535px encoded-edge safety limit. Successful output stores `image/png`, the deterministic `.png` relative path, actual oriented output dimensions/byte length, and publication timestamp. No table, migration, V9 identity contract, or failure/Job persistence is added.
+
+Publication revalidates the temporary membership/Source/context access snapshot plus all current FileEntry and ContentRecord evidence under SQLite writer reservation. Those route fields remain outside `PreviewSourceEvidence` and `preview_asset`; overlapping Sources reuse one physical identity. Equivalent publication reuses the stored successful row. Missing-file regeneration must agree with existing output metadata and preserves its ID/creation time. Unsafe or inconsistent immutable files and incompatible winners fail closed. Failed DB publication may retain an orphan final cache file for future cleanup.
 
 ## Filesystem Timestamps
 
@@ -439,7 +443,7 @@ The current implementation does not include:
 - Matching candidates, actual relationship matchers, per-type evidence codecs, or manual override schemas. Groups are derived rather than persisted.
 - AI-specific result schemas and provider infrastructure.
 - Filesystem-action history.
-- Actual thumbnail/preview generation, publication orchestration, background preview jobs, and cache eviction/cleanup.
+- Medium previews, additional image formats, video previews, bulk/background preview scheduling, and cache eviction/cleanup.
 - Final FFmpeg/ffprobe discovery strategy.
 - WAL-specific architecture.
 - Final symlink/junction traversal behavior.
