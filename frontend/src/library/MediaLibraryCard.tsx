@@ -1,16 +1,18 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import type { MediaLibraryItem } from '../api/mediaLibrary.ts'
 import type { ThumbnailWork } from './mediaLibraryState.ts'
+import { formatGroupFileCount } from './mediaLibraryGroupState.ts'
 
 interface CardProps {
   item: MediaLibraryItem
+  currentItemCount?: number
   work?: ThumbnailWork
   observeCard: (node: HTMLElement, id: number) => () => void
   onRetry: (item: MediaLibraryItem, purpose: 'generation' | 'repair') => void
   onRepairLoaded: (id: number) => void
 }
 
-export const MediaLibraryCard = memo(function MediaLibraryCard({ item, work, observeCard, onRetry, onRepairLoaded }: CardProps) {
+export const MediaLibraryCard = memo(function MediaLibraryCard({ item, currentItemCount, work, observeCard, onRetry, onRepairLoaded }: CardProps) {
   const card = useRef<HTMLElement>(null)
   const [brokenUrl, setBrokenUrl] = useState<string | null>(null)
   const url = item.thumbnail.url
@@ -37,7 +39,8 @@ export const MediaLibraryCard = memo(function MediaLibraryCard({ item, work, obs
   }
 
   return (
-    <article ref={card} className="library-card" aria-label={item.displayName}>
+    <article ref={card} className="library-card" aria-label={currentItemCount === undefined
+      ? item.displayName : `${item.displayName}, ${formatGroupFileCount(currentItemCount)}`}>
       <div className="library-tile">
         <div className="library-tile-content">
           {url && (!broken || retryRequest) && (
@@ -81,6 +84,9 @@ export const MediaLibraryCard = memo(function MediaLibraryCard({ item, work, obs
             </div>
           )}
         </div>
+        {currentItemCount !== undefined && (
+          <span className="library-group-count" aria-hidden="true">{formatGroupFileCount(currentItemCount)}</span>
+        )}
       </div>
       <div className="library-card-caption">
         <h2 title={item.relativePath}>{item.displayName}</h2>

@@ -1,4 +1,5 @@
 import type { MediaLibraryItem, MediaLibraryPage, ThumbnailScheduleStatus } from '../api/mediaLibrary.ts'
+import type { LoadedLibraryGroupPage } from './mediaLibraryGroupState.ts'
 
 export const THUMBNAIL_RETRY_MS = 2_000
 export const THUMBNAIL_WAIT_MS = 30_000
@@ -6,6 +7,20 @@ export const THUMBNAIL_WAIT_MS = 30_000
 export interface LoadedLibraryPage extends MediaLibraryPage {
   afterFileEntryId: number | null
   endFileEntryId: number | null
+}
+
+export interface ThumbnailPageSegment {
+  cursor: number | null
+  items: MediaLibraryItem[]
+}
+
+export function itemThumbnailSegments(pages: LoadedLibraryPage[]): ThumbnailPageSegment[] {
+  return pages.map((page) => ({ cursor: page.afterFileEntryId, items: page.items }))
+}
+
+export function groupThumbnailSegments(pages: LoadedLibraryGroupPage[]): ThumbnailPageSegment[] {
+  return pages.map((page) => ({ cursor: page.afterRepresentativeFileEntryId,
+    items: page.groups.map((group) => group.representative) }))
 }
 
 export function appendLibraryPage(
@@ -125,11 +140,11 @@ export function reconcileThumbnailWork(
   return next
 }
 
-export function visibleAwaitingPages(
-  pages: LoadedLibraryPage[],
+export function visibleAwaitingPages<T extends { items: MediaLibraryItem[] }>(
+  pages: T[],
   visible: ReadonlySet<number>,
   work: ThumbnailWorkById,
-): LoadedLibraryPage[] {
+): T[] {
   return pages.filter((page) => page.items.some((item) =>
     visible.has(item.fileEntryId) && item.thumbnail.state === 'MISSING'
     && work[item.fileEntryId]?.purpose === 'generation'

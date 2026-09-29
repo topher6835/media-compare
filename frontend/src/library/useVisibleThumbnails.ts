@@ -3,12 +3,12 @@ import { scheduleMediaLibraryThumbnails, type MediaLibraryItem } from '../api/me
 import {
   applyScheduleStatus, newThumbnailWork, reconcileThumbnailWork,
   visibleAwaitingPages, visibleRepairCandidates, visibleSchedulingCandidates,
-  type LoadedLibraryPage, type ThumbnailWorkById,
+  type ThumbnailPageSegment, type ThumbnailWorkById,
 } from './mediaLibraryState.ts'
 
 interface ThumbnailOptions {
   items: MediaLibraryItem[]
-  pages: LoadedLibraryPage[]
+  pages: ThumbnailPageSegment[]
   visible: ReadonlySet<number>
   refreshPage: (cursor: number | null, signal: AbortSignal) => Promise<void>
 }
@@ -83,7 +83,7 @@ export function useVisibleThumbnails({ items, pages, visible, refreshPage }: Thu
     }
 
     const relevant = visibleAwaitingPages(pages, visible, current)
-    const relevantCursors = new Set(relevant.map((page) => page.afterFileEntryId))
+    const relevantCursors = new Set(relevant.map((page) => page.cursor))
     for (const [cursor, controller] of refreshes.current) {
       if (!relevantCursors.has(cursor)) {
         controller.abort()
@@ -91,7 +91,7 @@ export function useVisibleThumbnails({ items, pages, visible, refreshPage }: Thu
       }
     }
     for (const page of relevant) {
-      const cursor = page.afterFileEntryId
+      const cursor = page.cursor
       if (refreshes.current.has(cursor) || now - (lastRefresh.current.get(cursor) ?? 0) < 1_000) continue
       const controller = new AbortController()
       refreshes.current.set(cursor, controller)

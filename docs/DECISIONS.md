@@ -241,7 +241,14 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Default the public grouped API to EXACT, the only implemented public type, mapped exactly to the SHA projection definition. Deduplicate repeated EXACT values. Reject unavailable known types and malformed values rather than infer latest versions or invent matcher definitions. Concrete future matchers deliberately extend this library-specific policy.
 - Scan the unchanged current-item query from zero in bounded 500-item keyset batches under one read-only transaction with graph selection. Keep only component mapping and one representative/count per group. After complete aggregation, order/page by representative FileEntry ID with default 50/max 200, nonnegative cursor, one lookahead, and nullable next cursor; later members never reintroduce earlier groups.
 - Keep GET database-only and no-store, using existing safe 400/empty-500 handling. Persist/materialize/cache no groups or memberships; add no schema, dependency, filesystem access, rendering, scheduling, or writes. Preserve `/items`, thumbnail POST, preview GET, and duplicate-specific API/UI behavior.
-- The next milestone is the first grouped React library view with an explicit item/group control and representative thumbnail/count tiles. Group detail/members remain separate unless explicitly included later.
+- The React library presents these groups as summaries; group detail/members remain separate future work.
+
+## First Grouped React Media Library View
+
+- Keep Items as the default `/library` view. An explicit native-button Items / Groups control uses page-local state and may reload a mode from its first page when switched; no view choice is persisted.
+- Groups explicitly requests `relationshipType=EXACT` from the grouped API with 50-group representative-ID pages. The frontend sends no matcher provenance and derives no relationship graph or durable group identity.
+- Show every returned group, including one-file singletons, as one representative FileEntry tile. Its count describes current physical library files, not a historical total or deletion estimate. Cards are summaries without click/detail behavior until a member/detail contract exists.
+- Share the existing visible-only thumbnail scheduling, publication polling, and explicit missing-file repair lifecycle with Items. Group mode exposes only representatives to that lifecycle, and refreshes preserve original representative segment boundaries.
 
 ## First React Media Library Grid
 
@@ -250,7 +257,7 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Treat QUEUED and ALREADY_QUEUED as awaiting publication. Back off QUEUE_FULL by two seconds and retry only visible, eligible work. Bound each continuous admission/publication cycle to 30 seconds, then require an explicit retry; request failures also expose retry without automatic resubmission.
 - Re-fetch only loaded keyset segments containing visible awaiting generation items, at most once per second per segment. Preserve original segment boundaries/cursors when eligibility changes and deduplicate by FileEntry ID. Release completed work and cancel refreshes when no visible awaiting items remain or on unmount.
 - Distinguish successful DB metadata from physical file availability. Image-load failure never schedules automatic PUBLISHED repair. Explicit Repair preview uses the same POST and bounded visible retries of the same immutable URL with a temporary query token; successful load restores the canonical URL.
-- Keep this route at the item level. Relationship/group UI uses the new grouped API in a later milestone; detail/compare, selection, filters, videos, medium/original previews, and organization remain separate milestones.
+- Keep the item grid behavior in the default Items view. The first group summary view is described above; detail/compare, selection, filters, videos, medium/original previews, and organization remain separate milestones.
 
 ## Catalog-Correct Exact Duplicate Filtering
 

@@ -30,6 +30,17 @@ export interface MediaLibraryPage {
   nextCursor: number | null
 }
 
+export interface MediaLibraryGroupSummary {
+  groupKeyContentRecordId: number
+  representative: MediaLibraryItem
+  currentItemCount: number
+}
+
+export interface MediaLibraryGroupPage {
+  groups: MediaLibraryGroupSummary[]
+  nextCursor: number | null
+}
+
 export interface ThumbnailScheduleResult {
   fileEntryId: number
   status: ThumbnailScheduleStatus
@@ -48,6 +59,17 @@ export function getMediaLibraryItems(
     parameters.set('afterFileEntryId', String(afterFileEntryId))
   }
   return requestJson(`/api/media-library/items?${parameters}`, { signal })
+}
+
+export function getMediaLibraryGroups(
+  afterRepresentativeFileEntryId?: number | null,
+  signal?: AbortSignal,
+): Promise<MediaLibraryGroupPage> {
+  const parameters = new URLSearchParams({ relationshipType: 'EXACT', limit: '50' })
+  if (afterRepresentativeFileEntryId !== undefined && afterRepresentativeFileEntryId !== null) {
+    parameters.set('afterRepresentativeFileEntryId', String(afterRepresentativeFileEntryId))
+  }
+  return requestJson(`/api/media-library/groups?${parameters}`, { signal })
 }
 
 export function chunkThumbnailIds(fileEntryIds: number[]): number[][] {
