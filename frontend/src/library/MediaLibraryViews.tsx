@@ -5,18 +5,22 @@ import { flattenLibraryPages, groupThumbnailSegments, itemThumbnailSegments } fr
 import { useMediaLibraryGroupPages } from './useMediaLibraryGroupPages.ts'
 import { useMediaLibraryPages } from './useMediaLibraryPages.ts'
 
-export function MediaLibraryItemView() {
-  const { pages, ...pagination } = useMediaLibraryPages()
+interface ViewProps { historyKey: string; restoreKey: string }
+
+export function MediaLibraryItemView({ historyKey, restoreKey }: ViewProps) {
+  const { pages, ...pagination } = useMediaLibraryPages(historyKey, restoreKey)
   const cards = useMemo<LibraryCardEntry[]>(() => flattenLibraryPages(pages).map((item) => ({ item })), [pages])
   const segments = useMemo(() => itemThumbnailSegments(pages), [pages])
-  return <MediaLibraryGrid mode="items" cards={cards} segments={segments} {...pagination} />
+  return <MediaLibraryGrid mode="items" cards={cards} segments={segments}
+    historyKey={historyKey} restoreKey={restoreKey} {...pagination} />
 }
 
-export function MediaLibraryGroupView() {
-  const { pages, ...pagination } = useMediaLibraryGroupPages()
+export function MediaLibraryGroupView({ historyKey, restoreKey }: ViewProps) {
+  const { pages, ...pagination } = useMediaLibraryGroupPages(historyKey, restoreKey)
   const cards = useMemo<LibraryCardEntry[]>(() => flattenLibraryGroupPages(pages).map((group) => ({
     item: group.representative, currentItemCount: group.currentItemCount,
   })), [pages])
   const segments = useMemo(() => groupThumbnailSegments(pages), [pages])
-  return <MediaLibraryGrid mode="groups" cards={cards} segments={segments} {...pagination} />
+  return <MediaLibraryGrid mode="groups" cards={cards} segments={segments}
+    historyKey={historyKey} restoreKey={restoreKey} {...pagination} />
 }

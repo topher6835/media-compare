@@ -8,6 +8,8 @@ import { ExactBadge } from './ExactBadge.tsx'
 interface CardProps {
   item: MediaLibraryItem
   mode: 'items' | 'groups'
+  fromLibraryKey?: string
+  onOpen?: () => void
   currentItemCount?: number
   work?: ThumbnailWork
   observeCard: (node: HTMLElement, id: number) => () => void
@@ -15,7 +17,8 @@ interface CardProps {
   onRepairLoaded: (id: number) => void
 }
 
-export const MediaLibraryCard = memo(function MediaLibraryCard({ item, mode, currentItemCount, work, observeCard, onRetry, onRepairLoaded }: CardProps) {
+export const MediaLibraryCard = memo(function MediaLibraryCard({ item, mode, fromLibraryKey, onOpen,
+  currentItemCount, work, observeCard, onRetry, onRepairLoaded }: CardProps) {
   const card = useRef<HTMLElement>(null)
   const [brokenUrl, setBrokenUrl] = useState<string | null>(null)
   const url = item.thumbnail.url
@@ -43,7 +46,7 @@ export const MediaLibraryCard = memo(function MediaLibraryCard({ item, mode, cur
   }
 
   return (
-    <article ref={card} className="library-card" aria-label={currentItemCount === undefined
+    <article ref={card} className="library-card" data-file-entry-id={item.fileEntryId} aria-label={currentItemCount === undefined
       ? item.displayName : `${item.displayName}, ${formatGroupFileCount(currentItemCount)}`}>
       <div className="library-tile">
         <div className="library-tile-content">
@@ -87,7 +90,7 @@ export const MediaLibraryCard = memo(function MediaLibraryCard({ item, mode, cur
               )}
             </div>
           )}
-          <Link className="library-card-main-link" to={detailUrl}
+          <Link className="library-card-main-link" to={detailUrl} state={{ fromLibraryKey }} onClick={onOpen}
             aria-label={`View details for ${item.displayName}`} />
         </div>
         {currentItemCount !== undefined && (
@@ -95,7 +98,7 @@ export const MediaLibraryCard = memo(function MediaLibraryCard({ item, mode, cur
         )}
       </div>
       <div className="library-card-caption">
-        <h2 title={item.relativePath}><Link to={detailUrl}>{item.displayName}</Link></h2>
+        <h2 title={item.relativePath}><Link to={detailUrl} state={{ fromLibraryKey }} onClick={onOpen}>{item.displayName}</Link></h2>
         <p className="library-source" title={`${item.sourceName} · ${item.relativePath}`}>
           {item.sourceName}
           <span className="library-accessible-path"> · {item.relativePath}</span>

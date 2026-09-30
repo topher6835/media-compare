@@ -5,6 +5,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Optional;
+import java.util.List;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -88,6 +89,14 @@ public class SourceMembershipRepository {
                 SELECT * FROM source_membership WHERE source_id = ? AND file_entry_id = ?
                 """, SourceMembershipRepository::membership, sourceId, fileEntryId)
                 .stream().findFirst();
+    }
+
+    public List<SourceMembership> findActivePresentByFileEntryId(long fileEntryId) {
+        return jdbc.query("""
+                SELECT * FROM source_membership
+                WHERE file_entry_id = ? AND applicability_status = 'ACTIVE' AND presence_status = 'PRESENT'
+                ORDER BY id
+                """, SourceMembershipRepository::membership, fileEntryId);
     }
 
     public int retire(SourceMembership membership) {

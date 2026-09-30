@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import type { ExactDuplicateGroupDetail } from '../api/exactDuplicates.ts'
 import { filenameFromPath, pluralize } from './duplicateFormatting.ts'
 import { groupPhysicalCopies } from './duplicatePhysicalCopies.ts'
+import { RevealFileButton } from '../library/RevealFileButton.tsx'
 import {
   createCleanupPlanEntry,
   estimateCleanupSavings,
@@ -159,8 +160,14 @@ export function DuplicatePhysicalCopies({ detail, filtersActive, filterSearch }:
                       {filtersActive && occurrence.matchesFilter && <span className="status-badge filter-match">FILTER MATCH</span>}
                     </div>
                     <p className="file-path">{occurrence.relativePath}</p>
-                    <p className="file-path full-path">{occurrence.absolutePath
-                      ?? 'Full path unavailable from current trusted catalog route'}</p>
+                    <div className="reveal-path-row">
+                      <p className="file-path full-path">{occurrence.absolutePath
+                        ?? 'Full path unavailable from current trusted catalog route'}</p>
+                      {!isMissing && occurrence.presenceStatus === 'PRESENT' && occurrence.absolutePath
+                        && occurrence === copy.occurrences.find((route) =>
+                          route.presenceStatus === 'PRESENT' && route.absolutePath)
+                        && <RevealFileButton fileEntryId={copy.fileEntryId} />}
+                    </div>
                     <p className="planner-note">
                       {occurrence.extension ?? 'No extension'} ·{' '}
                       {occurrence.fileCategory === 'PHOTO' ? 'Photo' : occurrence.fileCategory === 'VIDEO' ? 'Video' : occurrence.fileCategory === 'DOCUMENT' ? 'Document' : 'Unclassified'}

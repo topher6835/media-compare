@@ -51,17 +51,26 @@ public class CleanupPreflightFileValidator {
     }
 
     public CleanupPreflightReason validate(CleanupPreflightCatalog.PhysicalFile file, String digest) {
+        return validatePhysicalFile(file, digest).reason();
+    }
+
+    /** The same live route/path checks without digest hashing, for a single-file host action. */
+    public ValidatedFile validateForReveal(CleanupPreflightCatalog.PhysicalFile file) {
+        return validatePhysicalFile(file, null);
+    }
+
+    private ValidatedFile validatePhysicalFile(CleanupPreflightCatalog.PhysicalFile file, String digest) {
         FileEntry entry = file.entry();
-        if (!"RESOLVED".equals(entry.locationIdentityStatus())) return UNSAFE_PATH;
+        if (!"RESOLVED".equals(entry.locationIdentityStatus())) return failed(UNSAFE_PATH);
         final LocationPath location;
         try {
             location = new LocationPathCodec().decode(entry.locationPath());
             if (location.dialect() != LocationDialect.UNIX || location.components().isEmpty()
                     || !LocationKeyCodec.matches(location, LocationKey.parse(entry.locationKey()))) {
-                return UNSAFE_PATH;
+                return failed(UNSAFE_PATH);
             }
         } catch (IllegalArgumentException exception) {
-            return UNSAFE_PATH;
+            return failed(UNSAFE_PATH);
         }
         CleanupPreflightReason failure = AUTHORITY_UNAVAILABLE;
         for (var route : file.routes()) {
@@ -85,14 +94,17 @@ public class CleanupPreflightFileValidator {
             try {
                 Path path = hostPath(location);
                 var before = checkPath(entry, path, authority);
-                if (before != null) return before;
-                if (entry.currentContentId() == null) return AUTHORITY_CHANGED;
-                String actual = hasher.hash(new ContentHashCandidate(entry.id(), entry.currentContentId(),
-                        member.id(), source.id(), context.id(), context.revision(), member.membershipRevision(),
-                        entry.locationPath(), entry.locationKey(), entry.observationRevision(), entry.sizeBytes(),
-                        entry.modifiedTimeEpochSecond(), entry.modifiedTimeNano(), source.locationRevision()));
+                if (before != null) return failed(before);
+                if (entry.currentContentId() == null) return failed(AUTHORITY_CHANGED);
+                String actual = null;
+                if (digest != null) {
+                    actual = hasher.hash(new ContentHashCandidate(entry.id(), entry.currentContentId(),
+                            member.id(), source.id(), context.id(), context.revision(), member.membershipRevision(),
+                            entry.locationPath(), entry.locationKey(), entry.observationRevision(), entry.sizeBytes(),
+                            entry.modifiedTimeEpochSecond(), entry.modifiedTimeNano(), source.locationRevision()));
+                }
                 var after = checkPath(entry, path, authority);
-                if (after != null) return after;
+                if (after != null) return failed(after);
                 var end = capture.capture(source, context);
                 if (end.outcome() != ScanAuthorityOutcome.TRUSTED) {
                     failure = AUTHORITY_CHANGED;
@@ -112,15 +124,22 @@ public class CleanupPreflightFileValidator {
                     failure = AUTHORITY_CHANGED;
                     continue;
                 }
-                return actual.equals(digest) ? null : HASH_MISMATCH;
+                return digest == null || actual.equals(digest)
+                        ? new ValidatedFile(path, null) : failed(HASH_MISMATCH);
             } catch (StaleContentHashException exception) {
-                return FILESYSTEM_CHANGED;
+                return failed(FILESYSTEM_CHANGED);
             } catch (IOException | SecurityException | UnsupportedOperationException exception) {
-                return IO_UNAVAILABLE;
+                return failed(IO_UNAVAILABLE);
             }
         }
-        return failure;
+        return failed(failure);
     }
+
+    private static ValidatedFile failed(CleanupPreflightReason reason) {
+        return new ValidatedFile(null, reason);
+    }
+
+    public record ValidatedFile(Path path, CleanupPreflightReason reason) { }
 
     private CleanupPreflightReason checkPath(FileEntry entry, Path file, ScanAuthoritySnapshot authority)
             throws IOException {

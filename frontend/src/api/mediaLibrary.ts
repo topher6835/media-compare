@@ -1,4 +1,4 @@
-import { requestJson } from './http.ts'
+import { ApiError, requestJson } from './http.ts'
 
 export type GenerationSupport = 'SUPPORTED' | 'UNSUPPORTED'
 export type ThumbnailState = 'MISSING' | 'PUBLISHED'
@@ -65,6 +65,13 @@ export function getMediaLibraryItems(
 
 export function getMediaLibraryItem(fileEntryId: number, signal?: AbortSignal): Promise<MediaLibraryItem> {
   return requestJson(`/api/media-library/items/${fileEntryId}`, { signal })
+}
+
+export async function revealMediaLibraryFile(fileEntryId: number, signal?: AbortSignal): Promise<void> {
+  const response = await fetch(`/api/media-library/items/${fileEntryId}/reveal`, {
+    method: 'POST', headers: { 'X-Media-Compare-Reveal': '1' }, signal,
+  })
+  if (!response.ok) throw new ApiError(response.status)
 }
 
 export function getMediaLibraryGroups(

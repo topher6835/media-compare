@@ -21,6 +21,8 @@ before(async () => {
     '/src/duplicates/DuplicateRepresentativePreview.tsx',
     '/src/library/MediaLibraryPage.tsx', '/src/library/libraryView.ts',
     '/src/duplicates/DuplicatesPage.tsx', '/src/duplicates/DuplicateDetailPage.tsx',
+    '/src/library/librarySession.ts', '/src/api/mediaLibrary.ts',
+    '/src/library/revealStatus.ts', '/src/api/http.ts',
   ].map((name) => vite.ssrLoadModule(name)))
 })
 
@@ -79,6 +81,29 @@ test('Item Detail return link follows explicit Library context', () => {
   assert.match(render(route, '/library/items/7'), /href="\/library\?view=items"/)
 })
 
+test('Library snapshots restore later pages and originating cards for both modes', () => {
+  const { rememberLibraryPages, rememberLibraryOrigin, getLibrarySnapshot,
+    restoreLibraryPosition, libraryReturnKey } = components[7]
+  const itemPage = (id, cursor) => ({ items: [{ fileEntryId: id }], nextCursor: id,
+    afterFileEntryId: cursor, endFileEntryId: id })
+  rememberLibraryPages('items', 'items-key', [itemPage(7, null), itemPage(57, 7)])
+  rememberLibraryOrigin('items', 'items-key', 57, 1200)
+  const items = getLibrarySnapshot('items', 'items-key')
+  assert.equal(items.pages.length, 2)
+  assert.deepEqual(restoreLibraryPosition([7, 57], items), { cardId: 57, scrollY: 1200 })
+  assert.deepEqual(restoreLibraryPosition([7], items), { cardId: null, scrollY: 0 })
+  assert.equal(getLibrarySnapshot('groups', 'items-key'), null)
+  const groupPage = { groups: [{ representative: { fileEntryId: 73 } }], nextCursor: 73,
+    afterRepresentativeFileEntryId: null, endRepresentativeFileEntryId: 73 }
+  rememberLibraryPages('groups', 'groups-key', [groupPage])
+  rememberLibraryOrigin('groups', 'groups-key', 73, 900)
+  assert.deepEqual(restoreLibraryPosition([73], getLibrarySnapshot('groups', 'groups-key')),
+    { cardId: 73, scrollY: 900 })
+  assert.equal(restoreLibraryPosition([], getLibrarySnapshot('items', 'new-visit')), null)
+  assert.equal(libraryReturnKey({ restoreLibraryKey: 'items-key' }, 'new-key'), 'items-key')
+  assert.equal(libraryReturnKey(null, 'browser-back-key'), 'browser-back-key')
+})
+
 test('HEIC detail shows path and honest unavailable metadata and preview', () => {
   const { MediaLibraryItemDetailContent } = components[1]
   const html = render(createElement(MediaLibraryItemDetailContent,
@@ -89,6 +114,7 @@ test('HEIC detail shows path and honest unavailable metadata and preview', () =>
   assert.match(html, /Decoded format<\/dt><dd>Unavailable/)
   assert.doesNotMatch(html, /<img/)
   assert.doesNotMatch(html, /Exact copies/)
+  assert.equal((html.match(/Reveal in Finder/g) ?? []).length, 1)
 })
 
 test('exact item detail lists current, missing, and unavailable paths', () => {
@@ -112,6 +138,7 @@ test('exact item detail lists current, missing, and unavailable paths', () => {
   assert.match(html, /Full path unavailable from current trusted catalog route/)
   assert.match(html, /MISSING/)
   assert.match(html, /\/media\/old\/picture\.heic/)
+  assert.equal((html.match(/Reveal in Finder/g) ?? []).length, 2)
 })
 
 test('duplicate preview keeps unsupported and non-image groups visible', () => {
@@ -155,4 +182,58 @@ test('exact detail shows one representative and no member thumbnails', () => {
   assert.equal((html.match(/class="duplicate-representative"/g) ?? []).length, 1)
   assert.match(html, /Preview unavailable/)
   assert.match(html, /Physical copies/)
+})
+
+test('exact detail offers one reveal action per present physical copy', () => {
+  const { DuplicateGroupDetail } = components[6]
+  const occurrence = (fileEntryId, membershipId, path) => ({
+    fileEntryId, membershipId, contentRecordId: fileEntryId,
+    sourceId: membershipId, sourceName: `Source ${membershipId}`,
+    relativePath: 'picture.heic', absolutePath: path,
+    presenceStatus: 'PRESENT', applicabilityStatus: 'ACTIVE', extension: 'HEIC',
+    fileCategory: 'PHOTO', matchesFilter: false,
+  })
+  const detail = {
+    digestHex: 'd'.repeat(64), sizeBytes: 123, contentRecordCount: 2,
+    presentOccurrenceCount: 2, missingOccurrenceCount: 0, sourceCount: 2,
+    potentialStorageSavingsBytes: 123, representative: null,
+    members: [], occurrences: [
+      occurrence(7, 1, '/media/picture.heic'),
+      occurrence(7, 2, '/media/picture.heic'),
+      occurrence(8, 3, '/media/copy.heic'),
+    ],
+  }
+  const html = render(createElement(DuplicateGroupDetail, {
+    detail, filters: { fileCategories: [], extensions: [] },
+  }))
+  assert.equal((html.match(/Reveal in Finder<\/button>/g) ?? []).length, 2)
+  assert.match(html, /aria-label="Reveal FileEntry 7 in Finder"/)
+  assert.match(html, /aria-label="Reveal FileEntry 8 in Finder"/)
+})
+
+test('reveal API sends only a physical FileEntry ID and no browser path', async () => {
+  const { revealMediaLibraryFile } = components[8]
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (url, options) => {
+    calls.push([url, options])
+    return { ok: true, status: 204 }
+  }
+  try {
+    await revealMediaLibraryFile(7)
+    assert.deepEqual(calls, [['/api/media-library/items/7/reveal', {
+      method: 'POST', headers: { 'X-Media-Compare-Reveal': '1' }, signal: undefined,
+    }]])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('reveal failures distinguish stale file, platform, and request errors', () => {
+  const { revealFailureMessage } = components[9]
+  const { ApiError } = components[10]
+  assert.match(revealFailureMessage(new ApiError(409)), /current location could not be verified/)
+  assert.match(revealFailureMessage(new ApiError(410)), /current location could not be verified/)
+  assert.match(revealFailureMessage(new ApiError(501)), /macOS only/)
+  assert.match(revealFailureMessage(new Error('offline')), /backend is running/)
 })

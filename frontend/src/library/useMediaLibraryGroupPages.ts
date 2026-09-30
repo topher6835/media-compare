@@ -3,15 +3,18 @@ import { getMediaLibraryGroups } from '../api/mediaLibrary.ts'
 import {
   appendLibraryGroupPage, refreshLibraryGroupPage, type LoadedLibraryGroupPage,
 } from './mediaLibraryGroupState.ts'
+import { getLibrarySnapshot, rememberLibraryPages } from './librarySession.ts'
 
-export function useMediaLibraryGroupPages() {
-  const [pages, setPages] = useState<LoadedLibraryGroupPage[]>([])
-  const [loading, setLoading] = useState(true)
+export function useMediaLibraryGroupPages(historyKey: string, restoreKey: string) {
+  const [initialPages] = useState(() => getLibrarySnapshot('groups', restoreKey)?.pages ?? [])
+  const [pages, setPages] = useState<LoadedLibraryGroupPage[]>(initialPages)
+  const [loading, setLoading] = useState(initialPages.length === 0)
   const [error, setError] = useState(false)
   const [initialAttempt, setInitialAttempt] = useState(0)
   const moreRequest = useRef<AbortController | null>(null)
 
   useEffect(() => {
+    if (initialPages.length > 0 && initialAttempt === 0) return
     const controller = new AbortController()
     getMediaLibraryGroups(null, controller.signal)
       .then((page) => {
@@ -24,7 +27,11 @@ export function useMediaLibraryGroupPages() {
         if (!controller.signal.aborted) setLoading(false)
       })
     return () => controller.abort()
-  }, [initialAttempt])
+  }, [initialAttempt, initialPages.length])
+
+  useEffect(() => {
+    if (pages.length > 0) rememberLibraryPages('groups', historyKey, pages)
+  }, [historyKey, pages])
 
   useEffect(() => () => { moreRequest.current?.abort() }, [])
 

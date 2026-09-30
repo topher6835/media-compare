@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
 import { ApiError } from '../api/http.ts'
 import { getExactDuplicateGroup, type ExactDuplicateGroupDetail } from '../api/exactDuplicates.ts'
 import { getMediaLibraryItem, type MediaLibraryItem } from '../api/mediaLibrary.ts'
 import { filenameFromPath } from '../duplicates/duplicateFormatting.ts'
 import { groupPhysicalCopies } from '../duplicates/duplicatePhysicalCopies.ts'
 import { ExactBadge } from './ExactBadge.tsx'
+import { RevealFileButton } from './RevealFileButton.tsx'
 
 export function MediaLibraryItemDetailPage() {
   const { fileEntryId = '' } = useParams()
   const [searchParams] = useSearchParams()
+  const location = useLocation()
+  const fromLibraryKey = (location.state as { fromLibraryKey?: unknown } | null)?.fromLibraryKey
   const returnView = searchParams.get('from') === 'groups' ? 'groups' : 'items'
   const id = Number(fileEntryId)
   const [item, setItem] = useState<MediaLibraryItem | null>(null)
@@ -46,7 +49,8 @@ export function MediaLibraryItemDetailPage() {
 
   const invalid = !Number.isSafeInteger(id) || id <= 0
   return <div className="library-item-detail">
-    <Link className="back-link" to={`/library?view=${returnView}`}>← Library</Link>
+    <Link className="back-link" to={`/library?view=${returnView}`}
+      state={typeof fromLibraryKey === 'string' ? { restoreLibraryKey: fromLibraryKey } : undefined}>← Library</Link>
     {invalid || failure === 'missing' ? <div className="state-panel empty-panel">
       <h1>Item not found</h1><p>This catalog image is unavailable.</p>
     </div> : failure === 'server' ? <div className="state-panel error-panel" role="alert">
@@ -99,7 +103,10 @@ export function MediaLibraryItemDetailContent({ item, brokenPreview, onPreviewEr
               <div><dt>Source paths</dt><dd>{item.sourceCount}</dd></div>
             </dl>
             <h2>Full path</h2>
-            <p className="item-full-path">{item.absolutePath ?? 'Path unavailable from current trusted catalog route'}</p>
+            <div className="reveal-path-row">
+              <p className="item-full-path">{item.absolutePath ?? 'Path unavailable from current trusted catalog route'}</p>
+              {item.absolutePath && <RevealFileButton fileEntryId={item.fileEntryId} />}
+            </div>
           </div>
         </div>
         {item.exactSet && item.exactSet.physicalCopyCount >= 2 && (
@@ -118,8 +125,14 @@ export function MediaLibraryItemDetailContent({ item, brokenPreview, onPreviewEr
                     {copy.occurrences.map((occurrence) => (
                       <div className="item-copy-route" key={occurrence.membershipId}>
                         <p>Source: {occurrence.sourceName} · #{occurrence.sourceId} · {occurrence.presenceStatus}</p>
-                        <p className="item-full-path">{occurrence.absolutePath
-                          ?? 'Full path unavailable from current trusted catalog route'}</p>
+                        <div className="reveal-path-row">
+                          <p className="item-full-path">{occurrence.absolutePath
+                            ?? 'Full path unavailable from current trusted catalog route'}</p>
+                          {copy.presenceStatus === 'PRESENT' && occurrence.presenceStatus === 'PRESENT'
+                            && occurrence.absolutePath && occurrence === copy.occurrences.find((route) =>
+                              route.presenceStatus === 'PRESENT' && route.absolutePath)
+                            && <RevealFileButton fileEntryId={copy.fileEntryId} />}
+                        </div>
                       </div>
                     ))}
                   </li>

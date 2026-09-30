@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import type { MediaLibraryItem } from '../api/mediaLibrary.ts'
+import { getMediaLibraryItem } from '../api/mediaLibrary.ts'
+import { ApiError } from '../api/http.ts'
 import { MediaLibraryCard } from './MediaLibraryCard.tsx'
 import type { ThumbnailPageSegment } from './mediaLibraryState.ts'
 import { useCardVisibility } from './useCardVisibility.ts'
 import { useVisibleThumbnails } from './useVisibleThumbnails.ts'
+import { getLibrarySnapshot, rememberLibraryOrigin, restoreLibraryPosition } from './librarySession.ts'
 
 export interface LibraryCardEntry {
   item: MediaLibraryItem
@@ -13,6 +16,8 @@ export interface LibraryCardEntry {
 
 interface GridProps {
   mode: 'items' | 'groups'
+  historyKey: string
+  restoreKey: string
   cards: LibraryCardEntry[]
   segments: ThumbnailPageSegment[]
   loading: boolean
@@ -24,7 +29,7 @@ interface GridProps {
 }
 
 /** One visible-card thumbnail lifecycle and one progressive grid for the active view. */
-export function MediaLibraryGrid({ mode, cards, segments, loading, error, nextCursor,
+export function MediaLibraryGrid({ mode, historyKey, restoreKey, cards, segments, loading, error, nextCursor,
   loadMore, refreshPage, retry }: GridProps) {
   const items = useMemo(() => cards.map((card) => card.item), [cards])
   const { visible, observeCard } = useCardVisibility()
@@ -32,6 +37,42 @@ export function MediaLibraryGrid({ mode, cards, segments, loading, error, nextCu
   const sentinel = useRef<HTMLDivElement>(null)
   const initial = segments.length === 0
   const groups = mode === 'groups'
+  const restored = useRef(false)
+  const checkedOrigin = useRef(false)
+
+  useLayoutEffect(() => {
+    if (restored.current || segments.length === 0) return
+    restored.current = true
+    const position = restoreLibraryPosition(items.map((item) => item.fileEntryId),
+      getLibrarySnapshot(mode, restoreKey))
+    if (!position) return
+    const card = position.cardId === null ? null
+      : document.querySelector<HTMLElement>(`.library-card[data-file-entry-id="${position.cardId}"]`)
+    if (card) card.scrollIntoView({ block: 'center' })
+    else window.scrollTo(0, position.scrollY)
+  }, [items, mode, restoreKey, segments.length])
+
+  useEffect(() => {
+    if (checkedOrigin.current || segments.length === 0) return
+    checkedOrigin.current = true
+    const origin = getLibrarySnapshot(mode, restoreKey)?.cardId
+    if (origin == null) return
+    const segment = segments.find((page) => page.items.some((item) => item.fileEntryId === origin))
+    if (!segment) return
+    const controller = new AbortController()
+    void getMediaLibraryItem(origin, controller.signal).catch(async (failure: unknown) => {
+      if (controller.signal.aborted || !(failure instanceof ApiError) || failure.status !== 404) return
+      try {
+        await refreshPage(segment.cursor, controller.signal)
+        if (!controller.signal.aborted) window.scrollTo(0, 0)
+      } catch { /* Keep the restored page when the refresh itself is unavailable. */ }
+    })
+    return () => controller.abort()
+  }, [mode, refreshPage, restoreKey, segments])
+
+  function openCard(id: number) {
+    rememberLibraryOrigin(mode, historyKey, id, window.scrollY)
+  }
 
   useEffect(() => {
     const node = sentinel.current
@@ -75,6 +116,8 @@ export function MediaLibraryGrid({ mode, cards, segments, loading, error, nextCu
                 key={item.fileEntryId}
                 item={item}
                 mode={mode}
+                fromLibraryKey={historyKey}
+                onOpen={() => openCard(item.fileEntryId)}
                 currentItemCount={currentItemCount}
                 work={thumbnails.work[item.fileEntryId]}
                 observeCard={observeCard}

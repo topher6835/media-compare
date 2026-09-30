@@ -259,6 +259,12 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Reuse one compact representative-preview component on the exact list and detail. The detail response uses the list's supported-image selection; HEIC and non-image groups retain placeholders. Thumbnail generation and exact SHA-256 semantics do not change.
 - Defer Finder reveal. The strong cleanup-preflight validator currently requires a digest-based whole-group snapshot and matching hash. A separate single-FileEntry click-time capture/recheck boundary is needed for any Library item or retained exact copy, including singleton items, before a backend can safely derive a path and invoke Finder. Projected display paths alone have no execution authority.
 
+## Library Return Position and macOS Finder Reveal
+
+- Keep Library mode in `?view=items|groups`. Store only loaded pages/cursors, originating card ID, and scroll position in a bounded in-memory map keyed to router history entries. Card links carry the originating key in router state; return links and browser Back restore it. Direct visits start normally. Missing origin cards trigger a bounded refresh and quiet fallback.
+- Treat projected absolute paths as selectable display data only. Reveal accepts a physical `fileEntryId` with no request body, captures one current FileEntry plus ACTIVE/PRESENT Source routes, runs the preflight validator's live route/structured-path/APFS/no-follow file checks without a digest, and rereads the durable snapshot before action. It does not persist absolute paths or alter portable identity.
+- On macOS only, select the validated file with the backend-owned `/usr/bin/open` executable and separate `-R` and path arguments through the existing bounded process executor. The request has a five-second process timeout and no shell. Windows Explorer, filesystem mutation, and non-exact matching remain deferred. A successful reveal is not authority for later file operations.
+
 ## First Grouped React Media Library View
 
 - Keep Items as the default `/library` view. An explicit native-button Items / Groups control uses page-local state and may reload a mode from its first page when switched; no view choice is persisted.

@@ -437,6 +437,12 @@ class CleanupPreflightApiTests extends V3ApiTestBase {
             if (afterValidation != null) { var action = afterValidation; afterValidation = null; action.run(); }
             return result;
         }
+        @Override public ValidatedFile validateForReveal(CleanupPreflightCatalog.PhysicalFile file) {
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+            var result = super.validateForReveal(file);
+            if (afterValidation != null) { var action = afterValidation; afterValidation = null; action.run(); }
+            return result;
+        }
         ContinuityProbeResult<MacOsApfsMountInspector.MountObservation> mount(Path path) {
             assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
             boolean file = path.toString().endsWith(".bin");

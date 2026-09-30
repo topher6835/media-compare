@@ -1,10 +1,13 @@
-import { useSearchParams } from 'react-router-dom'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import { MediaLibraryGroupView, MediaLibraryItemView } from './MediaLibraryViews.tsx'
 import { libraryView, type LibraryView } from './libraryView.ts'
+import { libraryReturnKey } from './librarySession.ts'
 
 export function MediaLibraryPage() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const location = useLocation()
   const view = libraryView(searchParams.get('view'))
+  const restoreKey = libraryReturnKey(location.state, location.key)
 
   function selectView(next: LibraryView) {
     setSearchParams((current) => {
@@ -28,7 +31,9 @@ export function MediaLibraryPage() {
           : 'Exact groups combine current files with identical content. Single files remain one-file groups.'}</p>
       </header>
 
-      {view === 'items' ? <MediaLibraryItemView /> : <MediaLibraryGroupView />}
+      {view === 'items'
+        ? <MediaLibraryItemView key={location.key} historyKey={location.key} restoreKey={restoreKey} />
+        : <MediaLibraryGroupView key={location.key} historyKey={location.key} restoreKey={restoreKey} />}
     </section>
   )
 }
