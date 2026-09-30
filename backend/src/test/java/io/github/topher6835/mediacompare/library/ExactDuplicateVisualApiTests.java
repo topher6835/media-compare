@@ -52,6 +52,11 @@ class ExactDuplicateVisualApiTests {
                 .andExpect(jsonPath("$.groups[0].potentialStorageSavingsBytes").value(42))
                 .andExpect(jsonPath("$.groups[0].representative.fileEntryId").value(first.id()))
                 .andExpect(jsonPath("$.groups[0].representative.thumbnail.assetKey").value(asset.assetKey()));
+        mvc.perform(get("/api/exact-duplicate-groups/{digest}", digest))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.representative.fileEntryId").value(first.id()))
+                .andExpect(jsonPath("$.representative.thumbnail.assetKey").value(asset.assetKey()))
+                .andExpect(jsonPath("$.occurrences.length()").value(2));
     }
 
     @Test
@@ -64,6 +69,12 @@ class ExactDuplicateVisualApiTests {
                 .andExpect(jsonPath("$.groups[0].representative").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$.groups[1].representative").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$.groups[0].presentOccurrenceCount").value(2));
+        mvc.perform(get("/api/exact-duplicate-groups/{digest}", "%064x".formatted(802)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.representative").value(org.hamcrest.Matchers.nullValue()));
+        mvc.perform(get("/api/exact-duplicate-groups/{digest}", "%064x".formatted(803)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.representative").value(org.hamcrest.Matchers.nullValue()));
     }
 
     @Test

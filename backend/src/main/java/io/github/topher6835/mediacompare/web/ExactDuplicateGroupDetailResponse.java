@@ -14,6 +14,7 @@ public record ExactDuplicateGroupDetailResponse(
         long missingOccurrenceCount,
         long sourceCount,
         long potentialStorageSavingsBytes,
+        io.github.topher6835.mediacompare.library.MediaLibraryItem representative,
         List<ExactDuplicateMemberResponse> members,
         List<ExactDuplicateOccurrenceResponse> occurrences) {
 
@@ -28,6 +29,7 @@ public record ExactDuplicateGroupDetailResponse(
                 summary.missingOccurrenceCount(),
                 summary.sourceCount(),
                 summary.potentialStorageSavingsBytes(),
+                summary.representative(),
                 details.members().stream().map(ExactDuplicateMemberResponse::from).toList(),
                 details.occurrences().stream().map(ExactDuplicateOccurrenceResponse::from).toList());
     }

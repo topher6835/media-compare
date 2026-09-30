@@ -7,6 +7,7 @@ import { ExactBadge } from './ExactBadge.tsx'
 
 interface CardProps {
   item: MediaLibraryItem
+  mode: 'items' | 'groups'
   currentItemCount?: number
   work?: ThumbnailWork
   observeCard: (node: HTMLElement, id: number) => () => void
@@ -14,7 +15,7 @@ interface CardProps {
   onRepairLoaded: (id: number) => void
 }
 
-export const MediaLibraryCard = memo(function MediaLibraryCard({ item, currentItemCount, work, observeCard, onRetry, onRepairLoaded }: CardProps) {
+export const MediaLibraryCard = memo(function MediaLibraryCard({ item, mode, currentItemCount, work, observeCard, onRetry, onRepairLoaded }: CardProps) {
   const card = useRef<HTMLElement>(null)
   const [brokenUrl, setBrokenUrl] = useState<string | null>(null)
   const url = item.thumbnail.url
@@ -24,6 +25,7 @@ export const MediaLibraryCard = memo(function MediaLibraryCard({ item, currentIt
   const retryRequest = repairing && work.reload > 0
   const imageUrl = url && retryRequest
     ? `${url}${url.includes('?') ? '&' : '?'}repair=${work.startedAt}-${work.reload}` : url
+  const detailUrl = `/library/items/${item.fileEntryId}?from=${mode}`
 
   useEffect(() => {
     const node = card.current
@@ -85,7 +87,7 @@ export const MediaLibraryCard = memo(function MediaLibraryCard({ item, currentIt
               )}
             </div>
           )}
-          <Link className="library-card-main-link" to={`/library/items/${item.fileEntryId}`}
+          <Link className="library-card-main-link" to={detailUrl}
             aria-label={`View details for ${item.displayName}`} />
         </div>
         {currentItemCount !== undefined && (
@@ -93,7 +95,7 @@ export const MediaLibraryCard = memo(function MediaLibraryCard({ item, currentIt
         )}
       </div>
       <div className="library-card-caption">
-        <h2 title={item.relativePath}><Link to={`/library/items/${item.fileEntryId}`}>{item.displayName}</Link></h2>
+        <h2 title={item.relativePath}><Link to={detailUrl}>{item.displayName}</Link></h2>
         <p className="library-source" title={`${item.sourceName} · ${item.relativePath}`}>
           {item.sourceName}
           <span className="library-accessible-path"> · {item.relativePath}</span>

@@ -243,6 +243,7 @@ export function DuplicateGroupList({
         return (
           <article className="duplicate-card" key={group.digestHex}>
             <DuplicateRepresentativePreview representative={group.representative} />
+            <div className="duplicate-card-content">
             <div className="duplicate-card-heading">
               <div>
                 <p className="duplicate-reference">
@@ -300,6 +301,7 @@ export function DuplicateGroupList({
               >
                 Review group <span aria-hidden="true">→</span>
               </Link>
+            </div>
             </div>
           </article>
         )

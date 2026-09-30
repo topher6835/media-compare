@@ -218,10 +218,12 @@ export function getExactDuplicateGroups(
 export function getExactDuplicateGroup(
   digestHex: string,
   filters: ExactDuplicateFilters,
+  signal?: AbortSignal,
 ): Promise<ExactDuplicateGroupDetail> {
   const query = exactDuplicateFilterParameters(filters).toString()
-  return getJson<ExactDuplicateGroupDetail>(
+  return requestJson<ExactDuplicateGroupDetail>(
     `/api/exact-duplicate-groups/${encodeURIComponent(digestHex)}${query ? `?${query}` : ''}`,
+    { headers: { Accept: 'application/json' }, signal },
   )
 }
 

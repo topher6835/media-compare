@@ -1,10 +1,18 @@
-import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { MediaLibraryGroupView, MediaLibraryItemView } from './MediaLibraryViews.tsx'
-
-type LibraryView = 'items' | 'groups'
+import { libraryView, type LibraryView } from './libraryView.ts'
 
 export function MediaLibraryPage() {
-  const [view, setView] = useState<LibraryView>('items')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const view = libraryView(searchParams.get('view'))
+
+  function selectView(next: LibraryView) {
+    setSearchParams((current) => {
+      const updated = new URLSearchParams(current)
+      updated.set('view', next)
+      return updated
+    })
+  }
 
   return (
     <section className="library-page" aria-labelledby="library-heading">
@@ -12,8 +20,8 @@ export function MediaLibraryPage() {
         <p className="eyebrow">Media catalog</p>
         <h1 id="library-heading">Media Library</h1>
         <div className="library-view-switch" role="group" aria-label="Library view">
-          <button type="button" aria-pressed={view === 'items'} onClick={() => setView('items')}>Items</button>
-          <button type="button" aria-pressed={view === 'groups'} onClick={() => setView('groups')}>Groups</button>
+          <button type="button" aria-pressed={view === 'items'} onClick={() => selectView('items')}>Items</button>
+          <button type="button" aria-pressed={view === 'groups'} onClick={() => selectView('groups')}>Groups</button>
         </div>
         <p className="page-intro">{view === 'items'
           ? 'Browse current catalog images and their small previews, with source context for each file.'

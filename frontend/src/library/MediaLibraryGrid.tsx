@@ -74,6 +74,7 @@ export function MediaLibraryGrid({ mode, cards, segments, loading, error, nextCu
               <MediaLibraryCard
                 key={item.fileEntryId}
                 item={item}
+                mode={mode}
                 currentItemCount={currentItemCount}
                 work={thumbnails.work[item.fileEntryId]}
                 observeCard={observeCard}

@@ -31,6 +31,7 @@ import {
 } from './duplicateSession.ts'
 
 import { DuplicatePhysicalCopies } from './DuplicatePhysicalCopies.tsx'
+import { DuplicateRepresentativePreview } from './DuplicateRepresentativePreview.tsx'
 import { invalidateUnavailableCleanupKeeper, removeCleanupPlanEntry } from './duplicateCleanupPlan.ts'
 
 type DetailFailure = 'bad-request' | 'not-found' | 'server'
@@ -109,6 +110,10 @@ export function DuplicateGroupDetail({
             <span>{extensions.join(' · ')}</span>
           </div>
         )}
+      </div>
+
+      <div className="duplicate-detail-representative">
+        <DuplicateRepresentativePreview representative={detail.representative} />
       </div>
 
       {filtersActive && (

@@ -71,8 +71,12 @@ public class ExactDuplicateService {
             String digestHex, ExactDuplicateFilter filter) {
         validateDigest(digestHex);
         repository.validateIntegrity();
+        Map<String, Long> representativeIds = repository.findRepresentativeImageFileIds(List.of(digestHex));
+        Long representativeId = representativeIds.get(digestHex);
+        MediaLibraryItem representative = representativeId == null ? null
+                : library.findByIds(List.of(representativeId)).stream().findFirst().orElse(null);
         return repository.findGroupCounts(digestHex)
-                .map(counts -> toSummary(counts, null, null))
+                .map(counts -> toSummary(counts, null, representative))
                 .map(summary -> new ExactDuplicateGroupDetails(
                         summary,
                         List.copyOf(repository.findMembers(digestHex)),
