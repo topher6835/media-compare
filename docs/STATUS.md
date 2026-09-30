@@ -2,6 +2,10 @@
 
 ## Current State
 
+### Variant Architecture Approved; Implementation Paused
+
+Variant design is approved and Variant V1.1 — Fingerprint Foundation is scoped in `docs/DECISIONS.md` and `docs/ARCHITECTURE.md`. It will analyze trusted JPEG/PNG ContentRecords using versioned deterministic normalization, persist 64-bit pHash and dHash through `AnalysisRecord`, reuse only valid compatible results, and test stale/unsupported/corrupt input. Exact remains SHA-256 byte equality. Variant matching, relationship publication, grouping, crops, HEIC fingerprints, and UI are not implemented. Development now switches to Windows/NTFS filesystem support and platform abstractions, then Windows Show in File Explorer and Windows V1 packaging/testing, before returning to V1.1 and later Variant/Semantic work.
+
 ### Library Return Position and Safe macOS Finder Reveal
 
 Library mode still comes from `?view=items|groups`. Opening Item Detail from an Items or Groups card now retains its loaded progressive pages, originating card ID, and scroll position in bounded browser memory keyed by the Library history entry. The visible Library link and browser Back restore the matching view and card before paint where available. A missing originating item triggers one quiet refresh and top-of-view fallback; direct Library visits start normally. No durable UI or catalog state was added.
@@ -203,4 +207,4 @@ Physical-copy preview validation: `npm run lint && npm run build` passed in `fro
 
 ## Next Recommended Step
 
-Validate Library return position and Finder reveal against a disposable real macOS/APFS catalog, including HEIC and stale-file feedback. Exact browsing is complete for now. The next product milestone is Variant Matching; its matching rules remain undecided here. Windows Explorer reveal, side-by-side compare, semantic analysis, manual overrides, persisted group IDs/memberships, group caches/background recomputation, medium/original previews, video grouping UI, and cache cleanup remain deferred.
+Next implement Windows/NTFS filesystem support and platform abstractions, then Windows Show in File Explorer and package/test the Windows V1 MVP. Return to the defined, unimplemented Variant V1.1 fingerprint milestone afterward. Variant pairwise matching/grouping and Semantic/AI work remain later milestones. Real macOS/APFS validation of Library return position and Finder reveal, including HEIC and stale-file feedback, remains recommended. Side-by-side compare, manual overrides, persisted group IDs/memberships, group caches/background recomputation, medium/original previews, video grouping UI, and cache cleanup remain deferred.

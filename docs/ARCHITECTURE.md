@@ -298,7 +298,7 @@ Historical v1 ended after reconciliation. Historical v2 and current v3 both use 
 
 The design targets thousands, tens of thousands, and potentially hundreds of thousands of files. Implementations should stream Java NIO traversal, use bounded database batches and indexed queries, avoid loading complete drive listings into memory, and avoid expensive work for files that do not need it.
 
-Exact byte-equality grouping is the first implemented matching behavior and uses indexed digest aggregation rather than pairwise comparison. Broader matching uses cheap candidate generation followed by deeper comparison for plausible candidates. Full pairwise comparison is not a V1 strategy. Candidate persistence and later matching algorithms remain open, while pending work must eventually support durable resume.
+Exact byte-equality grouping is the first implemented matching behavior and uses indexed digest aggregation rather than pairwise comparison. Full-catalog pairwise comparison is not a V1 strategy. For planned manually selected Variant sets of roughly 50 to 1,000 fingerprinted images, all-pairs hash-distance comparison is acceptable (499,500 pairs at 1,000 images); indexing/LSH waits for measured need. Larger-scale candidate generation and durable resume remain open.
 
 ### ContentRecord Relationship Graph
 
@@ -319,6 +319,14 @@ The adapter reuses `ExactDuplicateRepository` integrity checks and exact-member 
 Projected `ExactHashRelationshipEdge` values contain only canonical positive distinct ContentRecord endpoints and the constant EXACT type. They have no row identity or creation timestamp and are never inserted or backfilled into `media_relationship`. No schema/index migration is needed. Valid hashes remain reusable regardless of missing/no physical occurrences, ACTIVE memberships, mounted Sources, media metadata, or previews. Generalized grouping can combine these transient edges with explicitly selected persistent CROP/RESIZED/etc. artifacts.
 
 The exact duplicate repository/service/API/UI remains separately authoritative for occurrence, Source, filter, and savings semantics. It does not use generalized relationship grouping. No non-exact matcher or generic relationship API is implemented. The item endpoint remains separate; the grouped-library presentation API described below consumes the selected graph.
+
+### Planned Variant Analysis and Pairwise Matching
+
+Variant means the same underlying visual image across altered bytes and distinct ContentRecords; Exact remains SHA-256 byte equality, and future Semantic relationships remain separate. Planned V1 analysis stores one 64-bit pHash and one 64-bit dHash as fixed-width lowercase hex in a versioned `AnalysisRecord.result_json` attached to each ContentRecord. The analyzer identity and configuration define pixel orientation, color/alpha and grayscale normalization, resize dimensions/method, and both hash algorithms. Source FileEntries provide trusted bytes under filesystem/catalog validation; fingerprint results are independent of paths and APFS/NTFS identity. V1.1 initially uses the existing bounded JPEG/PNG decode capability. HEIC/HEIF and meaningful crop support are later work.
+
+A later matcher compares fingerprinted pairs, retains pHash/dHash Hamming distances in evidence, and leaves confidence null until calibrated. Thresholds and decision rules live in an exact matcher definition/configuration; changed definitions preserve old results without silently reinterpreting them. Accepted pairs require valid unequal SHA-256 digests and use the existing `media_relationship` infrastructure with a future broad `VARIANT` type, canonical endpoints, and `UNDIRECTED` direction. Byte-identical pairs remain Exact only. Transformation descriptions can coexist as evidence/classification without implying an original or a single exclusive resize/crop/edit type.
+
+Pairwise Variant matches are not transitive. The existing connected-component service and grouped-library projection must not expose Variant as a family until a separate grouping policy is designed; Exact grouping stays as implemented. Crop-resistant matching may later use local features, region fingerprints, or verification, with its own versioned contract. The frozen V1.1 milestone publishes only fingerprints and no pair relationships, thresholds, groups, UI, new durable Job, or new imaging dependency. It follows Windows/NTFS platform support, Explorer reveal, and Windows V1 packaging/testing.
 
 ### Thumbnail and Preview Cache Foundation (V9)
 
@@ -560,7 +568,7 @@ The following remain open after the V1 review:
 - Scheduling beyond the bounded v3 worker, public cancellation/retries, and future resume.
 - Detailed scan scope representation and source-specific progress.
 - Specialized result schemas beyond `content_hash`.
-- Candidate generation, concrete relationship matcher/evidence designs, multi-producer compatibility per type, group detail/member projection, album UX ordering, and manual override schemas. Explicit exact definition selection is implemented; the item-level library API is separate and relationship groups remain derived, not materialized.
+- Larger-scale candidate generation, concrete Variant thresholds/evidence schema, Variant grouping policy, multi-producer compatibility per type, group detail/member projection, album UX ordering, and manual override schemas. Explicit exact definition selection is implemented; the item-level library API is separate and relationship groups remain derived, not materialized.
 - Face/person schema and AI-provider architecture.
 - Additional preview renderers/formats, medium-preview policy, future scheduling performance/capacity changes, and cache eviction/storage policy. V9 supports the first synchronous small-thumbnail generator and immutable serving boundary.
 - Real-Windows ffprobe redirected-file/`fd:` qualification and acceptance.
