@@ -13,6 +13,7 @@ import io.github.topher6835.mediacompare.location.LocationKey;
 import io.github.topher6835.mediacompare.location.LocationKeyCodec;
 import io.github.topher6835.mediacompare.location.LocationPathParser;
 import io.github.topher6835.mediacompare.location.MacOsApfsLocationContextEvidenceCodec;
+import io.github.topher6835.mediacompare.session.SessionSourceBoundary;
 
 /** Explicitly relocates a structured-unbound Source and restores its binding authority. */
 @Service
@@ -21,16 +22,19 @@ public class SourceRelocationService {
     private final LocationContextRepository contexts;
     private final SourceBindingPeriodRepository periods;
     private final SourceMembershipRepository memberships;
+    private final SessionSourceBoundary sessionBoundary;
     private final SourceBindingValidation validation = new SourceBindingValidation();
     private final MacOsApfsLocationContextEvidenceCodec legacyContextCodec =
             new MacOsApfsLocationContextEvidenceCodec();
 
     public SourceRelocationService(CatalogRepository sources, LocationContextRepository contexts,
-            SourceBindingPeriodRepository periods, SourceMembershipRepository memberships) {
+            SourceBindingPeriodRepository periods, SourceMembershipRepository memberships,
+            SessionSourceBoundary sessionBoundary) {
         this.sources = sources;
         this.contexts = contexts;
         this.periods = periods;
         this.memberships = memberships;
+        this.sessionBoundary = sessionBoundary;
     }
 
     @Transactional
@@ -44,6 +48,7 @@ public class SourceRelocationService {
         if (newConfiguredRootPath == null || newConfiguredRootPath.isBlank()) {
             throw new IllegalArgumentException("New configured Source root is required");
         }
+        sessionBoundary.requireSeparate(newConfiguredRootPath);
         requireCanonicalContextId(targetContextId);
         if (capture == null || capture.contextProbeResult() == null || capture.sourceRootProbeResult() == null
                 || capture.configuredRootPathSnapshot() == null) {

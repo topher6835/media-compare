@@ -60,6 +60,9 @@ public final class Session {
         }
         checkExistingChild(child(root, "catalog.db"), false);
         checkExistingChild(child(root, "catalog.db.lock"), false);
+        checkExistingChild(child(root, "catalog.db-wal"), false);
+        checkExistingChild(child(root, "catalog.db-shm"), false);
+        checkExistingChild(child(root, "catalog.db-journal"), false);
         checkExistingChild(child(root, "cache"), true);
         checkExistingChild(child(root, "cache", "previews"), true);
         return new Session(root);
@@ -81,10 +84,16 @@ public final class Session {
         return open(root);
     }
 
+    /** Removes only recognized workspace contents after proving catalog ownership is idle. */
+    public static void delete(Path selectedRoot) throws IOException {
+        SessionDeletion.delete(open(selectedRoot));
+    }
+
     public Path root() { return root; }
     public Path manifestPath() { return child(root, "session.json"); }
     public Path catalogPath() { return child(root, "catalog.db"); }
     public Path previewCacheRoot() { return child(root, "cache", "previews"); }
+    public String catalogJdbcUrl() { return "jdbc:sqlite:" + catalogPath().toUri() + "?foreign_keys=on"; }
 
     private static Path normalizedRoot(Path selectedRoot) throws IOException {
         if (selectedRoot == null || selectedRoot.toString().isBlank()) {

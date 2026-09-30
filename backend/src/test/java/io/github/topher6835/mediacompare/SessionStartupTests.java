@@ -8,6 +8,8 @@ import java.nio.file.Path;
 import javax.sql.DataSource;
 
 import io.github.topher6835.mediacompare.config.CatalogOwnership;
+import io.github.topher6835.mediacompare.catalog.CatalogRepository;
+import io.github.topher6835.mediacompare.catalog.Source;
 import io.github.topher6835.mediacompare.preview.PreviewCacheResolver;
 import io.github.topher6835.mediacompare.preview.PreviewCacheWriter;
 import io.github.topher6835.mediacompare.session.Session;
@@ -52,5 +54,23 @@ class SessionStartupTests {
         assertThrows(Exception.class, () -> new SpringApplicationBuilder(MediaCompareApplication.class)
                 .web(WebApplicationType.NONE)
                 .run("--media-compare.test-catalog-override=false", "--logging.level.root=ERROR"));
+    }
+
+    @Test
+    void refusesToReopenSessionWhosePersistedSourceNowContainsIt() throws Exception {
+        Session session = Session.create(directory.resolve("moved-session"));
+        try (var context = new SpringApplicationBuilder(MediaCompareApplication.class)
+                .web(WebApplicationType.NONE)
+                .run("--media-compare.session-root=" + session.root(), "--logging.level.root=ERROR")) {
+            long now = System.currentTimeMillis();
+            String parent = session.root().getParent().toString();
+            // Simulate an older catalog or a moved Session; bypass registration intentionally.
+            context.getBean(CatalogRepository.class)
+                    .insert(new Source(null, "Old Source", parent, parent, 0, now, now));
+        }
+        assertThrows(Exception.class, () -> new SpringApplicationBuilder(MediaCompareApplication.class)
+                .web(WebApplicationType.NONE)
+                .run("--media-compare.session-root=" + session.root(), "--logging.level.root=ERROR"));
+        assertTrue(Files.exists(session.manifestPath()));
     }
 }

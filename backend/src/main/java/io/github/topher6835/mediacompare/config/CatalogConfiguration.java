@@ -7,6 +7,7 @@ import javax.sql.DataSource;
 import io.github.topher6835.mediacompare.preview.PreviewCacheResolver;
 import io.github.topher6835.mediacompare.preview.PreviewCacheWriter;
 import io.github.topher6835.mediacompare.session.Session;
+import io.github.topher6835.mediacompare.session.SessionSourceBoundary;
 
 import org.springframework.boot.jdbc.DataSourceBuilder;
 import org.springframework.context.annotation.Bean;
@@ -20,8 +21,8 @@ public class CatalogConfiguration {
         String selectedRoot = environment.getProperty("media-compare.session-root");
         if (selectedRoot != null && !selectedRoot.isBlank()) {
             Session session = Session.open(Path.of(selectedRoot));
-            return new CatalogPaths("jdbc:sqlite:" + session.catalogPath().toUri() + "?foreign_keys=on",
-                    session.previewCacheRoot().toString());
+            return new CatalogPaths(session.catalogJdbcUrl(),
+                    session.previewCacheRoot().toString(), session.root());
         }
         // Existing isolated catalog tests explicitly opt into their own JDBC/cache paths.
         if (environment.getProperty("media-compare.test-catalog-override", Boolean.class, false)) {
@@ -30,7 +31,7 @@ public class CatalogConfiguration {
                 throw new IllegalStateException("Test catalog override requires spring.datasource.url");
             }
             return new CatalogPaths(jdbcUrl,
-                    environment.getProperty("media-compare.preview-cache-root", "data/cache/previews"));
+                    environment.getProperty("media-compare.preview-cache-root", "data/cache/previews"), null);
         }
         throw new IllegalStateException("Set media-compare.session-root to an existing Session folder before startup");
     }
@@ -38,6 +39,11 @@ public class CatalogConfiguration {
     @Bean
     CatalogOwnership catalogOwnership(CatalogPaths paths) throws IOException {
         return CatalogOwnership.acquire(paths.jdbcUrl());
+    }
+
+    @Bean
+    SessionSourceBoundary sessionSourceBoundary(CatalogPaths paths) {
+        return new SessionSourceBoundary(paths.sessionRoot());
     }
 
     @Bean

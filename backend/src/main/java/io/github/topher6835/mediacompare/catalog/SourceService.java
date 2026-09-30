@@ -5,20 +5,35 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 
+import io.github.topher6835.mediacompare.session.SessionSourceBoundary;
+import org.springframework.beans.factory.InitializingBean;
+import org.springframework.boot.sql.init.dependency.DependsOnDatabaseInitialization;
 import org.springframework.stereotype.Service;
 
 @Service
-public class SourceService {
+@DependsOnDatabaseInitialization
+public class SourceService implements InitializingBean {
 
     private final CatalogRepository catalogRepository;
+    private final SessionSourceBoundary sessionBoundary;
 
-    public SourceService(CatalogRepository catalogRepository) {
+    public SourceService(CatalogRepository catalogRepository, SessionSourceBoundary sessionBoundary) {
         this.catalogRepository = catalogRepository;
+        this.sessionBoundary = sessionBoundary;
+    }
+
+    @Override
+    public void afterPropertiesSet() {
+        // A moved/copied Session may already contain Sources that now overlap its folder.
+        for (Source source : catalogRepository.findAllSources()) {
+            sessionBoundary.requireSeparate(source.rootPath());
+        }
     }
 
     public Source register(String name, String rootPath) {
         validateName(name);
         validateRootPath(rootPath);
+        sessionBoundary.requireSeparate(rootPath);
 
         long now = System.currentTimeMillis();
         Source source = new Source(null, name, rootPath, rootPath, 0, now, now);

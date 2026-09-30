@@ -24,7 +24,23 @@ Maven does not need to be installed separately because the backend includes Mave
 
 ## Run Locally
 
-Create a Session folder with a `session.json` containing exactly this manifest before starting the backend:
+Build the backend once from `backend/`, then use the one-shot Session command to create a workspace. It exits without starting Spring or Flyway.
+
+macOS/Linux:
+
+```sh
+./mvnw -q package -DskipTests
+java -jar target/media-compare-0.0.1-SNAPSHOT.jar session create "/path/to/My Session"
+```
+
+Windows:
+
+```bat
+mvnw.cmd -q package -DskipTests
+java -jar target\media-compare-0.0.1-SNAPSHOT.jar session create "C:\path\to\My Session"
+```
+
+The command creates this minimal `session.json` in a new or empty folder:
 
 ```json
 {
@@ -34,6 +50,8 @@ Create a Session folder with a `session.json` containing exactly this manifest b
 ```
 
 Select that existing folder through the `MEDIA_COMPARE_SESSION_ROOT` environment variable. The backend fails startup if no valid Session is selected. Start the backend from `backend/`.
+
+For disposable real-data testing, register and scan an external Source after startup, then stop the backend before deleting the Session. A Source root cannot contain the Session or be inside it; registration returns `400` with `SOURCE_OVERLAPS_SESSION` if they overlap. Original media stays outside the Session. Delete with `java -jar target/media-compare-0.0.1-SNAPSHOT.jar session delete "/path/to/My Session"` (use `target\...jar` and a Windows path on Windows). The command refuses an active catalog, removes only recognized Session-owned data, and leaves any unknown files placed directly in the Session folder untouched. It reports an error if those files prevent folder removal. There is no frontend Session picker yet.
 
 macOS/Linux:
 

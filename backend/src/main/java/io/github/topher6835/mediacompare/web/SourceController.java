@@ -11,6 +11,7 @@ import io.github.topher6835.mediacompare.catalog.SourceBindingConflictException;
 import io.github.topher6835.mediacompare.catalog.SourcePreparationException;
 import io.github.topher6835.mediacompare.catalog.SourcePreparationService;
 import io.github.topher6835.mediacompare.catalog.SourceService;
+import io.github.topher6835.mediacompare.session.SourceWorkspaceOverlapException;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -86,6 +87,14 @@ public class SourceController {
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Void> invalidRegistration() {
         return ResponseEntity.badRequest().build();
+    }
+
+    @ExceptionHandler(SourceWorkspaceOverlapException.class)
+    public ResponseEntity<SourceRegistrationError> overlappingSource() {
+        return ResponseEntity.badRequest().body(new SourceRegistrationError("SOURCE_OVERLAPS_SESSION"));
+    }
+
+    public record SourceRegistrationError(String code) {
     }
 
     public record PreparationError(SourcePreparationException.Code code) {

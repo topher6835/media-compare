@@ -1,5 +1,7 @@
 package io.github.topher6835.mediacompare.config;
 
-/** The one catalog and cache selected before database initialization. */
-record CatalogPaths(String jdbcUrl, String previewCacheRoot) {
+import java.nio.file.Path;
+
+/** Paths from the one validated Session; sessionRoot is null only for isolated catalog tests. */
+record CatalogPaths(String jdbcUrl, String previewCacheRoot, Path sessionRoot) {
 }

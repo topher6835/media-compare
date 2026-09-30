@@ -430,6 +430,12 @@ The V5-only behavior below records the sequence that preceded the V6 cutover. Th
 - Exactly one Session/catalog is active during a catalog runtime. The backend selects an existing valid Session explicitly with `media-compare.session-root`, derives its database and preview roots, and fails startup when selection is absent or invalid. An isolated test-only catalog override preserves existing catalog tests. Controlled restart/reinitialization remains preferred over live DataSource swapping; Session picker, Recents, and registry are future work.
 - This decision supersedes the older proposed Catalog-as-workspace identity/registry boundary. Existing V1–V9 catalog schema and Source/LocationContext identities remain unchanged.
 
+## Disposable Session Lifecycle and Source Isolation
+
+- A configured Source root and active Session root must not structurally overlap in either direction. Registration and explicit Source root relocation reject overlap without probing Source contents; startup checks persisted Sources as well. Source paths from another host OS remain portable data.
+- Deletion is allowlist-based for a validated closed Session: manifest, catalog, `.lock`, recognized SQLite sidecars, and managed `cache/` contents. It never recursively removes unknown entries directly in the Session root or follows symbolic links. Unknown root entries survive and prevent complete folder removal.
+- The `.lock` file can remain after shutdown. Active ownership is determined by the existing OS-lock contract, not file existence. The one-shot Java `session create`/`session delete` commands do not start the catalog runtime.
+
 ## Approved Future Catalog Boundaries
 
 - Historical direction (superseded by **Sessions** above): one SQLite file per Catalog, an immutable internal catalog UUID, and a rebuildable known-catalog registry/settings store. The single active catalog and controlled restart preference remain.
