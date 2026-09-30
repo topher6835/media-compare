@@ -159,6 +159,8 @@ export function DuplicatePhysicalCopies({ detail, filtersActive, filterSearch }:
                       {filtersActive && occurrence.matchesFilter && <span className="status-badge filter-match">FILTER MATCH</span>}
                     </div>
                     <p className="file-path">{occurrence.relativePath}</p>
+                    <p className="file-path full-path">{occurrence.absolutePath
+                      ?? 'Full path unavailable from current trusted catalog route'}</p>
                     <p className="planner-note">
                       {occurrence.extension ?? 'No extension'} ·{' '}
                       {occurrence.fileCategory === 'PHOTO' ? 'Photo' : occurrence.fileCategory === 'VIDEO' ? 'Video' : occurrence.fileCategory === 'DOCUMENT' ? 'Document' : 'Unclassified'}

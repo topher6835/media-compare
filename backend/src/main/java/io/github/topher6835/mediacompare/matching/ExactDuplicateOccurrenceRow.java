@@ -9,5 +9,6 @@ record ExactDuplicateOccurrenceRow(
         String relativePath,
         String extensionKey,
         String presenceStatus,
-        String applicabilityStatus) {
+        String applicabilityStatus,
+        String absolutePath) {
 }

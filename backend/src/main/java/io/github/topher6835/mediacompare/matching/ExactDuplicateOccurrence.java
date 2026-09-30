@@ -13,5 +13,6 @@ public record ExactDuplicateOccurrence(
         String applicabilityStatus,
         String extensionKey,
         FileCategory fileCategory,
-        boolean matchesFilter) {
+        boolean matchesFilter,
+        String absolutePath) {
 }

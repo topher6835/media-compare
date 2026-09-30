@@ -243,6 +243,7 @@ main {
 }
 
 .library-card {
+  position: relative;
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -250,6 +251,36 @@ main {
   background: var(--surface);
   contain: layout style;
 }
+
+.library-card-main-link {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  border-radius: 9px;
+}
+
+.library-card-caption h2 a { color: inherit; text-decoration: none; }
+.library-card-caption h2 a:hover { color: var(--accent); text-decoration: underline; }
+
+.library-card-main-link:focus-visible { outline-offset: -3px; }
+.library-card .library-retry-button { position: relative; z-index: 2; }
+
+.exact-badge {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  margin-top: 8px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.exact-badge:hover { border-color: var(--accent); }
 
 .library-tile {
   position: relative;
@@ -1165,6 +1196,49 @@ main {
 
 .duplicate-card {
   overflow: hidden;
+}
+
+.duplicate-representative {
+  width: 100%;
+  height: 160px;
+  background: var(--surface-subtle);
+}
+
+.duplicate-representative img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.item-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 400px) minmax(0, 1fr);
+  gap: 24px;
+  margin-top: 22px;
+}
+
+.item-detail-preview {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 320px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+  overflow: hidden;
+}
+
+.item-detail-preview img { max-width: 100%; max-height: 320px; object-fit: contain; }
+.item-detail-preview > p { padding: 9px; color: var(--text-muted); font-size: 0.75rem; }
+.item-detail-facts { min-width: 0; }
+.item-detail-facts .detail-summary { margin: 16px 0; }
+.item-full-path { overflow-wrap: anywhere; margin-top: 8px; font-family: ui-monospace, monospace; }
+.full-path { overflow-wrap: anywhere; }
+
+@media (max-width: 700px) {
+  .item-detail-layout { grid-template-columns: 1fr; }
 }
 
 .duplicate-card-heading {

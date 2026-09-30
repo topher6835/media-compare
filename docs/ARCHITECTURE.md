@@ -492,9 +492,11 @@ The frontend consumes that slice as:
     -> typed exact-duplicate API client
     -> URL-backed File Type and Extension controls
     -> filter-keyed digest-keyset Load more list with retained-occurrence match context
+    -> batched current supported-image representative, using existing visible-card small-thumbnail scheduling
     -> planned badges and aggregate summary across all session-planned groups
 /duplicates/:digestHex
     -> complete group summary, ContentRecord members, and retained SourceMembership path details for physical FileEntries
+    -> complete projected catalog absolute path per physical occurrence when route data is coherent
     -> ACTIVE memberships grouped by physical FileEntry, present when any membership is PRESENT
     -> transient keeper selection and removal preview over the complete group
     -> per-membership filter match context
@@ -505,6 +507,10 @@ The frontend consumes that slice as:
     -> review-group links, individual removal, and in-page clear confirmation
     -> individual or sequential whole-plan read-only preflight, transient group/per-FileEntry results
 ```
+
+`GET /api/media-library/items/{fileEntryId}` reuses the current eligible item query and returns one physical FileEntry or 404. Item and grouped-library representative cards open `/library/items/{fileEntryId}`. Library page items receive batched current exact-set references: the count means distinct ACTIVE/PRESENT physical FileEntries sharing the current authoritative SHA-256 digest, including the item itself. Counts under two produce no badge. The badge links to `/duplicates/:digestHex`; no Variant/Semantic projection is implied. The item detail uses the existing small thumbnail and displays unavailable enrichment explicitly, including HEIC/HEIF without decoded metadata.
+
+The read-only path projection checks stored UNIX Source root/path key, resolved FileEntry location/path key, and exact Source-relative containment before forming a host absolute path. An invalid or unsupported route yields null. It makes no filesystem claim; a future host reveal action must separately validate live current authority and file evidence before invoking the platform UI. Exact-duplicate list representative selection is batched across a page, then resolves selected FileEntries through the same current Library projection. Unsupported formats and non-image groups remain in the duplicate list with placeholders. No schema or preview renderer changed.
 
 The exact-detail planner holds an explicit keeper FileEntry ID in local component state. Saving explicitly adds or replaces a digest-keyed snapshot in `duplicateCleanupPlan.ts`, a small module-level Map adjacent to the existing list/trail session helper. Snapshots copy the keeper/candidate physical FileEntry IDs, readable labels, Source-path context, size, candidate count, and estimated savings. Store reads and writes copy nested objects/arrays; replacements preserve first-insertion order. Multiple groups can be collected and reviewed without changing filter semantics, list memory, scroll restoration, or the recent trail. Plan links carry active filters.
 

@@ -61,7 +61,7 @@ export function MediaLibraryGrid({ mode, cards, segments, loading, error, nextCu
           <h2>{groups ? 'No current media groups' : 'No current catalog images'}</h2>
           <p>{groups
             ? 'Groups appear here when current catalog images are available.'
-            : 'Images appear here when the catalog has current image metadata for indexed files.'}</p>
+            : 'Images appear here when the catalog has current indexed image files.'}</p>
           <Link className="secondary-link" to="/sources">View Sources</Link>
         </div>
       )}

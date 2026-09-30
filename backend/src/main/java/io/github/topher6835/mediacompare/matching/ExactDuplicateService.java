@@ -8,6 +8,8 @@ import java.util.Optional;
 
 import io.github.topher6835.mediacompare.analysis.Sha256AnalysisDefinition;
 import io.github.topher6835.mediacompare.catalog.FileCategory;
+import io.github.topher6835.mediacompare.library.MediaLibraryRepository;
+import io.github.topher6835.mediacompare.library.MediaLibraryItem;
 
 import org.springframework.stereotype.Service;
 
@@ -18,9 +20,11 @@ public class ExactDuplicateService {
     static final int MAX_LIMIT = 250;
 
     private final ExactDuplicateRepository repository;
+    private final MediaLibraryRepository library;
 
-    public ExactDuplicateService(ExactDuplicateRepository repository) {
+    public ExactDuplicateService(ExactDuplicateRepository repository, MediaLibraryRepository library) {
         this.repository = repository;
+        this.library = library;
     }
 
     public ExactDuplicateGroupPage findGroups(String afterDigestHex, Integer requestedLimit) {
@@ -45,8 +49,15 @@ public class ExactDuplicateService {
         Map<String, ExactDuplicateFilterMatch> matches = filter.active()
                 ? findFilterMatches(pageCounts, filter)
                 : Map.of();
+        Map<String, Long> representativeIds = repository.findRepresentativeImageFileIds(
+                pageCounts.stream().map(ExactDuplicateGroupCounts::digestHex).toList());
+        Map<Long, MediaLibraryItem> representatives = new java.util.HashMap<>();
+        for (MediaLibraryItem item : library.findByIds(representativeIds.values().stream().distinct().toList())) {
+            representatives.put(item.fileEntryId(), item);
+        }
         List<ExactDuplicateGroupSummary> page = pageCounts.stream()
-                .map(counts -> toSummary(counts, matches.get(counts.digestHex())))
+                .map(counts -> toSummary(counts, matches.get(counts.digestHex()),
+                        representatives.get(representativeIds.get(counts.digestHex()))))
                 .toList();
         String nextCursor = hasNextPage ? page.getLast().digestHex() : null;
         return new ExactDuplicateGroupPage(page, nextCursor);
@@ -61,7 +72,7 @@ public class ExactDuplicateService {
         validateDigest(digestHex);
         repository.validateIntegrity();
         return repository.findGroupCounts(digestHex)
-                .map(counts -> toSummary(counts, null))
+                .map(counts -> toSummary(counts, null, null))
                 .map(summary -> new ExactDuplicateGroupDetails(
                         summary,
                         List.copyOf(repository.findMembers(digestHex)),
@@ -107,11 +118,12 @@ public class ExactDuplicateService {
                 occurrence.applicabilityStatus(),
                 occurrence.extensionKey(),
                 category,
-                filter.matches(occurrence.extensionKey()));
+                filter.matches(occurrence.extensionKey()),
+                occurrence.absolutePath());
     }
 
     private ExactDuplicateGroupSummary toSummary(
-            ExactDuplicateGroupCounts counts, ExactDuplicateFilterMatch filterMatch) {
+            ExactDuplicateGroupCounts counts, ExactDuplicateFilterMatch filterMatch, MediaLibraryItem representative) {
         long removableOccurrences = Math.max(counts.presentOccurrenceCount() - 1, 0);
         long potentialStorageSavingsBytes;
         try {
@@ -129,7 +141,8 @@ public class ExactDuplicateService {
                 counts.missingOccurrenceCount(),
                 counts.sourceCount(),
                 potentialStorageSavingsBytes,
-                filterMatch);
+                filterMatch,
+                representative);
     }
 
     private static String validateOptionalDigest(String digestHex) {

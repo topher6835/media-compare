@@ -79,7 +79,7 @@ class MediaLibraryGroupProjectionTests {
 
     private static MediaLibraryItem item(long fileId, long contentId) {
         return new MediaLibraryItem(fileId, contentId, 1, "Source", "image.png", "image.png", "png",
-                42, "png", 600, 400, 1, MediaLibraryItem.GenerationSupport.SUPPORTED, ThumbnailReference.missing());
+                42, "png", 600, 400, 1, MediaLibraryItem.GenerationSupport.SUPPORTED, ThumbnailReference.missing(), null, null);
     }
 
     private static final class RecordingLibrary extends MediaLibraryRepository {
@@ -88,7 +88,7 @@ class MediaLibraryGroupProjectionTests {
         private final List<Integer> limits = new ArrayList<>();
 
         RecordingLibrary(int count) {
-            super(null, null);
+            super(null, null, null);
             this.count = count;
         }
 

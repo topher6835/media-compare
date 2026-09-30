@@ -23,6 +23,8 @@ export interface MediaLibraryItem {
   sourceCount: number
   generationSupport: GenerationSupport
   thumbnail: ThumbnailReference
+  absolutePath: string | null
+  exactSet: { digestHex: string; physicalCopyCount: number } | null
 }
 
 export interface MediaLibraryPage {
@@ -59,6 +61,10 @@ export function getMediaLibraryItems(
     parameters.set('afterFileEntryId', String(afterFileEntryId))
   }
   return requestJson(`/api/media-library/items?${parameters}`, { signal })
+}
+
+export function getMediaLibraryItem(fileEntryId: number, signal?: AbortSignal): Promise<MediaLibraryItem> {
+  return requestJson(`/api/media-library/items/${fileEntryId}`, { signal })
 }
 
 export function getMediaLibraryGroups(

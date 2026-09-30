@@ -269,6 +269,8 @@ function IndexingPanel({
           <div>
             <strong>Analysis complete</strong>
             <p>Library is ready.</p>
+            {metadata.run!.stage.result?.completedUnsupported
+              ? <p>Some files use formats without previews yet.</p> : null}
             <Link className="primary-link" to="/library">View Library</Link>{' '}
             <Link className="primary-link" to="/duplicates">
               View exact duplicates
@@ -279,9 +281,14 @@ function IndexingPanel({
           <div>
             <strong>Analysis finished with issues</strong>
             <p>
-              Indexing and image metadata finished, with some skipped, unsupported, or failed files.
-              Cataloged images remain visible in Library even when a preview is unavailable.
+              Indexing and image metadata finished with skipped, stale, or failed files.
+              Cataloged images remain visible in Library.
             </p>
+            {metadata.run!.stage.result && <p>
+              Metadata: {metadata.run!.stage.result.failed} failed ·{' '}
+              {metadata.run!.stage.result.staleOrUnavailable} stale or unavailable ·{' '}
+              {metadata.run!.stage.result.completedUnsupported} unsupported formats.
+            </p>}
             <Link className="primary-link" to="/library">View Library</Link>{' '}
             <Link className="primary-link" to="/duplicates">
               View exact duplicates

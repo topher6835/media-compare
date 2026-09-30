@@ -1,4 +1,5 @@
 import { requestJson } from './http.ts'
+import type { MediaLibraryItem } from './mediaLibrary.ts'
 
 export { ApiError } from './http.ts'
 
@@ -24,6 +25,7 @@ export interface ExactDuplicateGroupSummary {
   sourceCount: number
   potentialStorageSavingsBytes: number
   filterMatch: ExactDuplicateFilterMatch | null
+  representative: MediaLibraryItem | null
 }
 
 export interface ExactDuplicateGroupPage {
@@ -48,6 +50,7 @@ export interface ExactDuplicateOccurrence {
   extension: string | null
   fileCategory: TechnicalFileCategory | null
   matchesFilter: boolean
+  absolutePath: string | null
 }
 
 export interface ExactDuplicateGroupDetail

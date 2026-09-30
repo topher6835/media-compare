@@ -1,6 +1,7 @@
 package io.github.topher6835.mediacompare.library;
 
 import java.util.List;
+import java.util.Optional;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -23,5 +24,9 @@ public class MediaLibraryService {
         boolean hasNext = rows.size() > limit;
         List<MediaLibraryItem> items = hasNext ? rows.subList(0, limit) : rows;
         return new MediaLibraryPage(items, hasNext ? items.getLast().fileEntryId() : null);
+    }
+
+    public Optional<MediaLibraryItem> findItem(long fileEntryId) {
+        return repository.findById(fileEntryId);
     }
 }

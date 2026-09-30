@@ -5,6 +5,7 @@ import { DuplicateCleanupPlanPage } from './duplicates/DuplicateCleanupPlanPage.
 import { DuplicatesPage } from './duplicates/DuplicatesPage.tsx'
 import { HomePage } from './HomePage.tsx'
 import { MediaLibraryPage } from './library/MediaLibraryPage.tsx'
+import { MediaLibraryItemDetailPage } from './library/MediaLibraryItemDetailPage.tsx'
 import { SourcesPage } from './sources/SourcesPage.tsx'
 
 function AppHeader() {
@@ -31,6 +32,7 @@ function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/sources" element={<SourcesPage />} />
           <Route path="/library" element={<MediaLibraryPage />} />
+          <Route path="/library/items/:fileEntryId" element={<MediaLibraryItemDetailPage />} />
           <Route path="/duplicates" element={<DuplicatesPage />} />
           <Route path="/duplicates/plan" element={<DuplicateCleanupPlanPage />} />
           <Route

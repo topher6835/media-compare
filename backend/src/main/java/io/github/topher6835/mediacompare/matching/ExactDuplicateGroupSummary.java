@@ -9,5 +9,6 @@ public record ExactDuplicateGroupSummary(
         long missingOccurrenceCount,
         long sourceCount,
         long potentialStorageSavingsBytes,
-        ExactDuplicateFilterMatch filterMatch) {
+        ExactDuplicateFilterMatch filterMatch,
+        io.github.topher6835.mediacompare.library.MediaLibraryItem representative) {
 }

@@ -15,7 +15,8 @@ public record ExactDuplicateOccurrenceResponse(
         String applicabilityStatus,
         String extension,
         FileCategory fileCategory,
-        boolean matchesFilter) {
+        boolean matchesFilter,
+        String absolutePath) {
 
     public static ExactDuplicateOccurrenceResponse from(ExactDuplicateOccurrence occurrence) {
         return new ExactDuplicateOccurrenceResponse(
@@ -31,6 +32,7 @@ public record ExactDuplicateOccurrenceResponse(
                         ? null
                         : FileExtensionNormalizer.toApiValue(occurrence.extensionKey()),
                 occurrence.fileCategory(),
-                occurrence.matchesFilter());
+                occurrence.matchesFilter(),
+                occurrence.absolutePath());
     }
 }

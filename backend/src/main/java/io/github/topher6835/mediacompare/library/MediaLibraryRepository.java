@@ -3,6 +3,10 @@ package io.github.topher6835.mediacompare.library;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Collections;
 import java.util.stream.Collectors;
 import io.github.topher6835.mediacompare.analysis.AvailableMediaMetadata;
 import io.github.topher6835.mediacompare.analysis.ImageIoMediaMetadataDefinition;
@@ -10,6 +14,8 @@ import io.github.topher6835.mediacompare.analysis.MediaKind;
 import io.github.topher6835.mediacompare.analysis.MediaMetadataAnalysisDefinition;
 import io.github.topher6835.mediacompare.analysis.MediaMetadataResultCodec;
 import io.github.topher6835.mediacompare.catalog.FileCategory;
+import io.github.topher6835.mediacompare.catalog.HostPathProjection;
+import io.github.topher6835.mediacompare.matching.ExactDuplicateRepository;
 import io.github.topher6835.mediacompare.preview.PreviewAssetKey;
 import io.github.topher6835.mediacompare.preview.PreviewKind;
 import io.github.topher6835.mediacompare.preview.PreviewSourceEvidence;
@@ -35,7 +41,10 @@ public class MediaLibraryRepository {
             SELECT entry.id AS file_entry_id, entry.current_content_id, entry.extension_key,
                    entry.size_bytes, entry.observation_revision,
                    entry.modified_time_epoch_second, entry.modified_time_nano,
-                   source.id AS source_id, source.name AS source_name, membership.relative_path,
+                   source.id AS source_id, source.name AS source_name, source.root_path,
+                   source.root_path_key,
+                   source.root_path_dialect, membership.relative_path,
+                   entry.location_path, entry.location_key,
                    analysis.status AS analysis_status, analysis.result_json,
                    asset.asset_key, asset.pixel_width, asset.pixel_height,
                    (SELECT COUNT(DISTINCT eligible.source_id) FROM source_membership AS eligible
@@ -74,14 +83,42 @@ public class MediaLibraryRepository {
 
     private final JdbcTemplate jdbc;
     private final MediaMetadataResultCodec codec;
+    private final ExactDuplicateRepository exact;
 
-    public MediaLibraryRepository(JdbcTemplate jdbc, MediaMetadataResultCodec codec) {
+    public MediaLibraryRepository(JdbcTemplate jdbc, MediaMetadataResultCodec codec,
+            ExactDuplicateRepository exact) {
         this.jdbc = jdbc;
         this.codec = codec;
+        this.exact = exact;
     }
 
     public List<MediaLibraryItem> findPage(long afterFileEntryId, int limit) {
-        return jdbc.query(PAGE_SQL, this::mapItem, pageParameters(afterFileEntryId, limit));
+        return withExactSets(jdbc.query(PAGE_SQL, this::mapItem, pageParameters(afterFileEntryId, limit)));
+    }
+
+    public Optional<MediaLibraryItem> findById(long fileEntryId) {
+        if (fileEntryId <= 0) return Optional.empty();
+        return findByIds(List.of(fileEntryId)).stream().findFirst();
+    }
+
+    public List<MediaLibraryItem> findByIds(List<Long> fileEntryIds) {
+        if (fileEntryIds.isEmpty()) return List.of();
+        if (fileEntryIds.size() > 250) throw new IllegalArgumentException("Too many FileEntry IDs");
+        String sql = PAGE_SQL.replace("entry.id > ?", "entry.id IN ("
+                + String.join(", ", Collections.nCopies(fileEntryIds.size(), "?")) + ")");
+        Object[] standard = pageParameters(0, fileEntryIds.size());
+        List<Object> parameters = new ArrayList<>();
+        for (int index = 0; index < standard.length - 2; index++) parameters.add(standard[index]);
+        parameters.addAll(fileEntryIds);
+        parameters.add(fileEntryIds.size());
+        return withExactSets(jdbc.query(sql, this::mapItem, parameters.toArray()));
+    }
+
+    private List<MediaLibraryItem> withExactSets(List<MediaLibraryItem> items) {
+        if (items.isEmpty() || exact == null) return items;
+        Map<Long, ExactSetReference> references = exact.findCurrentExactSets(
+                items.stream().map(MediaLibraryItem::contentRecordId).distinct().toList());
+        return items.stream().map(item -> item.withExactSet(references.get(item.contentRecordId()))).toList();
     }
 
     static Object[] pageParameters(long afterFileEntryId, int limit) {
@@ -126,6 +163,9 @@ public class MediaLibraryRepository {
                 relativePath.substring(relativePath.lastIndexOf('/') + 1), row.getString("extension_key"),
                 row.getLong("size_bytes"), image == null ? null : image.format(),
                 image == null ? null : image.width(), image == null ? null : image.height(),
-                row.getLong("source_count"), support, reference);
+                row.getLong("source_count"), support, reference,
+                HostPathProjection.from(row.getString("root_path"), row.getString("root_path_key"),
+                        row.getString("root_path_dialect"),
+                        relativePath, row.getString("location_path"), row.getString("location_key")), null);
     }
 }

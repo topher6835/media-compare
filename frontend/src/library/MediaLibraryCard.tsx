@@ -1,7 +1,9 @@
 import { memo, useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import type { MediaLibraryItem } from '../api/mediaLibrary.ts'
 import type { ThumbnailWork } from './mediaLibraryState.ts'
 import { formatGroupFileCount } from './mediaLibraryGroupState.ts'
+import { ExactBadge } from './ExactBadge.tsx'
 
 interface CardProps {
   item: MediaLibraryItem
@@ -83,13 +85,15 @@ export const MediaLibraryCard = memo(function MediaLibraryCard({ item, currentIt
               )}
             </div>
           )}
+          <Link className="library-card-main-link" to={`/library/items/${item.fileEntryId}`}
+            aria-label={`View details for ${item.displayName}`} />
         </div>
         {currentItemCount !== undefined && (
           <span className="library-group-count" aria-hidden="true">{formatGroupFileCount(currentItemCount)}</span>
         )}
       </div>
       <div className="library-card-caption">
-        <h2 title={item.relativePath}>{item.displayName}</h2>
+        <h2 title={item.relativePath}><Link to={`/library/items/${item.fileEntryId}`}>{item.displayName}</Link></h2>
         <p className="library-source" title={`${item.sourceName} · ${item.relativePath}`}>
           {item.sourceName}
           <span className="library-accessible-path"> · {item.relativePath}</span>
@@ -100,6 +104,7 @@ export const MediaLibraryCard = memo(function MediaLibraryCard({ item, currentIt
           {item.encodedWidth !== null && item.encodedHeight !== null
             && ` · ${item.encodedWidth} × ${item.encodedHeight}`}
         </p>
+        <ExactBadge exactSet={item.exactSet} />
       </div>
     </article>
   )

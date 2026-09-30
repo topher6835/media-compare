@@ -123,6 +123,60 @@ class MediaLibraryApiTests {
     }
 
     @Test
+    void itemDetailLoadsByPhysicalIdAndReturns404ForAbsentOrUntrustedItem() throws Exception {
+        var jpeg = fixture.image("jpeg", "camera/photo.jpg");
+        mvc.perform(get("/api/media-library/items/{id}", jpeg.id()))
+                .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.fileEntryId").value(jpeg.id()))
+                .andExpect(jsonPath("$.format").value("jpeg"))
+                .andExpect(jsonPath("$.encodedWidth").value(600));
+        mvc.perform(get("/api/media-library/items/{id}", 999999)).andExpect(status().isNotFound());
+        jdbc.update("UPDATE source_membership SET presence_status='MISSING' WHERE file_entry_id=?", jpeg.id());
+        mvc.perform(get("/api/media-library/items/{id}", jpeg.id())).andExpect(status().isNotFound());
+    }
+
+    @Test
+    void heicDetailHasNullMetadataAndValidatedFullPath() throws Exception {
+        long contentId = catalog.insert(new ContentRecord(null, 42, 1)).id();
+        var heic = fixture.occurrence(contentId, "camera/photo.HEIC");
+        String root = "/images/" + fixture.contextId;
+        jdbc.update("UPDATE source SET root_path=?, root_path_key=? WHERE id=?", root,
+                io.github.topher6835.mediacompare.location.LocationKeyCodec.encode(fixture.anchor).value(),
+                fixture.primary.id());
+        mvc.perform(get("/api/media-library/items/{id}", heic.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.displayName").value("photo.HEIC"))
+                .andExpect(jsonPath("$.format").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.absolutePath").value(root + "/camera/photo.HEIC"))
+                .andExpect(jsonPath("$.exactSet").value(org.hamcrest.Matchers.nullValue()));
+        jdbc.update("UPDATE source SET root_path_key='invalid' WHERE id=?", fixture.primary.id());
+        mvc.perform(get("/api/media-library/items/{id}", heic.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.absolutePath").value(org.hamcrest.Matchers.nullValue()));
+    }
+
+    @Test
+    void exactBadgeCountsPresentPhysicalCopiesAndSingletonHasNoBadge() throws Exception {
+        var first = fixture.image("png", "first.png");
+        var second = fixture.image("png", "second.png");
+        var singleton = fixture.image("jpeg", "single.jpg");
+        String digest = "%064x".formatted(145);
+        fixture.hash(first.currentContentId(), digest);
+        fixture.hash(second.currentContentId(), digest);
+        mvc.perform(get("/api/media-library/items"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].exactSet.digestHex").value(digest))
+                .andExpect(jsonPath("$.items[0].exactSet.physicalCopyCount").value(2))
+                .andExpect(jsonPath("$.items[1].exactSet.physicalCopyCount").value(2))
+                .andExpect(jsonPath("$.items[2].fileEntryId").value(singleton.id()))
+                .andExpect(jsonPath("$.items[2].exactSet").value(org.hamcrest.Matchers.nullValue()));
+        jdbc.update("UPDATE source_membership SET presence_status='MISSING' WHERE file_entry_id=?", second.id());
+        mvc.perform(get("/api/media-library/items/{id}", first.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.exactSet").value(org.hamcrest.Matchers.nullValue()));
+    }
+
+    @Test
     void defaultAndExplicitPaginationUseTheLastReturnedPhysicalIdAsCursor() throws Exception {
         var ids = new java.util.ArrayList<Long>();
         for (int index = 0; index < 51; index++) ids.add(fixture.image("png", "image-" + index + ".png").id());

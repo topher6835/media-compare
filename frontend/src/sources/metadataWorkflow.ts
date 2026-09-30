@@ -14,5 +14,5 @@ export function metadataAction(
 
 export function metadataHasIssues(run: MediaMetadataRun): boolean {
   const result = run.stage.result
-  return result !== null && (result.completedWithIssues || result.completedUnsupported > 0)
+  return result !== null && (result.failed > 0 || result.staleOrUnavailable > 0)
 }

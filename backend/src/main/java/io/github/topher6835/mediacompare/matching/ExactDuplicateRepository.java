@@ -6,6 +6,10 @@ import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
+import java.util.Map;
+import java.util.HashMap;
+import io.github.topher6835.mediacompare.library.ExactSetReference;
+import io.github.topher6835.mediacompare.analysis.ImageIoMediaMetadataDefinition;
 
 import io.github.topher6835.mediacompare.analysis.Sha256AnalysisDefinition;
 
@@ -262,6 +266,8 @@ public class ExactDuplicateRepository {
                        membership.source_id,
                        source.name AS source_name,
                        membership.relative_path,
+                       source.root_path, source.root_path_key, source.root_path_dialect,
+                       file_entry.location_path, file_entry.location_key,
                        file_entry.extension_key,
                        membership.presence_status,
                        membership.applicability_status
@@ -282,7 +288,12 @@ public class ExactDuplicateRepository {
                         resultSet.getString("relative_path"),
                         resultSet.getString("extension_key"),
                         resultSet.getString("presence_status"),
-                        resultSet.getString("applicability_status")),
+                        resultSet.getString("applicability_status"),
+                        io.github.topher6835.mediacompare.catalog.HostPathProjection.from(
+                                resultSet.getString("root_path"), resultSet.getString("root_path_key"),
+                                resultSet.getString("root_path_dialect"),
+                                resultSet.getString("relative_path"), resultSet.getString("location_path"),
+                                resultSet.getString("location_key"))),
                 exactDefinitionParameters(digestHex));
     }
 
@@ -340,6 +351,85 @@ public class ExactDuplicateRepository {
                             resultSet.getLong("exact_duplicate_group_count"),
                             resultSet.getLong("retained_occurrence_count"));
                 }, exactDefinitionParameters());
+    }
+
+    /** One bounded lookup for all Library items in a page; physical count matches PRESENT exact copies. */
+    public Map<Long, ExactSetReference> findCurrentExactSets(List<Long> contentIds) {
+        if (contentIds.isEmpty()) return Map.of();
+        validateIntegrity();
+        String sql = EXACT_MEMBERS_CTE + """
+                , targets AS (
+                    SELECT content_record_id, digest_hex FROM exact_members
+                    WHERE content_record_id IN (%s)
+                )
+                SELECT targets.content_record_id, targets.digest_hex,
+                       COUNT(DISTINCT members.content_record_id) AS member_count,
+                       COUNT(DISTINCT CASE WHEN EXISTS (
+                           SELECT 1 FROM source_membership AS membership
+                           WHERE membership.file_entry_id = entry.id
+                             AND membership.applicability_status = 'ACTIVE'
+                             AND membership.presence_status = 'PRESENT'
+                       ) THEN entry.id END) AS physical_count
+                FROM targets
+                JOIN exact_members AS members ON members.digest_hex = targets.digest_hex
+                LEFT JOIN file_entry AS entry ON entry.current_content_id = members.content_record_id
+                GROUP BY targets.content_record_id, targets.digest_hex
+                HAVING member_count >= 2 AND physical_count >= 2
+                """.formatted(placeholders(contentIds.size()));
+        List<Object> parameters = new ArrayList<>(List.of(exactDefinitionParameters()));
+        parameters.addAll(contentIds);
+        Map<Long, ExactSetReference> results = new HashMap<>();
+        jdbcTemplate.query(sql, (row, number) -> Map.entry(row.getLong("content_record_id"),
+                new ExactSetReference(row.getString("digest_hex"), row.getLong("physical_count"))),
+                parameters.toArray()).forEach(entry -> results.put(entry.getKey(), entry.getValue()));
+        return results;
+    }
+
+    /** One representative decodable image candidate per requested digest, without per-card queries. */
+    public Map<String, Long> findRepresentativeImageFileIds(List<String> digests) {
+        if (digests.isEmpty()) return Map.of();
+        var image = ImageIoMediaMetadataDefinition.definition();
+        String sql = EXACT_HASH_MEMBERS_CTE + """
+                SELECT members.digest_hex, MIN(entry.id) AS file_entry_id
+                FROM exact_members AS members
+                JOIN file_entry AS entry ON entry.current_content_id = members.content_record_id
+                  AND entry.location_identity_status = 'RESOLVED'
+                JOIN location_context AS context ON context.id = entry.location_context_id
+                  AND context.lifecycle_status = 'ACTIVE' AND context.continuity_status = 'ACCEPTED'
+                JOIN analysis_record AS image ON image.content_record_id = members.content_record_id
+                  AND image.analysis_type = 'MEDIA_METADATA' AND image.analyzer_id = ?
+                  AND image.analyzer_version = ? AND image.configuration_version = ?
+                  AND image.configuration_hash = ? AND image.status = 'COMPLETED'
+                WHERE members.digest_hex IN (%s)
+                  AND CASE WHEN json_valid(image.result_json) THEN
+                      json_extract(image.result_json, '$.outcome') = 'AVAILABLE'
+                      AND json_extract(image.result_json, '$.mediaKind') = 'IMAGE'
+                      AND json_extract(image.result_json, '$.image.format') IN ('jpeg', 'png')
+                    ELSE 0 END
+                  AND EXISTS (
+                    SELECT 1 FROM source_membership AS membership
+                    JOIN source ON source.id = membership.source_id
+                    WHERE membership.file_entry_id = entry.id
+                      AND membership.applicability_status = 'ACTIVE'
+                      AND membership.presence_status = 'PRESENT'
+                      AND membership.observed_file_entry_revision = entry.observation_revision
+                      AND membership.observed_source_location_revision = source.location_revision
+                      AND membership.observed_location_context_revision = context.revision
+                      AND source.bound_location_context_id = context.id
+                  )
+                GROUP BY members.digest_hex
+                """.formatted(placeholders(digests.size()));
+        List<Object> parameters = new ArrayList<>(List.of(exactDefinitionParameters()));
+        parameters.add(image.analyzerId());
+        parameters.add(image.analyzerVersion());
+        parameters.add(image.configurationVersion());
+        parameters.add(image.configurationHash());
+        parameters.addAll(digests);
+        Map<String, Long> results = new HashMap<>();
+        jdbcTemplate.query(sql, (row, number) -> Map.entry(row.getString("digest_hex"),
+                row.getLong("file_entry_id")), parameters.toArray())
+                .forEach(entry -> results.put(entry.getKey(), entry.getValue()));
+        return results;
     }
 
     private static ExactDuplicateGroupCounts mapGroupCounts(java.sql.ResultSet resultSet)

@@ -19,14 +19,18 @@ test('reload polls an active durable job and does not duplicate it', () => {
   assert.equal(metadataAction(300, { active, latest: active }), 'poll')
 })
 
-test('failed pass waits for explicit retry and completed unsupported work reports issues', () => {
+test('failed pass waits for explicit retry and unsupported formats are normal completion', () => {
   assert.equal(metadataAction(200, { active: null, latest: run('FAILED', 200) }), 'failed')
   assert.equal(metadataHasIssues(run('COMPLETED', 200, {
     completedAvailable: 1, completedUnsupported: 1, failed: 0,
     staleOrUnavailable: 0, completedWithIssues: false,
-  })), true)
+  })), false)
   assert.equal(metadataHasIssues(run('COMPLETED', 200, {
     completedAvailable: 1, completedUnsupported: 0, failed: 0,
     staleOrUnavailable: 0, completedWithIssues: false,
   })), false)
+  assert.equal(metadataHasIssues(run('COMPLETED', 200, {
+    completedAvailable: 1, completedUnsupported: 1, failed: 1,
+    staleOrUnavailable: 0, completedWithIssues: true,
+  })), true)
 })

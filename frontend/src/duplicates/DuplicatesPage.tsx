@@ -26,6 +26,7 @@ import {
   rememberDuplicatePage,
 } from './duplicateSession.ts'
 import { aggregateCleanupPlan, formatCleanupSavings, getCleanupPlan, getCleanupPlanEntry } from './duplicateCleanupPlan.ts'
+import { DuplicateRepresentativePreview } from './DuplicateRepresentativePreview.tsx'
 
 const categoryChoices: Array<{
   value: TechnicalFileCategory
@@ -241,6 +242,7 @@ export function DuplicateGroupList({
         const context = matchContext(group)
         return (
           <article className="duplicate-card" key={group.digestHex}>
+            <DuplicateRepresentativePreview representative={group.representative} />
             <div className="duplicate-card-heading">
               <div>
                 <p className="duplicate-reference">

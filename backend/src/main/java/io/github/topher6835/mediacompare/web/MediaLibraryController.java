@@ -6,6 +6,7 @@ import io.github.topher6835.mediacompare.library.MediaLibraryGroupPage;
 import io.github.topher6835.mediacompare.library.MediaLibraryGroupService;
 import io.github.topher6835.mediacompare.library.MediaLibraryPage;
 import io.github.topher6835.mediacompare.library.MediaLibraryService;
+import io.github.topher6835.mediacompare.library.MediaLibraryItem;
 import io.github.topher6835.mediacompare.matching.MediaRelationshipType;
 import io.github.topher6835.mediacompare.preview.ThumbnailScheduler;
 import org.slf4j.Logger;
@@ -15,6 +16,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -43,6 +45,13 @@ public class MediaLibraryController {
             @RequestParam(required = false) Integer limit) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
                 .body(library.findItems(afterFileEntryId, limit));
+    }
+
+    @GetMapping("/items/{fileEntryId}")
+    public ResponseEntity<MediaLibraryItem> item(@PathVariable long fileEntryId) {
+        return library.findItem(fileEntryId)
+                .map(item -> ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(item))
+                .orElseGet(() -> ResponseEntity.notFound().cacheControl(CacheControl.noStore()).build());
     }
 
     /** Database-only groups: current items projected onto explicitly selected full content components. */

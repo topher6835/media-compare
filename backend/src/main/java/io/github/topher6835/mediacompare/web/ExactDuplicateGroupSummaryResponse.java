@@ -11,7 +11,8 @@ public record ExactDuplicateGroupSummaryResponse(
         long missingOccurrenceCount,
         long sourceCount,
         long potentialStorageSavingsBytes,
-        ExactDuplicateFilterMatchResponse filterMatch) {
+        ExactDuplicateFilterMatchResponse filterMatch,
+        io.github.topher6835.mediacompare.library.MediaLibraryItem representative) {
 
     public static ExactDuplicateGroupSummaryResponse from(ExactDuplicateGroupSummary summary) {
         return new ExactDuplicateGroupSummaryResponse(
@@ -23,6 +24,6 @@ public record ExactDuplicateGroupSummaryResponse(
                 summary.missingOccurrenceCount(),
                 summary.sourceCount(),
                 summary.potentialStorageSavingsBytes(),
-                ExactDuplicateFilterMatchResponse.from(summary.filterMatch()));
+                ExactDuplicateFilterMatchResponse.from(summary.filterMatch()), summary.representative());
     }
 }
