@@ -427,6 +427,13 @@ public class JobRepository {
                 """, JobRepository::mapJob);
     }
 
+    public Optional<Job> findLatestMediaMetadataJob() {
+        return jdbcTemplate.query("""
+                SELECT * FROM job WHERE job_type = 'MEDIA_METADATA' AND execution_version = 1
+                ORDER BY id DESC LIMIT 1
+                """, JobRepository::mapJob).stream().findFirst();
+    }
+
     public int startMediaMetadataJob(long jobId, long startedAtMs) {
         return jdbcTemplate.update("""
                 UPDATE job

@@ -3,11 +3,13 @@ package io.github.topher6835.mediacompare.library;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.stream.Collectors;
 import io.github.topher6835.mediacompare.analysis.AvailableMediaMetadata;
 import io.github.topher6835.mediacompare.analysis.ImageIoMediaMetadataDefinition;
 import io.github.topher6835.mediacompare.analysis.MediaKind;
 import io.github.topher6835.mediacompare.analysis.MediaMetadataAnalysisDefinition;
 import io.github.topher6835.mediacompare.analysis.MediaMetadataResultCodec;
+import io.github.topher6835.mediacompare.catalog.FileCategory;
 import io.github.topher6835.mediacompare.preview.PreviewAssetKey;
 import io.github.topher6835.mediacompare.preview.PreviewKind;
 import io.github.topher6835.mediacompare.preview.PreviewSourceEvidence;
@@ -17,6 +19,8 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public class MediaLibraryRepository {
+    private static final String PHOTO_EXTENSIONS = FileCategory.PHOTO.extensionKeys().stream()
+            .sorted().map(key -> "'" + key + "'").collect(Collectors.joining(", "));
     // Correlated route lookups use the existing membership FileEntry index, not a full-library aggregate.
     private static final String TRUSTED_ROUTE = """
             eligible.file_entry_id = entry.id
@@ -32,7 +36,7 @@ public class MediaLibraryRepository {
                    entry.size_bytes, entry.observation_revision,
                    entry.modified_time_epoch_second, entry.modified_time_nano,
                    source.id AS source_id, source.name AS source_name, membership.relative_path,
-                   analysis.result_json,
+                   analysis.status AS analysis_status, analysis.result_json,
                    asset.asset_key, asset.pixel_width, asset.pixel_height,
                    (SELECT COUNT(DISTINCT eligible.source_id) FROM source_membership AS eligible
                     JOIN source AS eligible_source ON eligible_source.id = eligible.source_id
@@ -47,10 +51,9 @@ public class MediaLibraryRepository {
                 WHERE %s
             )
             JOIN source ON source.id = membership.source_id
-            JOIN analysis_record AS analysis ON analysis.content_record_id = content.id
+            LEFT JOIN analysis_record AS analysis ON analysis.content_record_id = content.id
               AND analysis.analysis_type = ? AND analysis.analyzer_id = ? AND analysis.analyzer_version = ?
               AND analysis.configuration_version = ? AND analysis.configuration_hash = ?
-              AND analysis.status = 'COMPLETED'
             LEFT JOIN preview_asset AS asset ON asset.file_entry_id = entry.id
               AND asset.content_record_id = entry.current_content_id
               AND asset.file_observation_revision = entry.observation_revision
@@ -60,13 +63,14 @@ public class MediaLibraryRepository {
               AND asset.preview_kind = ? AND asset.generator_id = ? AND asset.generator_version = ?
               AND asset.configuration_version = ? AND asset.configuration_hash = ?
             WHERE entry.id > ? AND entry.location_identity_status = 'RESOLVED'
-              AND CASE WHEN json_valid(analysis.result_json) THEN
-                    json_extract(analysis.result_json, '$.outcome') = 'AVAILABLE'
-                    AND json_extract(analysis.result_json, '$.mediaKind') = 'IMAGE'
-                  ELSE 1 END
+              AND (entry.extension_key IN (%s) OR
+                   (analysis.status = 'COMPLETED' AND
+                    (NOT json_valid(analysis.result_json) OR
+                     (json_extract(analysis.result_json, '$.outcome') = 'AVAILABLE' AND
+                      json_extract(analysis.result_json, '$.mediaKind') = 'IMAGE'))))
             ORDER BY entry.id
             LIMIT ?
-            """.formatted(TRUSTED_ROUTE, TRUSTED_ROUTE);
+            """.formatted(TRUSTED_ROUTE, TRUSTED_ROUTE, PHOTO_EXTENSIONS);
 
     private final JdbcTemplate jdbc;
     private final MediaMetadataResultCodec codec;
@@ -90,12 +94,18 @@ public class MediaLibraryRepository {
     }
 
     private MediaLibraryItem mapItem(ResultSet row, int rowNumber) throws SQLException {
-        // Invalid JSON is deliberately included by SQL so the existing strict codec rejects it.
-        var decoded = codec.read(row.getString("result_json"));
-        if (!(decoded instanceof AvailableMediaMetadata available) || available.mediaKind() != MediaKind.IMAGE) {
-            throw new IllegalStateException("Media library query returned incompatible image metadata");
+        AvailableMediaMetadata available = null;
+        if ("COMPLETED".equals(row.getString("analysis_status"))) {
+            // Invalid completed results must still fail closed through the strict codec.
+            var decoded = codec.read(row.getString("result_json"));
+            if (decoded instanceof AvailableMediaMetadata present) {
+                if (present.mediaKind() != MediaKind.IMAGE) {
+                    throw new IllegalStateException("Media library query returned incompatible image metadata");
+                }
+                available = present;
+            }
         }
-        var image = available.image();
+        var image = available == null ? null : available.image();
         String relativePath = row.getString("relative_path");
         String assetKey = row.getString("asset_key");
         ThumbnailReference reference = ThumbnailReference.missing();
@@ -109,12 +119,13 @@ public class MediaLibraryRepository {
             }
             reference = ThumbnailReference.published(assetKey, row.getInt("pixel_width"), row.getInt("pixel_height"));
         }
-        var support = image.format().equals("jpeg") || image.format().equals("png")
+        var support = image != null && (image.format().equals("jpeg") || image.format().equals("png"))
                 ? MediaLibraryItem.GenerationSupport.SUPPORTED : MediaLibraryItem.GenerationSupport.UNSUPPORTED;
         return new MediaLibraryItem(row.getLong("file_entry_id"), row.getLong("current_content_id"),
                 row.getLong("source_id"), row.getString("source_name"), relativePath,
                 relativePath.substring(relativePath.lastIndexOf('/') + 1), row.getString("extension_key"),
-                row.getLong("size_bytes"), image.format(), image.width(), image.height(),
+                row.getLong("size_bytes"), image == null ? null : image.format(),
+                image == null ? null : image.width(), image == null ? null : image.height(),
                 row.getLong("source_count"), support, reference);
     }
 }

@@ -69,6 +69,14 @@ test('scheduling includes only visible MISSING SUPPORTED items in catalog order'
   assert.deepEqual(visibleSchedulingCandidates(items, new Set(), {}, 1000), [])
 })
 
+test('metadata-free HEIC remains a Library item without entering thumbnail scheduling', () => {
+  const heic = { ...item(4, 'MISSING', 'UNSUPPORTED'), displayName: 'image.HEIC',
+    extensionKey: 'heic', format: null, encodedWidth: null, encodedHeight: null }
+  const pages = appendLibraryPage([], null, page([heic]))
+  assert.deepEqual(flattenLibraryPages(pages), [heic])
+  assert.deepEqual(visibleSchedulingCandidates([heic], new Set([4]), {}, 1000), [])
+})
+
 test('in-flight, awaiting, failed and paused work is not schedule eligible', () => {
   for (const phase of ['scheduling', 'awaiting', 'failed', 'paused']) {
     assert.deepEqual(visibleSchedulingCandidates([item(1)], new Set([1]), { 1: waiting(item(1), phase) }, 2000), [])

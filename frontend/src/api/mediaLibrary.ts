@@ -17,9 +17,9 @@ export interface MediaLibraryItem {
   displayName: string
   extensionKey: string | null
   sizeBytes: number
-  format: string
-  encodedWidth: number
-  encodedHeight: number
+  format: string | null
+  encodedWidth: number | null
+  encodedHeight: number | null
   sourceCount: number
   generationSupport: GenerationSupport
   thumbnail: ThumbnailReference

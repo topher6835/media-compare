@@ -243,6 +243,15 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Keep GET database-only and no-store, using existing safe 400/empty-500 handling. Persist/materialize/cache no groups or memberships; add no schema, dependency, filesystem access, rendering, scheduling, or writes. Preserve `/items`, thumbnail POST, preview GET, and duplicate-specific API/UI behavior.
 - The React library presents these groups as summaries; group detail/members remain separate future work.
 
+## Fresh-Session Library Readiness and Future Relationship UX
+
+- The Sources UI composes the existing four-stage v3 SCAN with the separate durable media-metadata Job. A completed indexing Job stays completed if metadata fails. The frontend reads latest/active metadata state before starting, resumes polling active work after reload, and requires an explicit retry after a failed pass. This adds no SCAN stage or schema.
+- A recognized current image remains in Library Items and Groups without AVAILABLE metadata or a usable preview. The existing PHOTO extension policy includes HEIC/HEIF; completed compatible metadata remains strictly validated. Format and encoded dimensions are nullable enrichment, never fabricated. JPEG/PNG thumbnail support keeps the existing generator.
+- **Exact set:** byte-for-byte equality only, determined by SHA-256. Altered copies are never exact duplicates. **Variant group:** the same underlying image/content after crop, resize, recompression, filters/color changes, watermark, or minor edits; each variant retains distinct ContentRecord/file identity. **Semantic group:** different media related by person, scene, shoot/event, location, action, or later higher-level meaning. An item can participate in all three concepts simultaneously. Exact copies may appear within broader Variant/Semantic presentation while retaining a separately identifiable exact-copy relationship. Variant and Semantic relationships must remain distinct.
+- The dedicated Exact Duplicates page stays limited to byte-identical physical copies for redundancy/cleanup review. Future list cards should show one representative preview. Library keeps **Items | Groups**, with no Exacts tab.
+- Future Library item cards may show independent Exact, Variant, Person, Scene, and other relationship badges. The card opens Item Detail; a badge opens its relationship detail. On group cards, the representative opens Item Detail and badges open their corresponding detail. Broader group cards use one primary preview, a small bounded number of alternates, and `+N` overflow.
+- Future Item Detail is the central page for a supported large preview, metadata, Source, full absolute path, exact copies, Variant groups, Semantic groups, and links to relationship detail. Item Detail, Exact Detail, and future Group Detail expose the complete absolute path for each relevant physical file. A future local-host UI offers Finder reveal on macOS and File Explorer reveal on Windows for manual cleanup. These detail, badge, reveal, matcher, and preview features are not part of this milestone.
+
 ## First Grouped React Media Library View
 
 - Keep Items as the default `/library` view. An explicit native-button Items / Groups control uses page-local state and may reload a mode from its first page when switched; no view choice is persisted.
@@ -350,7 +359,7 @@ The initial persistence implementation uses immutable Java records for row-shape
 - Reuse the unique compatible AnalysisRecord for retry. `COMPLETED` remains reusable, `PENDING`/`RUNNING` remains owned, and `FAILED` is eligible for a later Job. Every retry increments attempt count; success stores typed result and clears error, while repeated failure retains null result and a bounded safe error.
 - Publish per-content failure only after filesystem post-validation and the same transactional catalog-evidence guard as success. Stale evidence produces no artifact. Individual extraction failures increment the completed stage's issue count and do not fail the Job; unexpected infrastructure failures fail the stage and Job.
 - On startup, fail abandoned active metadata Jobs and convert only exact `builtin.imageio` nonterminal analysis rows to retryable `FAILED`. Re-enumerate candidates on the next Job and preserve completed artifacts. Persist only the bounded version-1 stage summary counts; cursor resume and per-file result lists remain deferred.
-- Keep automatic post-SCAN scheduling, ffprobe video analysis/publication, and frontend metadata display deferred.
+- At this earlier milestone, automatic post-SCAN scheduling and frontend metadata display were deferred; the later fresh-session Library readiness decision below now composes these in the Sources UI. ffprobe video analysis/publication remains deferred.
 
 ## Pre-V6 Staged LocationContext and Membership Migration
 

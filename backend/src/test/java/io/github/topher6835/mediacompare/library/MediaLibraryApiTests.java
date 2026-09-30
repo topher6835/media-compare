@@ -104,6 +104,25 @@ class MediaLibraryApiTests {
     }
 
     @Test
+    void metadataFreeHeicStillReturnsCatalogIdentityAndHonestNullEnrichment() throws Exception {
+        long contentId = catalog.insert(new ContentRecord(null, 42, 1)).id();
+        var entry = fixture.occurrence(contentId, "camera/image.HEIC");
+        mvc.perform(get("/api/media-library/items"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].fileEntryId").value(entry.id()))
+                .andExpect(jsonPath("$.items[0].contentRecordId").value(contentId))
+                .andExpect(jsonPath("$.items[0].sourceName").value("primary"))
+                .andExpect(jsonPath("$.items[0].displayName").value("image.HEIC"))
+                .andExpect(jsonPath("$.items[0].extensionKey").value("heic"))
+                .andExpect(jsonPath("$.items[0].sizeBytes").value(42))
+                .andExpect(jsonPath("$.items[0].format").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.items[0].encodedWidth").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.items[0].encodedHeight").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.items[0].generationSupport").value("UNSUPPORTED"))
+                .andExpect(jsonPath("$.items[0].thumbnail.state").value("MISSING"));
+    }
+
+    @Test
     void defaultAndExplicitPaginationUseTheLastReturnedPhysicalIdAsCursor() throws Exception {
         var ids = new java.util.ArrayList<Long>();
         for (int index = 0; index < 51; index++) ids.add(fixture.image("png", "image-" + index + ".png").id());

@@ -94,7 +94,12 @@ export const MediaLibraryCard = memo(function MediaLibraryCard({ item, currentIt
           {item.sourceName}
           <span className="library-accessible-path"> · {item.relativePath}</span>
         </p>
-        <p className="library-format">{item.format.toUpperCase()} · {item.encodedWidth} × {item.encodedHeight}</p>
+        <p className="library-format">
+          {(item.extensionKey ?? 'Unknown extension').toUpperCase()} · {item.sizeBytes.toLocaleString()} bytes
+          {item.format && ` · ${item.format.toUpperCase()}`}
+          {item.encodedWidth !== null && item.encodedHeight !== null
+            && ` · ${item.encodedWidth} × ${item.encodedHeight}`}
+        </p>
       </div>
     </article>
   )

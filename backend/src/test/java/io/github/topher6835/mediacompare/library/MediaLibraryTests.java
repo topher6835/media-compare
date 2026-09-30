@@ -98,8 +98,8 @@ class MediaLibraryTests {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"type", "analyzer", "version", "config-version", "config-hash", "pending", "failed", "missing", "unsupported", "video"})
-    void excludesMissingOldOrNonImageMetadata(String mutation) {
+    @ValueSource(strings = {"type", "analyzer", "version", "config-version", "config-hash", "pending", "failed", "missing", "unsupported"})
+    void recognizedImageRemainsVisibleWithoutAvailableMetadata(String mutation) {
         fixture.image("jpeg", "image.jpg");
         switch (mutation) {
             case "type" -> jdbc.update("UPDATE analysis_record SET analysis_type = 'OTHER'");
@@ -111,11 +111,40 @@ class MediaLibraryTests {
             case "failed" -> jdbc.update("UPDATE analysis_record SET status = 'FAILED'");
             case "missing" -> jdbc.update("DELETE FROM analysis_record");
             case "unsupported" -> jdbc.update("UPDATE analysis_record SET result_json = ?", codec.write(new UnsupportedMediaMetadata(1)));
-            case "video" -> jdbc.update("UPDATE analysis_record SET result_json = ?", codec.write(new AvailableMediaMetadata(1,
-                    MediaKind.VIDEO, null, new VideoMediaMetadata(List.of("mov"), null, "h264", 600, 400, 1, null, 0))));
         }
-        assertTrue(library.findItems(null, null).items().isEmpty());
-        assertTrue(groups.findGroups(null, null, null).groups().isEmpty());
+        var item = library.findItems(null, null).items().getFirst();
+        assertEquals("image.jpg", item.displayName());
+        assertEquals("jpg", item.extensionKey());
+        assertEquals(42, item.sizeBytes());
+        assertNull(item.format());
+        assertNull(item.encodedWidth());
+        assertNull(item.encodedHeight());
+        assertEquals(MediaLibraryItem.GenerationSupport.UNSUPPORTED, item.generationSupport());
+        assertEquals(ThumbnailReference.missing(), item.thumbnail());
+        assertEquals(item, groups.findGroups(null, null, null).groups().getFirst().representative());
+    }
+
+    @Test
+    void heicWithoutMetadataAppearsInItemsAndExactGroupWithPhysicalCopyCount() {
+        long contentId = catalog.insert(new ContentRecord(null, 42, 1)).id();
+        var first = fixture.occurrence(contentId, "camera/first.HEIC");
+        var second = fixture.occurrence(contentId, "copies/second.heic");
+        var items = library.findItems(null, null).items();
+        assertEquals(List.of(first.id(), second.id()), items.stream().map(MediaLibraryItem::fileEntryId).toList());
+        assertEquals("heic", items.getFirst().extensionKey());
+        assertNull(items.getFirst().format());
+        assertEquals(MediaLibraryItem.GenerationSupport.UNSUPPORTED, items.getFirst().generationSupport());
+        var group = groups.findGroups(null, null, null).groups().getFirst();
+        assertEquals(2, group.currentItemCount());
+        assertEquals(first.id(), group.representative().fileEntryId());
+    }
+
+    @Test
+    void incompatibleCompletedVideoMetadataOnRecognizedImageFailsClosed() {
+        fixture.image("png", "image.png");
+        jdbc.update("UPDATE analysis_record SET result_json = ?", codec.write(new AvailableMediaMetadata(1,
+                MediaKind.VIDEO, null, new VideoMediaMetadata(List.of("mov"), null, "h264", 600, 400, 1, null, 0))));
+        assertThrows(IllegalStateException.class, () -> library.findItems(null, null));
     }
 
     @ParameterizedTest
@@ -201,6 +230,17 @@ class MediaLibraryTests {
         } while (cursor != null);
         assertEquals(expected, actual);
         assertTrue(library.findItems(Long.MAX_VALUE, 200).items().isEmpty());
+    }
+
+    @Test
+    void keysetPagesIncludeMetadataFreeHeicBetweenSupportedImages() {
+        var first = fixture.image("jpeg", "first.jpg");
+        var heic = fixture.occurrence(catalog.insert(new ContentRecord(null, 42, 1)).id(), "middle.HEIF");
+        var last = fixture.image("png", "last.png");
+        assertEquals(List.of(first.id(), heic.id()), library.findItems(null, 2).items().stream()
+                .map(MediaLibraryItem::fileEntryId).toList());
+        assertEquals(List.of(last.id()), library.findItems(heic.id(), 2).items().stream()
+                .map(MediaLibraryItem::fileEntryId).toList());
     }
 
     @Test

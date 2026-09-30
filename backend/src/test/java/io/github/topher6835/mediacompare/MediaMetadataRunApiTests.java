@@ -69,6 +69,41 @@ class MediaMetadataRunApiTests {
     }
 
     @Test
+    void statusReadReportsLatestActiveAndCompletedWithoutCreatingJobs() throws Exception {
+        mvc.perform(get("/api/media-metadata-runs/status"))
+                .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.active").doesNotExist())
+                .andExpect(jsonPath("$.latest").doesNotExist());
+        long id = metadataJobs.create().job().id();
+        mvc.perform(get("/api/media-metadata-runs/status"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.active.jobId").value(id))
+                .andExpect(jsonPath("$.latest.jobId").value(id));
+        metadataJobs.run(id);
+        mvc.perform(get("/api/media-metadata-runs/status"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.active").doesNotExist())
+                .andExpect(jsonPath("$.latest.jobId").value(id))
+                .andExpect(jsonPath("$.latest.status").value("COMPLETED"));
+        org.junit.jupiter.api.Assertions.assertEquals(1L,
+                jdbc.queryForObject("SELECT COUNT(*) FROM job WHERE job_type='MEDIA_METADATA'", Long.class));
+    }
+
+    @Test
+    void failedMetadataStatusDoesNotChangeCompletedIndexingJob() throws Exception {
+        long id = metadataJobs.create().job().id();
+        Source source = catalog.insert(new Source(null, "scan", tempDir.toString(), tempDir.toString(), 1,
+                System.currentTimeMillis(), System.currentTimeMillis()));
+        long scanRunId = scanRuns.create(List.of(source.id())).scanRun().id();
+        long scanId = jobs.insert(new Job(null, scanRunId, "SCAN", 3, "COMPLETED", null,
+                0, 0L, 1, 1, 1L, 2L, null)).id();
+        long now = System.currentTimeMillis();
+        jdbc.update("UPDATE job SET status='FAILED', current_stage_type=NULL, finished_at_ms=? WHERE id=?", now, id);
+        jdbc.update("UPDATE job_stage SET status='FAILED', finished_at_ms=? WHERE job_id=?", now, id);
+        mvc.perform(get("/api/media-metadata-runs/status"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.latest.status").value("FAILED"));
+        org.junit.jupiter.api.Assertions.assertEquals("COMPLETED", jobs.findJobById(scanId).orElseThrow().status());
+    }
+
+    @Test
     void readsCompletedSummaryWithoutLeakingStoredCodecFields() throws Exception {
         long id = metadataJobs.create().job().id();
         metadataJobs.run(id);

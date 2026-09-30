@@ -92,6 +92,10 @@ public class MediaMetadataJobService {
         return new MediaMetadataExecutionDetails(job, stages);
     }
 
+    public java.util.Optional<MediaMetadataExecutionDetails> latest() {
+        return jobs.findLatestMediaMetadataJob().map(job -> find(job.id()));
+    }
+
     private void validateDurableState(Job job, JobStage stage) {
         if (!List.of("PENDING", "RUNNING", "COMPLETED", "FAILED").contains(job.status())) {
             throw new IllegalStateException("Invalid metadata Job status");

@@ -56,6 +56,17 @@ public class MediaMetadataRunController {
                 .body(MediaMetadataRunResponse.from(jobs.find(jobId), resultCodec));
     }
 
+    @GetMapping("/status")
+    public ResponseEntity<MediaMetadataStatusResponse> status() {
+        var latest = jobs.latest().map(details -> MediaMetadataRunResponse.from(details, resultCodec)).orElse(null);
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(new MediaMetadataStatusResponse(latest != null
+                        && ("PENDING".equals(latest.status()) || "RUNNING".equals(latest.status()))
+                        ? latest : null, latest));
+    }
+
+    public record MediaMetadataStatusResponse(MediaMetadataRunResponse active, MediaMetadataRunResponse latest) {}
+
     @ExceptionHandler({IllegalArgumentException.class, HttpMessageNotReadableException.class,
             MethodArgumentTypeMismatchException.class})
     public ResponseEntity<Void> invalid() { return error(400); }

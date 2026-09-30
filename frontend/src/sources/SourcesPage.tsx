@@ -8,6 +8,8 @@ import {
 import { Link } from 'react-router-dom'
 
 import { ApiError } from '../api/http.ts'
+import { metadataHasIssues } from './metadataWorkflow.ts'
+import { useMetadataWorkflow, type MetadataPhase } from './useMetadataWorkflow.ts'
 import {
   clearPendingIndexingStart,
   getIndexingRun,
@@ -68,9 +70,7 @@ function preparationErrorMessage(error: unknown): string {
 
 function runDisplayStatus(run: IndexingRunSummary): string {
   if (run.status === 'COMPLETED') {
-    return run.completedWithIssues
-      ? 'Analysis finished with issues'
-      : 'Analysis complete'
+    return 'Indexing complete'
   }
   if (run.status === 'FAILED') return 'Analysis stopped'
   if (run.status === 'PENDING') return 'Waiting to start'
@@ -88,6 +88,17 @@ function runStatusClass(
   if (isActiveIndexingRun(run)) return 'active'
   if (run.status === 'FAILED') return 'failed'
   return run.completedWithIssues ? 'complete-with-issues' : 'complete'
+}
+
+function analysisStatus(run: IndexingRunSummary, metadata: MetadataPhase | null): string {
+  if (run.status !== 'COMPLETED' || metadata?.scanRunId !== run.scanRunId) return runDisplayStatus(run)
+  if (metadata.state === 'complete' && metadata.run) {
+    return run.completedWithIssues || metadataHasIssues(metadata.run)
+      ? 'Analysis finished with issues' : 'Analysis complete'
+  }
+  if (metadata.state === 'failed') return 'Metadata analysis failed'
+  if (metadata.state === 'running') return 'Analyzing image metadata'
+  return 'Checking metadata analysis'
 }
 
 function stageState(
@@ -115,6 +126,8 @@ interface IndexingPanelProps {
   sourceName: string
   canStartNew: boolean
   onStartNew: () => void
+  metadata: MetadataPhase | null
+  onRetryMetadata: () => void
 }
 
 function IndexingPanel({
@@ -122,8 +135,16 @@ function IndexingPanel({
   sourceName,
   canStartNew,
   onStartNew,
+  metadata,
+  onRetryMetadata,
 }: IndexingPanelProps) {
-  const statusClass = runStatusClass(run)
+  const metadataDone = metadata?.state === 'complete' && metadata.run !== null
+  const metadataFailed = metadata?.state === 'failed'
+  const completedWithIssues = run.completedWithIssues || (metadataDone && metadataHasIssues(metadata.run!))
+  const statusClass = run.status === 'COMPLETED'
+    ? metadataFailed ? 'failed' : metadataDone
+      ? completedWithIssues ? 'complete-with-issues' : 'complete' : 'active'
+    : runStatusClass(run)
   const discovery = run.stages.find((stage) => stage.stageType === 'DISCOVERY')
   const reconciliation = run.stages.find(
     (stage) => stage.stageType === 'RECONCILIATION',
@@ -137,7 +158,7 @@ function IndexingPanel({
           <h2 id="indexing-heading">{sourceName}</h2>
         </div>
         <span className={`run-status ${statusClass}`}>
-          {runDisplayStatus(run)}
+          {analysisStatus(run, metadata)}
         </span>
       </div>
 
@@ -152,6 +173,13 @@ function IndexingPanel({
             </li>
           )
         })}
+        <li className={run.status !== 'COMPLETED' ? 'waiting' : metadataFailed ? 'failed'
+          : metadataDone ? 'complete' : 'running'}>
+          <span className="stage-marker" aria-hidden="true" />
+          <span>Analyzing image metadata</span>
+          <small>{run.status !== 'COMPLETED' ? 'Waiting' : metadataFailed ? 'Failed'
+            : metadataDone ? 'Complete' : metadata?.state === 'running' ? 'In progress' : 'Checking'}</small>
+        </li>
       </ol>
 
       {(discovery !== undefined ||
@@ -211,7 +239,7 @@ function IndexingPanel({
 
       <div
         className={`run-message ${statusClass}`}
-        role={run.status === 'FAILED' ? 'alert' : 'status'}
+        role={run.status === 'FAILED' || metadataFailed ? 'alert' : 'status'}
         aria-live="polite"
       >
         {run.status === 'PENDING' && (
@@ -224,23 +252,37 @@ function IndexingPanel({
               : 'Analysis is waiting for the background worker.'}
           </p>
         )}
-        {run.status === 'COMPLETED' && !run.completedWithIssues && (
+        {run.status === 'COMPLETED' && !metadataDone && !metadataFailed && (
+          <p>{metadata?.state === 'unavailable'
+            ? 'Indexing is complete. Metadata status is temporarily unavailable; checking again shortly.'
+            : 'Indexing is complete. Image metadata is being checked or analyzed before Library is ready.'}</p>
+        )}
+        {run.status === 'COMPLETED' && metadataFailed && (
+          <div>
+            <strong>Metadata analysis failed</strong>
+            <p>Indexing is complete. Image metadata could not finish; cataloged images remain visible in Library.</p>
+            {metadata?.run?.errorMessage && <p>{metadata.run.errorMessage}</p>}
+            <button type="button" onClick={onRetryMetadata}>Retry metadata analysis</button>
+          </div>
+        )}
+        {run.status === 'COMPLETED' && metadataDone && !completedWithIssues && (
           <div>
             <strong>Analysis complete</strong>
-            <p>The catalog is ready for exact duplicate browsing.</p>
+            <p>Library is ready.</p>
+            <Link className="primary-link" to="/library">View Library</Link>{' '}
             <Link className="primary-link" to="/duplicates">
               View exact duplicates
             </Link>
           </div>
         )}
-        {run.status === 'COMPLETED' && run.completedWithIssues && (
+        {run.status === 'COMPLETED' && metadataDone && completedWithIssues && (
           <div>
             <strong>Analysis finished with issues</strong>
             <p>
-              The indexing pipeline finished, but some files were skipped or
-              could not be hashed. Successfully analyzed content remains
-              available for exact duplicate browsing.
+              Indexing and image metadata finished, with some skipped, unsupported, or failed files.
+              Cataloged images remain visible in Library even when a preview is unavailable.
             </p>
+            <Link className="primary-link" to="/library">View Library</Link>{' '}
             <Link className="primary-link" to="/duplicates">
               View exact duplicates
             </Link>
@@ -259,7 +301,8 @@ function IndexingPanel({
       </div>
 
       <p className="run-identifiers">
-        ScanRun #{run.scanRunId} · Job #{run.jobId}
+        ScanRun #{run.scanRunId} · Indexing Job #{run.jobId}
+        {metadata?.run && ` · Metadata Job #${metadata.run.jobId}`}
       </p>
     </section>
   )
@@ -390,6 +433,25 @@ export function SourcesPage() {
   const effectiveActiveRun =
     sourceStatus?.active ?? (run && isActiveIndexingRun(run) ? run : null)
   const activeScanRunId = effectiveActiveRun?.scanRunId ?? null
+  const latestSummary = [run, ...(sourceStatus?.sources.map((item) => item.latest) ?? [])]
+    .filter((item): item is IndexingRunSummary => item !== null)
+    .reduce<IndexingRunSummary | null>((latest, item) =>
+      latest === null || item.scanRunId > latest.scanRunId ? item : latest, null)
+  const completedSummary = latestSummary?.status === 'COMPLETED' ? latestSummary : null
+  const completedScanRunId = completedSummary?.scanRunId ?? null
+  const completedFinishedAtMs = completedSummary?.finishedAtMs ?? null
+  const { phase: metadataPhase, retryMetadata } = useMetadataWorkflow(
+    completedScanRunId, completedFinishedAtMs,
+  )
+
+  useEffect(() => {
+    if (completedScanRunId === null || run?.scanRunId === completedScanRunId) return
+    const controller = new AbortController()
+    getIndexingRun(completedScanRunId, controller.signal)
+      .then(setRun)
+      .catch(() => { /* The durable Source summary remains available for recovery. */ })
+    return () => controller.abort()
+  }, [completedScanRunId, run?.scanRunId])
 
   useEffect(() => {
     if (activeScanRunId === null) return
@@ -589,6 +651,7 @@ export function SourcesPage() {
     effectiveActiveRun?.scanRunId === run?.scanRunId ? (run?.sourceIds ?? []) : []
   const globallyBusy =
     effectiveActiveRun !== null ||
+    (metadataPhase !== null && ['checking', 'running', 'unavailable'].includes(metadataPhase.state)) ||
     preparingSourceId !== null ||
     startingSourceId !== null ||
     uncertainStart !== null ||
@@ -616,7 +679,7 @@ export function SourcesPage() {
           <h1>Sources</h1>
           <p className="page-intro">
             Register and prepare a local folder, then analyze it through discovery,
-            catalog reconciliation, content assignment, and exact hashing.
+            catalog reconciliation, content assignment, exact hashing, and image metadata.
           </p>
         </div>
       </div>
@@ -691,11 +754,13 @@ export function SourcesPage() {
         </p>
       )}
 
-      {run && (
+      {run && latestSummary?.scanRunId === run.scanRunId && (
         <IndexingPanel
           run={run}
           sourceName={panelSourceName}
           canStartNew={!globallyBusy && panelSource?.preparationState === 'READY'}
+          metadata={metadataPhase?.scanRunId === run.scanRunId ? metadataPhase : null}
+          onRetryMetadata={retryMetadata}
           onStartNew={() => {
             const source =
               panelSourceId === null ? undefined : metadataById.get(panelSourceId)
@@ -767,7 +832,7 @@ export function SourcesPage() {
               const disabledByOther =
                 blockedByActiveRun ||
                 blockedByLocalStart ||
-                blockedByUncertainStart
+                blockedByUncertainStart || globallyBusy
               return (
                 <article className="source-card" key={status.sourceId}>
                   <div className="source-card-main">
@@ -798,12 +863,13 @@ export function SourcesPage() {
                     )}
                     {displayRun && (
                       <div className={`source-latest ${runStatusClass(displayRun)}`}>
-                        <strong>Latest: {runDisplayStatus(displayRun)}</strong>
+                        <strong>Latest: {analysisStatus(displayRun,
+                          metadataPhase?.scanRunId === displayRun.scanRunId ? metadataPhase : null)}</strong>
                         {displayRun.status === 'FAILED' && displayRun.errorMessage && (
                           <span>{displayRun.errorMessage}</span>
                         )}
                         {displayRun.status === 'COMPLETED' && (
-                          <Link to="/duplicates">View exact duplicates</Link>
+                          <Link to="/library">View Library</Link>
                         )}
                       </div>
                     )}
