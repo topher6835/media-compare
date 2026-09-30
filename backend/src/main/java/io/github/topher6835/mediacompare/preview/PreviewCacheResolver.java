@@ -1,5 +1,7 @@
 package io.github.topher6835.mediacompare.preview;
 
+import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.channels.Channels;
@@ -68,7 +70,7 @@ public class PreviewCacheResolver {
         }
         BasicFileAttributes attributes = Files.readAttributes(resolved, BasicFileAttributes.class,
                 LinkOption.NOFOLLOW_LINKS);
-        if (!attributes.isRegularFile() || attributes.isSymbolicLink() || attributes.size() != expectedSize
+        if (!attributes.isRegularFile() || HostFileSystems.current().unsafeElement(resolved, attributes) || attributes.size() != expectedSize
                 || !resolved.toRealPath().equals(resolved)) {
             throw new IOException("Cache asset is missing, unsafe, or has unexpected size");
         }
@@ -78,7 +80,7 @@ public class PreviewCacheResolver {
     private static void requireDirectory(Path path) throws IOException {
         BasicFileAttributes attributes = Files.readAttributes(path, BasicFileAttributes.class,
                 LinkOption.NOFOLLOW_LINKS);
-        if (!attributes.isDirectory() || attributes.isSymbolicLink()) {
+        if (!attributes.isDirectory() || HostFileSystems.current().unsafeElement(path, attributes)) {
             throw new IOException("Cache path contains a non-directory or symbolic link");
         }
     }

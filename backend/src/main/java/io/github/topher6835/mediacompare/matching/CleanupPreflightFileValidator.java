@@ -12,9 +12,11 @@ import io.github.topher6835.mediacompare.analysis.StaleContentHashException;
 import io.github.topher6835.mediacompare.catalog.ContentHashCandidate;
 import io.github.topher6835.mediacompare.catalog.FileEntry;
 import io.github.topher6835.mediacompare.catalog.CurrentMembershipAuthority;
+import io.github.topher6835.mediacompare.filesystem.HostFileCheck;
+import io.github.topher6835.mediacompare.filesystem.HostFileStatus;
+import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
 import io.github.topher6835.mediacompare.location.ContinuityOutcome;
 import io.github.topher6835.mediacompare.location.ContinuityProbeResult;
-import io.github.topher6835.mediacompare.location.LocationDialect;
 import io.github.topher6835.mediacompare.location.LocationKey;
 import io.github.topher6835.mediacompare.location.LocationKeyCodec;
 import io.github.topher6835.mediacompare.location.LocationPath;
@@ -65,7 +67,7 @@ public class CleanupPreflightFileValidator {
         final LocationPath location;
         try {
             location = new LocationPathCodec().decode(entry.locationPath());
-            if (location.dialect() != LocationDialect.UNIX || location.components().isEmpty()
+            if (location.components().isEmpty()
                     || !LocationKeyCodec.matches(location, LocationKey.parse(entry.locationKey()))) {
                 return failed(UNSAFE_PATH);
             }
@@ -93,6 +95,10 @@ public class CleanupPreflightFileValidator {
             }
             try {
                 Path path = hostPath(location);
+                HostFileCheck fileBefore = HostFileSystems.current().inspect(location, entry.sizeBytes(),
+                        entry.modifiedTimeEpochSecond(), entry.modifiedTimeNano());
+                var fileFailure = fileFailure(fileBefore.status());
+                if (fileFailure != null) return failed(fileFailure);
                 var before = checkPath(entry, path, authority);
                 if (before != null) return failed(before);
                 if (entry.currentContentId() == null) return failed(AUTHORITY_CHANGED);
@@ -105,6 +111,11 @@ public class CleanupPreflightFileValidator {
                 }
                 var after = checkPath(entry, path, authority);
                 if (after != null) return failed(after);
+                HostFileCheck fileAfter = HostFileSystems.current().inspect(location, entry.sizeBytes(),
+                        entry.modifiedTimeEpochSecond(), entry.modifiedTimeNano());
+                fileFailure = fileFailure(fileAfter.status());
+                if (fileFailure != null) return failed(fileFailure);
+                if (!fileBefore.sameFileAs(fileAfter)) return failed(FILESYSTEM_CHANGED);
                 var end = capture.capture(source, context);
                 if (end.outcome() != ScanAuthorityOutcome.TRUSTED) {
                     failure = AUTHORITY_CHANGED;
@@ -139,6 +150,16 @@ public class CleanupPreflightFileValidator {
         return new ValidatedFile(null, reason);
     }
 
+    private static CleanupPreflightReason fileFailure(HostFileStatus status) {
+        return switch (status) {
+            case ESTABLISHED -> null;
+            case MISSING -> IO_UNAVAILABLE;
+            case STALE -> FILESYSTEM_CHANGED;
+            case UNVERIFIABLE -> AUTHORITY_UNAVAILABLE;
+            case UNSAFE_PATH -> UNSAFE_PATH;
+        };
+    }
+
     public record ValidatedFile(Path path, CleanupPreflightReason reason) { }
 
     private CleanupPreflightReason checkPath(FileEntry entry, Path file, ScanAuthoritySnapshot authority)
@@ -148,11 +169,11 @@ public class CleanupPreflightFileValidator {
         java.util.List<Path> storagePaths = new java.util.ArrayList<>();
         Path current = file.getRoot();
         var rootAttributes = Files.readAttributes(current, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-        if (!rootAttributes.isDirectory() || rootAttributes.isSymbolicLink()) return UNSAFE_PATH;
+        if (!rootAttributes.isDirectory() || HostFileSystems.current().unsafeElement(current, rootAttributes)) return UNSAFE_PATH;
         for (Path segment : file) {
             current = current.resolve(segment);
             var attrs = Files.readAttributes(current, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-            if (attrs.isSymbolicLink() || (!current.equals(file) && !attrs.isDirectory())
+            if (HostFileSystems.current().unsafeElement(current, attrs) || (!current.equals(file) && !attrs.isDirectory())
                     || (current.equals(file) && !attrs.isRegularFile())) return UNSAFE_PATH;
             if (current.startsWith(anchor)) storagePaths.add(current);
             if (current.equals(file)) {
@@ -180,8 +201,6 @@ public class CleanupPreflightFileValidator {
     }
 
     private static Path hostPath(LocationPath location) {
-        Path path = Path.of("/");
-        for (String component : location.components()) path = path.resolve(component);
-        return path;
+        return HostFileSystems.current().path(location);
     }
 }

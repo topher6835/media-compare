@@ -1,0 +1,65 @@
+package io.github.topher6835.mediacompare.filesystem;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.time.Instant;
+
+import io.github.topher6835.mediacompare.location.LocationPath;
+
+/** Narrow host boundary for original-file paths and operation-local identity checks. */
+public interface HostFileSystem {
+    String pathText(LocationPath location);
+
+    default Path path(LocationPath location) {
+        return Path.of(pathText(location));
+    }
+
+    /** The host may reject a link or reparse-like path even when Java calls it a directory. */
+    boolean unsafeElement(Path path, BasicFileAttributes attributes) throws IOException;
+
+    default HostFileCheck inspect(LocationPath location, long size, Long epochSecond, Integer nano)
+            throws IOException {
+        final Path file;
+        try {
+            file = path(location);
+        } catch (IllegalArgumentException exception) {
+            return HostFileCheck.failed(HostFileStatus.UNVERIFIABLE);
+        }
+        if (location.components().isEmpty() || file.getRoot() == null) {
+            return HostFileCheck.failed(HostFileStatus.UNVERIFIABLE);
+        }
+        try {
+            Path current = file.getRoot();
+            var root = Files.readAttributes(current, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            if (!root.isDirectory() || unsafeElement(current, root)) {
+                return HostFileCheck.failed(HostFileStatus.UNSAFE_PATH);
+            }
+            for (Path component : file) {
+                current = current.resolve(component);
+                var attributes = Files.readAttributes(current, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+                if (unsafeElement(current, attributes)) {
+                    return HostFileCheck.failed(HostFileStatus.UNSAFE_PATH);
+                }
+                if (!current.equals(file)) {
+                    if (!attributes.isDirectory()) return HostFileCheck.failed(HostFileStatus.UNSAFE_PATH);
+                    continue;
+                }
+                if (!attributes.isRegularFile()) return HostFileCheck.failed(HostFileStatus.UNSAFE_PATH);
+                Instant modified = attributes.lastModifiedTime().toInstant();
+                if (epochSecond == null || nano == null || attributes.size() != size
+                        || modified.getEpochSecond() != epochSecond || modified.getNano() != nano) {
+                    return HostFileCheck.failed(HostFileStatus.STALE);
+                }
+                if (attributes.fileKey() == null) return HostFileCheck.failed(HostFileStatus.UNVERIFIABLE);
+                return HostFileCheck.established(file, attributes.fileKey());
+            }
+        } catch (NoSuchFileException exception) {
+            return HostFileCheck.failed(HostFileStatus.MISSING);
+        }
+        return HostFileCheck.failed(HostFileStatus.UNVERIFIABLE);
+    }
+}

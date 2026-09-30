@@ -2,6 +2,14 @@
 
 ## Current State
 
+### Host Filesystem Validation Foundation
+
+A narrow `HostFileSystem` boundary now selects macOS or Windows behavior for structured host paths, component link/reparse checks, expected size/mtime, and operation-local file identity. Hashing, metadata extraction, thumbnail generation, preflight/reveal path checks, and Session/cache validation use it. Catalog display paths render directly from validated structured location dialects, independent of the current host, and grant no filesystem authority. Source/Session overlap checks resolve aliases and existing ancestors of missing Source paths. macOS/APFS binding and scan authority remain unchanged; Finder reveal still requires fresh APFS authority. Focused macOS tests cover status outcomes, replacement identity, links, alias overlap, portable display projection, and existing hash/metadata/preflight/reveal/Session behavior. A Windows-only NTFS test is ready for a real Windows run, but was not run on macOS.
+
+The full project gate passed on macOS: `mvn -q test`, `mvn -q package -DskipTests`, frontend lint/build, 59 frontend Node tests, and `git diff --check`. No Windows host or NTFS behavior was exercised in this gate.
+
+Windows local-drive/NTFS path and reparse validation is implemented within this boundary, but Windows Source binding/scans are still unsupported. OpenJDK 21's Windows NIO file key is null, so original-file identity is `UNVERIFIABLE` on that provider and no Windows catalog authority is inferred. Real NTFS validation, stronger identity/continuity if needed, Explorer reveal, and packaging remain. Variant V1.1 is still frozen and unimplemented.
+
 ### Variant Architecture Approved; Implementation Paused
 
 Variant design is approved and Variant V1.1 — Fingerprint Foundation is scoped in `docs/DECISIONS.md` and `docs/ARCHITECTURE.md`. It will analyze trusted JPEG/PNG ContentRecords using versioned deterministic normalization, persist 64-bit pHash and dHash through `AnalysisRecord`, reuse only valid compatible results, and test stale/unsupported/corrupt input. Exact remains SHA-256 byte equality. Variant matching, relationship publication, grouping, crops, HEIC fingerprints, and UI are not implemented. Development now switches to Windows/NTFS filesystem support and platform abstractions, then Windows Show in File Explorer and Windows V1 packaging/testing, before returning to V1.1 and later Variant/Semantic work.
@@ -207,4 +215,4 @@ Physical-copy preview validation: `npm run lint && npm run build` passed in `fro
 
 ## Next Recommended Step
 
-Next implement Windows/NTFS filesystem support and platform abstractions, then Windows Show in File Explorer and package/test the Windows V1 MVP. Return to the defined, unimplemented Variant V1.1 fingerprint milestone afterward. Variant pairwise matching/grouping and Semantic/AI work remain later milestones. Real macOS/APFS validation of Library return position and Finder reveal, including HEIC and stale-file feedback, remains recommended. Side-by-side compare, manual overrides, persisted group IDs/memberships, group caches/background recomputation, medium/original previews, video grouping UI, and cache cleanup remain deferred.
+Next validate this host boundary on real Windows/NTFS and complete Windows Source binding/scan authority without weakening APFS guarantees. Windows Show in File Explorer and Windows V1 packaging/testing follow; then return to the defined, unimplemented Variant V1.1 fingerprint milestone. Variant pairwise matching/grouping and Semantic/AI work remain later. Real macOS/APFS validation of Library return position and Finder reveal, including HEIC and stale-file feedback, remains recommended. Side-by-side compare, manual overrides, persisted group IDs/memberships, group caches/background recomputation, medium/original previews, video grouping UI, and cache cleanup remain deferred.

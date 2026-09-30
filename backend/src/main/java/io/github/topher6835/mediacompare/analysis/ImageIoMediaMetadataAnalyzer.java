@@ -52,16 +52,17 @@ public class ImageIoMediaMetadataAnalyzer {
                 afterFileEntryId = occurrence.fileEntryId();
                 try {
                     long startedAtMs = System.currentTimeMillis();
-                    Path file = evidenceValidator.validateBeforeExtraction(occurrence);
+                    var before = evidenceValidator.captureBeforeExtraction(occurrence);
+                    Path file = before.path();
                     MediaMetadataResult result;
                     try {
                         result = imageMetadataExtractor.extract(file);
                     } catch (ImageMetadataExtractionException exception) {
-                        evidenceValidator.validateAfterExtraction(occurrence, file);
+                        evidenceValidator.validateAfterExtraction(occurrence, before);
                         throw new CurrentImageMetadataExtractionException(
                                 occurrence, startedAtMs, exception);
                     }
-                    evidenceValidator.validateAfterExtraction(occurrence, file);
+                    evidenceValidator.validateAfterExtraction(occurrence, before);
                     publisher.publishIfStillCurrent(
                             occurrence, definition, result, startedAtMs, System.currentTimeMillis());
                     return Optional.of(result);

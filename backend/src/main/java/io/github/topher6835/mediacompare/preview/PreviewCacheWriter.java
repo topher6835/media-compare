@@ -1,5 +1,7 @@
 package io.github.topher6835.mediacompare.preview;
 
+import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
+
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
@@ -103,7 +105,7 @@ public class PreviewCacheWriter {
         }
         BasicFileAttributes attributes = Files.readAttributes(directory, BasicFileAttributes.class,
                 LinkOption.NOFOLLOW_LINKS);
-        if (!attributes.isDirectory() || attributes.isSymbolicLink()) {
+        if (!attributes.isDirectory() || HostFileSystems.current().unsafeElement(directory, attributes)) {
             throw new IOException("Cache directory is unsafe");
         }
     }
@@ -111,7 +113,7 @@ public class PreviewCacheWriter {
     private static long inspectPng(Path file, int width, int height) throws IOException {
         BasicFileAttributes attributes = Files.readAttributes(file, BasicFileAttributes.class,
                 LinkOption.NOFOLLOW_LINKS);
-        if (!attributes.isRegularFile() || attributes.isSymbolicLink() || attributes.size() <= 0
+        if (!attributes.isRegularFile() || HostFileSystems.current().unsafeElement(file, attributes) || attributes.size() <= 0
                 || width <= 0 || height <= 0
                 || Math.max(width, height) > SmallThumbnailDefinition.MAX_EDGE) {
             throw new IOException("Preview output is not a valid bounded regular file");

@@ -3,6 +3,7 @@ package io.github.topher6835.mediacompare.matching;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
 
+import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
 import io.github.topher6835.mediacompare.process.BoundedProcessInterruptedException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -18,8 +19,7 @@ public class RevealFileService {
     @Autowired
     public RevealFileService(RevealCatalog catalog, CleanupPreflightFileValidator validator,
             FinderRevealProcess finder) {
-        this(catalog, validator, finder, () -> System.getProperty("os.name", "")
-                .toLowerCase(java.util.Locale.ROOT).startsWith("mac"));
+        this(catalog, validator, finder, HostFileSystems::isMacOs);
     }
 
     public RevealFileService(RevealCatalog catalog, CleanupPreflightFileValidator validator,

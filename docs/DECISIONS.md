@@ -489,6 +489,12 @@ The V5-only behavior below records the sequence that preceded the V6 cutover. Th
 
 V5 implements LocationContext/Source binding storage, and V6/v3 use the pure scan authority contract, mount-aware local APFS traversal, guarded membership publication, and conservative legacy collision retirement. Nested/overlapping Source behavior has end-to-end acceptance coverage and is complete for supported local macOS/APFS. Explicit Source unbinding, fixed-root rebinding, and relocate-and-bind are implemented; automatic remount recognition, Windows junction/reparse-point support, and other provider profiles remain future work.
 
+## Host Filesystem Validation Foundation
+
+- Introduce one narrow runtime-selected host boundary for converting structured locations into current-host paths for live operations, no-follow component checks, expected size/mtime, and operation-local file identity. Return explicit established, missing, stale, unverifiable, or unsafe-path outcomes. Render portable catalog display paths from the structured dialect without consulting the host. Keep APFS Source/context continuity and guarded catalog publication intact; display paths never authorize host actions.
+- On local Windows NTFS drives, reject NIO-visible symbolic links/reparse points and real-path redirection, require the same FileStore, and require a non-null NIO file key for established identity. Java 21 Windows providers may return no file key; fail closed rather than equating timestamps or case-normalized paths with a physical identity. Defer stronger native Windows continuity, real NTFS acceptance, Windows Source binding/scans, Explorer reveal, and packaging.
+- Resolve existing Source roots or the nearest existing ancestor of a missing Source through host real paths before Source/Session overlap comparison. Preserve registration of unrelated missing paths and fail closed on unresolved alias evidence. Keep original media outside the Session and leave filesystem mutation out of scope.
+
 ## Development
 
 - Favor readable, conventional, learnable code over clever abstractions.

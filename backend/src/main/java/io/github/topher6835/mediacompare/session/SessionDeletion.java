@@ -10,6 +10,7 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 
 import io.github.topher6835.mediacompare.config.CatalogOwnership;
+import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
 
 /** Allowlisted deletion of one closed Session. Never reads Source records or paths. */
 final class SessionDeletion {
@@ -45,9 +46,12 @@ final class SessionDeletion {
     }
 
     private static void requireRegularIfPresent(Path path) throws IOException {
-        if (Files.exists(path, LinkOption.NOFOLLOW_LINKS)
-                && !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
-            throw new IOException("Session-owned file is not a regular file: " + path);
+        if (Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+            BasicFileAttributes attributes = Files.readAttributes(path, BasicFileAttributes.class,
+                    LinkOption.NOFOLLOW_LINKS);
+            if (!attributes.isRegularFile() || HostFileSystems.current().unsafeElement(path, attributes)) {
+                throw new IOException("Session-owned file is not a regular file: " + path);
+            }
         }
     }
 
@@ -57,7 +61,7 @@ final class SessionDeletion {
             @Override
             public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes)
                     throws IOException {
-                if (!attributes.isDirectory() || attributes.isSymbolicLink()) {
+                if (!attributes.isDirectory() || HostFileSystems.current().unsafeElement(directory, attributes)) {
                     throw new IOException("Session cache contains an unsafe directory: " + directory);
                 }
                 return FileVisitResult.CONTINUE;
@@ -66,7 +70,7 @@ final class SessionDeletion {
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attributes)
                     throws IOException {
-                if (!attributes.isRegularFile() || attributes.isSymbolicLink()) {
+                if (!attributes.isRegularFile() || HostFileSystems.current().unsafeElement(file, attributes)) {
                     throw new IOException("Session cache contains an unsafe entry: " + file);
                 }
                 return FileVisitResult.CONTINUE;
@@ -80,7 +84,7 @@ final class SessionDeletion {
             @Override
             public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes)
                     throws IOException {
-                if (!attributes.isDirectory() || attributes.isSymbolicLink()) {
+                if (!attributes.isDirectory() || HostFileSystems.current().unsafeElement(directory, attributes)) {
                     throw new IOException("Session cache changed during deletion: " + directory);
                 }
                 return FileVisitResult.CONTINUE;
@@ -89,7 +93,7 @@ final class SessionDeletion {
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attributes)
                     throws IOException {
-                if (!attributes.isRegularFile() || attributes.isSymbolicLink()) {
+                if (!attributes.isRegularFile() || HostFileSystems.current().unsafeElement(file, attributes)) {
                     throw new IOException("Session cache changed during deletion: " + file);
                 }
                 Files.delete(file);

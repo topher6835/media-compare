@@ -9,7 +9,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
+import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
 
@@ -101,7 +101,7 @@ public final class MacOsExactSpellingResolver {
     }
 
     private static boolean isMacOsHost() {
-        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("mac");
+        return HostFileSystems.isMacOs();
     }
 
     interface FileSystemAccess {

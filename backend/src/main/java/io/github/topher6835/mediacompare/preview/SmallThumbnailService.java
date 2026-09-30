@@ -52,10 +52,11 @@ public class SmallThumbnailService {
                     // Recreate only missing files, never inconsistent/unsafe immutable files.
                 }
             }
-            Path source = evidenceValidator.validateBeforeExtraction(candidate);
+            var before = evidenceValidator.captureBeforeExtraction(candidate);
+            Path source = before.path();
             temporary = cache.createTemporary(relativePath, key);
             var rendered = renderer.render(source, temporary);
-            evidenceValidator.validateAfterExtraction(candidate, source);
+            evidenceValidator.validateAfterExtraction(candidate, before);
             if (rendered.isEmpty()) {
                 publisher.requireCurrent(candidate);
                 return new ThumbnailGenerationResult(UNSUPPORTED, null);

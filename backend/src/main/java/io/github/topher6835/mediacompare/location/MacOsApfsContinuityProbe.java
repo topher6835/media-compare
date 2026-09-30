@@ -10,7 +10,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Clock;
 import java.time.Instant;
-import java.util.Locale;
+import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -232,7 +232,7 @@ public final class MacOsApfsContinuityProbe {
     }
 
     private static boolean isMacOsHost() {
-        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("mac");
+        return HostFileSystems.isMacOs();
     }
 
     interface FileEvidenceReader {

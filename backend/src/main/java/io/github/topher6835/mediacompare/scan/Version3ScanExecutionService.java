@@ -1,12 +1,12 @@
 package io.github.topher6835.mediacompare.scan;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 
 import io.github.topher6835.mediacompare.analysis.Version2ContentHashingService;
 import io.github.topher6835.mediacompare.catalog.CatalogRepository;
 import io.github.topher6835.mediacompare.catalog.LocationContextRepository;
+import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
 import io.github.topher6835.mediacompare.job.Job;
 import io.github.topher6835.mediacompare.job.JobRepository;
 import io.github.topher6835.mediacompare.job.JobStage;
@@ -46,7 +46,7 @@ public class Version3ScanExecutionService {
     @Transactional
     public ScanExecutionDetails create(long scanRunId) {
         scans.reserveExecutionWrite();
-        if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("mac")) {
+        if (!HostFileSystems.isMacOs()) {
             throw new Version2ExecutionConflictException(
                     "Version-3 SCAN requires a local macOS/APFS host");
         }

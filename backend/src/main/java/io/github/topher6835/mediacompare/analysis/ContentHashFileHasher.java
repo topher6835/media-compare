@@ -7,18 +7,16 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Set;
 
 import io.github.topher6835.mediacompare.catalog.ContentHashCandidate;
-import io.github.topher6835.mediacompare.location.LocationDialect;
+import io.github.topher6835.mediacompare.filesystem.HostFileCheck;
+import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
 import io.github.topher6835.mediacompare.location.LocationKey;
 import io.github.topher6835.mediacompare.location.LocationKeyCodec;
-import io.github.topher6835.mediacompare.location.LocationPath;
 import io.github.topher6835.mediacompare.location.LocationPathCodec;
 import io.github.topher6835.mediacompare.scan.IndexingInterruptedException;
 
@@ -30,9 +28,8 @@ public class ContentHashFileHasher {
     private static final int BUFFER_SIZE = 64 * 1024;
 
     public String hash(ContentHashCandidate candidate) throws IOException {
-        Path file = resolveAbsoluteLocation(candidate);
-        BasicFileAttributes before = readRegularFileAttributes(file, candidate);
-        requireExpectedMetadata(candidate, before, "metadata changed before hashing");
+        HostFileCheck before = inspect(candidate);
+        Path file = before.path();
 
         MessageDigest digest = newDigest();
         ByteBuffer buffer = ByteBuffer.allocate(BUFFER_SIZE);
@@ -55,12 +52,10 @@ public class ContentHashFileHasher {
         if (bytesRead != candidate.sizeBytes()) {
             throw stale(candidate, "file length changed during hashing");
         }
-        resolveAbsoluteLocation(candidate);
-        BasicFileAttributes after = readRegularFileAttributes(file, candidate);
-        if (!java.util.Objects.equals(before.fileKey(), after.fileKey())) {
+        HostFileCheck after = inspect(candidate);
+        if (!before.sameFileAs(after)) {
             throw stale(candidate, "file identity changed during hashing");
         }
-        requireExpectedMetadata(candidate, after, "metadata changed during hashing");
         return HexFormat.of().formatHex(digest.digest());
     }
 
@@ -69,57 +64,21 @@ public class ContentHashFileHasher {
         return channel.read(buffer);
     }
 
-    private static Path resolveAbsoluteLocation(ContentHashCandidate candidate)
-            throws IOException {
-        final LocationPath location;
+    private static HostFileCheck inspect(ContentHashCandidate candidate) throws IOException {
         try {
-            location = new LocationPathCodec().decode(candidate.locationPath());
+            var location = new LocationPathCodec().decode(candidate.locationPath());
             if (!LocationKeyCodec.matches(location, LocationKey.parse(candidate.locationKey()))
-                    || location.dialect() != LocationDialect.UNIX || location.components().isEmpty()) {
+                    || location.components().isEmpty()) {
                 throw stale(candidate, "absolute location identity is invalid");
             }
+            HostFileCheck check = HostFileSystems.current().inspect(location, candidate.sizeBytes(),
+                    candidate.modifiedTimeEpochSecond(), candidate.modifiedTimeNano());
+            if (check.status() != io.github.topher6835.mediacompare.filesystem.HostFileStatus.ESTABLISHED) {
+                throw stale(candidate, "filesystem evidence is " + check.status());
+            }
+            return check;
         } catch (IllegalArgumentException exception) {
             throw stale(candidate, "absolute location identity is invalid");
-        }
-        Path resolved = Path.of("/");
-        requireDirectoryWithoutLinks(resolved, candidate);
-        for (int index = 0; index < location.components().size(); index++) {
-            resolved = resolved.resolve(location.components().get(index));
-            if (index < location.components().size() - 1) {
-                requireDirectoryWithoutLinks(resolved, candidate);
-            }
-        }
-        return resolved;
-    }
-
-    private static void requireDirectoryWithoutLinks(
-            Path directory, ContentHashCandidate candidate) throws IOException {
-        BasicFileAttributes attributes = Files.readAttributes(
-                directory, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-        if (!attributes.isDirectory() || attributes.isSymbolicLink()) {
-            throw stale(candidate, "path contains a non-directory or symbolic link");
-        }
-    }
-
-    private static BasicFileAttributes readRegularFileAttributes(
-            Path file, ContentHashCandidate candidate) throws IOException {
-        BasicFileAttributes attributes = Files.readAttributes(
-                file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-        if (!attributes.isRegularFile() || attributes.isSymbolicLink()) {
-            throw stale(candidate, "candidate is not a regular non-symbolic-link file");
-        }
-        return attributes;
-    }
-
-    private static void requireExpectedMetadata(
-            ContentHashCandidate candidate, BasicFileAttributes attributes, String detail) {
-        Instant modifiedTime = attributes.lastModifiedTime().toInstant();
-        if (attributes.size() != candidate.sizeBytes()
-                || candidate.modifiedTimeEpochSecond() == null
-                || candidate.modifiedTimeNano() == null
-                || modifiedTime.getEpochSecond() != candidate.modifiedTimeEpochSecond()
-                || modifiedTime.getNano() != candidate.modifiedTimeNano()) {
-            throw stale(candidate, detail);
         }
     }
 

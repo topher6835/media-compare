@@ -6,6 +6,9 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
+
+import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
@@ -101,10 +104,12 @@ public final class Session {
         }
         Path root = selectedRoot.toAbsolutePath().normalize();
         // Resolve trusted parent aliases while rejecting a linked Session root itself.
-        if (Files.isSymbolicLink(root)) {
-            throw new IOException("Session root must not be a symbolic link: " + root);
-        }
         if (Files.exists(root, LinkOption.NOFOLLOW_LINKS)) {
+            BasicFileAttributes attributes = Files.readAttributes(root, BasicFileAttributes.class,
+                    LinkOption.NOFOLLOW_LINKS);
+            if (HostFileSystems.current().unsafeElement(root, attributes)) {
+                throw new IOException("Session root must not be a link or reparse path: " + root);
+            }
             return root.toRealPath();
         }
         return root;
@@ -119,13 +124,17 @@ public final class Session {
     }
 
     private static void requireDirectory(Path path, String description) throws IOException {
-        if (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+        BasicFileAttributes attributes = Files.readAttributes(path, BasicFileAttributes.class,
+                LinkOption.NOFOLLOW_LINKS);
+        if (!attributes.isDirectory() || HostFileSystems.current().unsafeElement(path, attributes)) {
             throw new IOException(description + " must be a regular directory: " + path);
         }
     }
 
     private static void requireRegularFile(Path path, String description) throws IOException {
-        if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+        BasicFileAttributes attributes = Files.readAttributes(path, BasicFileAttributes.class,
+                LinkOption.NOFOLLOW_LINKS);
+        if (!attributes.isRegularFile() || HostFileSystems.current().unsafeElement(path, attributes)) {
             throw new IOException(description + " must be a regular file: " + path);
         }
     }

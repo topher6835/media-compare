@@ -1,5 +1,7 @@
 package io.github.topher6835.mediacompare.scan;
 
+import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
+
 import java.io.IOException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -129,11 +131,7 @@ public class Version3DiscoveryWalker {
     }
 
     private static Path hostPath(LocationPath location) {
-        Path path = Path.of("/");
-        for (String component : location.components()) {
-            path = path.resolve(component);
-        }
-        return path;
+        return HostFileSystems.current().path(location);
     }
 
     private static void recordIssue(TraversalCompletion.Issue[] current,
