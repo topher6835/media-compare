@@ -25,11 +25,12 @@ public record ResolvedFileCandidate(long sourceId, long sourceLocationRevision,
         if (!LocationKeyCodec.matches(fileLocationPath, fileLocationKey)
                 || relativePath == null || relativePath.isEmpty()
                 || !relativePath.equals(relativePathKey)
-                || !MacOsApfsLocationContextEvidence.FILE_SYSTEM_TYPE.equals(fileSystemType)
+                || !(MacOsApfsLocationContextEvidence.FILE_SYSTEM_TYPE.equals(fileSystemType)
+                        || "ntfs".equals(fileSystemType))
                 || volumeUuid == null
                 || childStorageBoundary != ChildStorageBoundary.SAME_ACCEPTED_VOLUME
                 || !regularFile || symbolicLinkBoundary) {
-            throw new IllegalArgumentException("Resolved file requires coherent trusted APFS observation fields");
+            throw new IllegalArgumentException("Resolved file requires coherent trusted storage observation fields");
         }
     }
 }

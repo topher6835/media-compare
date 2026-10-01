@@ -17,6 +17,8 @@ import io.github.topher6835.mediacompare.location.LocationPathParser;
 import io.github.topher6835.mediacompare.location.MacOsApfsContinuityVerifier;
 import io.github.topher6835.mediacompare.location.MacOsApfsLocationContextEvidence;
 import io.github.topher6835.mediacompare.location.MacOsApfsSourceRootProbeRequest;
+import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
+import io.github.topher6835.mediacompare.filesystem.WindowsNtfsHostFileSystem;
 
 /** Coordinates explicit first-time preparation without holding a transaction across probes. */
 @Service
@@ -27,17 +29,20 @@ public class SourcePreparationService {
     private final LocationContextAcceptanceService acceptance;
     private final SourceBindingService binding;
     private final SourcePreparationProbe probe;
+    private final WindowsNtfsSourcePreparationService windows;
     private final LocationPathCodec paths = new LocationPathCodec();
 
     public SourcePreparationService(CatalogRepository sources, LocationContextRepository contexts,
             LocationContextActivationService activation, LocationContextAcceptanceService acceptance,
-            SourceBindingService binding, SourcePreparationProbe probe) {
+            SourceBindingService binding, SourcePreparationProbe probe,
+            WindowsNtfsSourcePreparationService windows) {
         this.sources = sources;
         this.contexts = contexts;
         this.activation = activation;
         this.acceptance = acceptance;
         this.binding = binding;
         this.probe = probe;
+        this.windows = windows;
     }
 
     public Source prepare(long sourceId) {
@@ -49,6 +54,10 @@ public class SourcePreparationService {
         }
         if (state == SourcePreparationState.REBIND_REQUIRED) {
             throw new SourcePreparationException(SourcePreparationException.Code.STATE_CHANGED);
+        }
+
+        if (HostFileSystems.current() instanceof WindowsNtfsHostFileSystem) {
+            return windows.prepare(source);
         }
 
         final LocationPath root;
@@ -127,6 +136,7 @@ public class SourcePreparationService {
         boolean overlapping = false;
         for (LocationContext context : contexts.findActive()) {
             LocationPath existingAnchor = anchor(context);
+            if (existingAnchor.dialect() != LocationDialect.UNIX) continue;
             if (context.continuityStatus() == LocationContext.ContinuityStatus.ACCEPTED) {
                 LocationContextAcceptanceAuthority.requireCurrentAccepted(context);
             } else if (context.continuityEvidenceJson() != null) {

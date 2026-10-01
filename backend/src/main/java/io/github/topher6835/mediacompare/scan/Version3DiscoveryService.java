@@ -16,6 +16,7 @@ import io.github.topher6835.mediacompare.scan.authority.ResolvedFileCandidate;
 import io.github.topher6835.mediacompare.scan.authority.ScanAuthorityOutcome;
 import io.github.topher6835.mediacompare.scan.authority.ScanObservationAuthority;
 import io.github.topher6835.mediacompare.scan.authority.TraversalCompletion;
+import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
 
 import org.springframework.stereotype.Service;
 
@@ -61,7 +62,7 @@ public class Version3DiscoveryService {
                             + source.source().id() + ": " + start.reason());
                 }
                 var snapshot = start.value().orElseThrow();
-                Path root = Path.of(source.source().rootPath());
+                Path root = HostFileSystems.current().path(snapshot.sourceRoot());
                 List<ResolvedFileCandidate> batch = new ArrayList<>(DiscoveryBatchWriter.MAX_BATCH_SIZE);
                 long[] count = { discovered };
                 TraversalCompletion.Issue issue = walker.walk(root, snapshot, candidate -> {

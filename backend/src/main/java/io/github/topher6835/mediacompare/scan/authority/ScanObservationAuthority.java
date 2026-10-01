@@ -146,11 +146,10 @@ public final class ScanObservationAuthority {
                 // Continue with independent provider and Volume UUID checks below.
             }
         }
-        if (!MacOsApfsLocationContextEvidence.FILE_SYSTEM_TYPE.equals(observed.fileSystemType())) {
+        if (!authority.fileSystemType().equals(observed.fileSystemType())) {
             return denied(ScanAuthorityOutcome.UNSUPPORTED, ScanAuthorityReason.PROFILE_UNSUPPORTED);
         }
-        if (!authority.contextBaseline().volumeUuid().equals(observed.volumeUuid())
-                || !authority.rootBaseline().volumeUuid().equals(observed.volumeUuid())) {
+        if (!authority.volumeId().equals(observed.volumeUuid())) {
             return denied(ScanAuthorityOutcome.UNCERTAIN, ScanAuthorityReason.VOLUME_IDENTITY_MISMATCH);
         }
         String relativePath = SourceRelativePath.from(authority.sourceRoot(), observed.fileLocationPath());
@@ -195,18 +194,10 @@ public final class ScanObservationAuthority {
         if (first.contextRevision() != last.contextRevision()) {
             return denied(ScanAuthorityOutcome.STALE, ScanAuthorityReason.CONTEXT_REVISION_CHANGED);
         }
-        if (!first.sourceRoot().equals(last.sourceRoot())
-                || !first.rootBaseline().equals(last.rootBaseline())
-                || MacOsApfsContinuityVerifier.verifySourceRoot(new MacOsApfsSourceRootComparisonContext(
-                        first.contextId(), first.contextRevision(), first.sourceRevision(),
-                        first.contextBaseline()), first.rootObservation(), last.rootObservation()).outcome()
-                        != ContinuityOutcome.ACCEPTED) {
+        if (!first.sameRootAs(last)) {
             return denied(ScanAuthorityOutcome.STALE, ScanAuthorityReason.SOURCE_ROOT_CHANGED);
         }
-        if (!first.contextBaseline().equals(last.contextBaseline())
-                || MacOsApfsContinuityVerifier.verifyLocationContext(
-                        first.contextObservation(), last.contextObservation()).outcome()
-                        != ContinuityOutcome.ACCEPTED) {
+        if (!first.sameContextAs(last)) {
             return denied(ScanAuthorityOutcome.STALE, ScanAuthorityReason.AUTHORITY_CHANGED);
         }
         return switch (completion.issue()) {

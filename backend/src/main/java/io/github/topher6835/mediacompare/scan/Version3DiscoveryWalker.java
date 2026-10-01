@@ -1,6 +1,8 @@
 package io.github.topher6835.mediacompare.scan;
 
 import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
+import io.github.topher6835.mediacompare.filesystem.HostFileStatus;
+import io.github.topher6835.mediacompare.filesystem.WindowsNtfsPathInspector;
 
 import java.io.IOException;
 import java.nio.file.FileVisitResult;
@@ -45,6 +47,7 @@ public class Version3DiscoveryWalker {
 
     public TraversalCompletion.Issue walk(Path root, ScanAuthoritySnapshot authority,
             Consumer<ResolvedFileCandidate> observer) throws IOException {
+        if (authority.windowsNtfs()) return walkWindows(root, authority, observer);
         var anchor = inspectMount.apply(hostPath(authority.contextAnchor()));
         var source = inspectMount.apply(root);
         if (anchor.outcome() != ContinuityOutcome.ACCEPTED
@@ -109,6 +112,83 @@ public class Version3DiscoveryWalker {
                     recordIssue(issue, result.outcome() == ScanAuthorityOutcome.UNSUPPORTED
                             ? TraversalCompletion.Issue.UNSUPPORTED_CHILD_STORAGE
                             : TraversalCompletion.Issue.UNCERTAIN_CHILD_STORAGE);
+                }
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFileFailed(Path file, IOException exception) {
+                recordIssue(issue, TraversalCompletion.Issue.INACCESSIBLE_SUBTREE);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+        return issue[0];
+    }
+
+    private TraversalCompletion.Issue walkWindows(Path root, ScanAuthoritySnapshot authority,
+            Consumer<ResolvedFileCandidate> observer) throws IOException {
+        var anchor = WindowsNtfsPathInspector.inspect(authority.contextAnchor(), true);
+        var source = WindowsNtfsPathInspector.inspect(authority.sourceRoot(), true);
+        if (anchor.status() != HostFileStatus.ESTABLISHED
+                || source.status() != HostFileStatus.ESTABLISHED
+                || !authority.volumeId().equals(anchor.identity().volumeSerial())
+                || !authority.volumeId().equals(source.identity().volumeSerial())) {
+            return TraversalCompletion.Issue.UNCERTAIN_CHILD_STORAGE;
+        }
+        TraversalCompletion.Issue[] issue = { TraversalCompletion.Issue.COMPLETE };
+        Files.walkFileTree(root, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) {
+                IndexingInterruptedException.check();
+                if (!attributes.isDirectory() || attributes.isSymbolicLink() || attributes.isOther()) {
+                    recordIssue(issue, TraversalCompletion.Issue.SYMBOLIC_LINK_AMBIGUITY);
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+                try {
+                    LocationPath location = exactLocation(authority.sourceRoot(), root.relativize(directory));
+                    var observed = WindowsNtfsPathInspector.inspect(location, true);
+                    if (observed.status() != HostFileStatus.ESTABLISHED
+                            || !authority.volumeId().equals(observed.identity().volumeSerial())) {
+                        recordIssue(issue, TraversalCompletion.Issue.UNCERTAIN_CHILD_STORAGE);
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
+                    return FileVisitResult.CONTINUE;
+                } catch (IllegalArgumentException exception) {
+                    recordIssue(issue, TraversalCompletion.Issue.UNCERTAIN_CHILD_STORAGE);
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+            }
+
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
+                IndexingInterruptedException.check();
+                if (attributes.isSymbolicLink() || attributes.isOther()) {
+                    recordIssue(issue, TraversalCompletion.Issue.SYMBOLIC_LINK_AMBIGUITY);
+                    return FileVisitResult.CONTINUE;
+                }
+                if (!attributes.isRegularFile()) return FileVisitResult.CONTINUE;
+                try {
+                    LocationPath location = exactLocation(authority.sourceRoot(), root.relativize(file));
+                    var observed = WindowsNtfsPathInspector.inspect(location, false);
+                    if (observed.status() != HostFileStatus.ESTABLISHED
+                            || !authority.volumeId().equals(observed.identity().volumeSerial())) {
+                        recordIssue(issue, TraversalCompletion.Issue.UNCERTAIN_CHILD_STORAGE);
+                        return FileVisitResult.CONTINUE;
+                    }
+                    Instant modified = attributes.lastModifiedTime().toInstant();
+                    var result = ScanObservationAuthority.resolve(authority, new ScanFileObservation(
+                            authority.sourceId(), authority.sourceRevision(), authority.contextId(),
+                            authority.contextRevision(), location, LocationKeyCodec.encode(location),
+                            "ntfs", observed.identity().volumeSerial(),
+                            ChildStorageBoundary.SAME_ACCEPTED_VOLUME, true, false,
+                            attributes.size(), modified.getEpochSecond(), modified.getNano()));
+                    if (result.outcome() == ScanAuthorityOutcome.TRUSTED) {
+                        observer.accept(result.value().orElseThrow());
+                    } else {
+                        recordIssue(issue, TraversalCompletion.Issue.UNCERTAIN_CHILD_STORAGE);
+                    }
+                } catch (IllegalArgumentException exception) {
+                    recordIssue(issue, TraversalCompletion.Issue.UNCERTAIN_CHILD_STORAGE);
                 }
                 return FileVisitResult.CONTINUE;
             }

@@ -495,6 +495,12 @@ V5 implements LocationContext/Source binding storage, and V6/v3 use the pure sca
 - On local Windows NTFS drives, reject NIO-visible symbolic links/reparse points and real-path redirection, require the same FileStore, and require a non-null NIO file key for established identity. Java 21 Windows providers may return no file key; fail closed rather than equating timestamps or case-normalized paths with a physical identity. Defer stronger native Windows continuity, real NTFS acceptance, Windows Source binding/scans, Explorer reveal, and packaging.
 - Resolve existing Source roots or the nearest existing ancestor of a missing Source through host real paths before Source/Session overlap comparison. Preserve registration of unrelated missing paths and fail closed on unresolved alias evidence. Keep original media outside the Session and leave filesystem mutation out of scope.
 
+## Windows NTFS Source and Scan Authority
+
+- Use Windows `GetFileInformationByHandleEx(FileIdInfo)` volume serial plus 128-bit file ID as the NTFS context/Source continuity value and operation-local original-file identity. Java 21 NIO's nullable Windows file key cannot establish that identity. Keep JNA Platform confined to the Windows adapter; do not use shell commands or persist handles.
+- Persist versioned NTFS context and Source evidence in the existing JSON columns, including structured path/key and row revisions. Keep APFS evidence formats unchanged. A Windows Source is eligible for v3 only on Windows with matching accepted/bound NTFS evidence; scan start/end and traversal recheck native identity and reject reparse points or volume changes. Do not infer physical identity from path, case, size, or mtime.
+- Keep catalog display portable and host-independent. Defer Explorer reveal, packaging, and any claim of real NTFS validation until Windows-only acceptance tests run. Variant V1.1 remains frozen.
+
 ## Development
 
 - Favor readable, conventional, learnable code over clever abstractions.

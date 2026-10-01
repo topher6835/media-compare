@@ -1,8 +1,9 @@
 package io.github.topher6835.mediacompare.filesystem;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Locale;
@@ -10,7 +11,7 @@ import java.util.Locale;
 import io.github.topher6835.mediacompare.location.LocationDialect;
 import io.github.topher6835.mediacompare.location.LocationPath;
 
-/** Local NTFS drive paths only; missing NIO file keys leave original-file identity unverifiable. */
+/** Local NTFS drive paths only; native IDs supply operation-local physical identity. */
 public final class WindowsNtfsHostFileSystem implements HostFileSystem {
     @Override
     public String pathText(LocationPath location) {
@@ -24,8 +25,7 @@ public final class WindowsNtfsHostFileSystem implements HostFileSystem {
     @Override
     public boolean unsafeElement(Path path, BasicFileAttributes attributes) throws IOException {
         if (attributes.isSymbolicLink() || attributes.isOther()) return true;
-        // A junction may not be reported as a symbolic link by every Windows provider.
-        // A visible redirection is unsafe even when both endpoints are directories.
+        if (WindowsNtfsNative.observe(path).reparsePoint()) return true;
         return !path.toRealPath().equals(path.toRealPath(LinkOption.NOFOLLOW_LINKS));
     }
 
@@ -35,15 +35,22 @@ public final class WindowsNtfsHostFileSystem implements HostFileSystem {
         if (location.dialect() != LocationDialect.WINDOWS_DRIVE) {
             return HostFileCheck.failed(HostFileStatus.UNVERIFIABLE);
         }
-        Path root = path(location).getRoot();
-        if (root == null || !"NTFS".equalsIgnoreCase(Files.getFileStore(root).type())) {
-            return HostFileCheck.failed(HostFileStatus.UNVERIFIABLE);
+        var before = WindowsNtfsPathInspector.inspect(location, false);
+        if (before.status() != HostFileStatus.ESTABLISHED) return HostFileCheck.failed(before.status());
+        Path file = path(location);
+        try {
+            var attributes = Files.readAttributes(file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            var modified = attributes.lastModifiedTime().toInstant();
+            if (epochSecond == null || nano == null || attributes.size() != size
+                    || modified.getEpochSecond() != epochSecond || modified.getNano() != nano) {
+                return HostFileCheck.failed(HostFileStatus.STALE);
+            }
+        } catch (NoSuchFileException exception) {
+            return HostFileCheck.failed(HostFileStatus.MISSING);
         }
-        HostFileCheck check = HostFileSystem.super.inspect(location, size, epochSecond, nano);
-        if (check.status() == HostFileStatus.ESTABLISHED
-                && !Files.getFileStore(root).equals(Files.getFileStore(check.path()))) {
-            return HostFileCheck.failed(HostFileStatus.UNVERIFIABLE);
-        }
-        return check;
+        var after = WindowsNtfsPathInspector.inspect(location, false);
+        if (after.status() != HostFileStatus.ESTABLISHED) return HostFileCheck.failed(after.status());
+        if (!before.identity().equals(after.identity())) return HostFileCheck.failed(HostFileStatus.STALE);
+        return HostFileCheck.established(file, after.identity());
     }
 }

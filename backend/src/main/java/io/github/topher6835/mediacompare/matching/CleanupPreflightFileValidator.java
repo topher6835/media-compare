@@ -15,15 +15,14 @@ import io.github.topher6835.mediacompare.catalog.CurrentMembershipAuthority;
 import io.github.topher6835.mediacompare.filesystem.HostFileCheck;
 import io.github.topher6835.mediacompare.filesystem.HostFileStatus;
 import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
+import io.github.topher6835.mediacompare.filesystem.WindowsNtfsPathInspector;
 import io.github.topher6835.mediacompare.location.ContinuityOutcome;
 import io.github.topher6835.mediacompare.location.ContinuityProbeResult;
 import io.github.topher6835.mediacompare.location.LocationKey;
 import io.github.topher6835.mediacompare.location.LocationKeyCodec;
 import io.github.topher6835.mediacompare.location.LocationPath;
 import io.github.topher6835.mediacompare.location.LocationPathCodec;
-import io.github.topher6835.mediacompare.location.MacOsApfsContinuityVerifier;
 import io.github.topher6835.mediacompare.location.MacOsApfsMountInspector;
-import io.github.topher6835.mediacompare.location.MacOsApfsSourceRootComparisonContext;
 import io.github.topher6835.mediacompare.scan.Version3AuthorityCapture;
 import io.github.topher6835.mediacompare.scan.authority.ScanAuthorityOutcome;
 import io.github.topher6835.mediacompare.scan.authority.ScanAuthoritySnapshot;
@@ -122,16 +121,7 @@ public class CleanupPreflightFileValidator {
                     continue;
                 }
                 var last = end.value().orElseThrow();
-                if (authority.sourceRevision() != last.sourceRevision()
-                        || authority.contextRevision() != last.contextRevision()
-                        || !authority.contextBaseline().equals(last.contextBaseline())
-                        || !authority.rootBaseline().equals(last.rootBaseline())
-                        || MacOsApfsContinuityVerifier.verifyLocationContext(authority.contextObservation(),
-                                last.contextObservation()).outcome() != ContinuityOutcome.ACCEPTED
-                        || MacOsApfsContinuityVerifier.verifySourceRoot(new MacOsApfsSourceRootComparisonContext(
-                                authority.contextId(), authority.contextRevision(), authority.sourceRevision(),
-                                authority.contextBaseline()), authority.rootObservation(), last.rootObservation())
-                                .outcome() != ContinuityOutcome.ACCEPTED) {
+                if (!authority.sameRootAs(last) || !authority.sameContextAs(last)) {
                     failure = AUTHORITY_CHANGED;
                     continue;
                 }
@@ -164,6 +154,13 @@ public class CleanupPreflightFileValidator {
 
     private CleanupPreflightReason checkPath(FileEntry entry, Path file, ScanAuthoritySnapshot authority)
             throws IOException {
+        if (authority.windowsNtfs()) {
+            var observed = WindowsNtfsPathInspector.inspect(
+                    new LocationPathCodec().decode(entry.locationPath()), false);
+            if (observed.status() == HostFileStatus.UNSAFE_PATH) return UNSAFE_PATH;
+            if (observed.status() != HostFileStatus.ESTABLISHED) return AUTHORITY_UNAVAILABLE;
+            return authority.volumeId().equals(observed.identity().volumeSerial()) ? null : AUTHORITY_CHANGED;
+        }
         Path anchor = hostPath(authority.contextAnchor());
         // Inspect ancestors in order before probing any descendant path.
         java.util.List<Path> storagePaths = new java.util.ArrayList<>();

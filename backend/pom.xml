@@ -64,6 +64,11 @@
 			<artifactId>sqlite-jdbc</artifactId>
 			<version>3.50.3.0</version>
 		</dependency>
+		<dependency>
+			<groupId>net.java.dev.jna</groupId>
+			<artifactId>jna-platform</artifactId>
+			<version>5.17.0</version>
+		</dependency>
 	</dependencies>
 
 	<build>

@@ -7,6 +7,7 @@ import io.github.topher6835.mediacompare.location.LocationKey;
 import io.github.topher6835.mediacompare.location.LocationKeyCodec;
 import io.github.topher6835.mediacompare.location.LocationPath;
 import io.github.topher6835.mediacompare.location.LocationPathParser;
+import io.github.topher6835.mediacompare.filesystem.WindowsNtfsEvidenceCodec;
 
 /** Product state derived from the current durable Source binding shape. */
 public enum SourcePreparationState {
@@ -17,7 +18,20 @@ public enum SourcePreparationState {
     public static SourcePreparationState from(Source source) {
         Objects.requireNonNull(source, "Source");
         if (source.boundLocationContextId() != null) {
-            SourceBindingAuthority.requireCurrentBound(source);
+            // A foreign-host Source remains catalog-visible; live use is checked separately.
+            if (LocationDialect.WINDOWS_DRIVE.persistedName().equals(source.rootPathDialect())) {
+                var root = LocationPathParser.parse(LocationDialect.WINDOWS_DRIVE, source.rootPath());
+                var evidence = new WindowsNtfsEvidenceCodec().decodeSource(source.bindingEvidenceJson());
+                if (!LocationKeyCodec.matches(root, LocationKey.parse(source.rootPathKey()))
+                        || source.id() == null || evidence.sourceId() != source.id()
+                        || evidence.sourceRevision() != source.locationRevision()
+                        || !evidence.contextId().equals(source.boundLocationContextId())
+                        || !evidence.root().equals(root)) {
+                    throw new IllegalStateException("Invalid bound Windows Source root");
+                }
+            } else {
+                SourceBindingAuthority.requireCurrentBound(source);
+            }
             return READY;
         }
         if (source.bindingEvidenceJson() != null) {
@@ -30,10 +44,11 @@ public enum SourcePreparationState {
             return PREPARATION_REQUIRED;
         }
         try {
-            if (!LocationDialect.UNIX.persistedName().equals(source.rootPathDialect())) {
+            LocationDialect dialect = LocationDialect.fromPersistedName(source.rootPathDialect());
+            if (dialect != LocationDialect.UNIX && dialect != LocationDialect.WINDOWS_DRIVE) {
                 throw new IllegalArgumentException("Unsupported structured Source dialect");
             }
-            LocationPath root = LocationPathParser.parse(LocationDialect.UNIX, source.rootPath());
+            LocationPath root = LocationPathParser.parse(dialect, source.rootPath());
             if (!LocationKeyCodec.matches(root, LocationKey.parse(source.rootPathKey()))) {
                 throw new IllegalArgumentException("Structured Source root and key disagree");
             }

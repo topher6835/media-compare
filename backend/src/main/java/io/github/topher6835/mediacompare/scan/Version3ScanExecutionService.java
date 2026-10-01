@@ -7,6 +7,10 @@ import io.github.topher6835.mediacompare.analysis.Version2ContentHashingService;
 import io.github.topher6835.mediacompare.catalog.CatalogRepository;
 import io.github.topher6835.mediacompare.catalog.LocationContextRepository;
 import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
+import io.github.topher6835.mediacompare.filesystem.MacOsHostFileSystem;
+import io.github.topher6835.mediacompare.filesystem.WindowsNtfsHostFileSystem;
+import io.github.topher6835.mediacompare.location.LocationDialect;
+import io.github.topher6835.mediacompare.scan.authority.WindowsNtfsScanAuthority;
 import io.github.topher6835.mediacompare.job.Job;
 import io.github.topher6835.mediacompare.job.JobRepository;
 import io.github.topher6835.mediacompare.job.JobStage;
@@ -46,10 +50,6 @@ public class Version3ScanExecutionService {
     @Transactional
     public ScanExecutionDetails create(long scanRunId) {
         scans.reserveExecutionWrite();
-        if (!HostFileSystems.isMacOs()) {
-            throw new Version2ExecutionConflictException(
-                    "Version-3 SCAN requires a local macOS/APFS host");
-        }
         ScanRun scan = scans.findScanRunById(scanRunId).orElseThrow();
         if (!"INDEX".equals(scan.requestType()) || !"PENDING".equals(scan.status())
                 || jobs.findJobByScanRunIdAndType(scanRunId, "SCAN").isPresent()
@@ -70,7 +70,14 @@ public class Version3ScanExecutionService {
             if (context == null) {
                 throw new Version2ExecutionConflictException("Source context is unavailable for v3 admission");
             }
-            var authority = ScanObservationAuthority.capture(source, context, null, null);
+            boolean windows = LocationDialect.WINDOWS_DRIVE.persistedName().equals(source.rootPathDialect());
+            if (windows ? !(HostFileSystems.current() instanceof WindowsNtfsHostFileSystem)
+                    : !(HostFileSystems.current() instanceof MacOsHostFileSystem)) {
+                throw new Version2ExecutionConflictException("Source profile is foreign to current host");
+            }
+            var authority = windows
+                    ? WindowsNtfsScanAuthority.capture(source, context, null, null)
+                    : ScanObservationAuthority.capture(source, context, null, null);
             if (authority.outcome() != ScanAuthorityOutcome.UNAVAILABLE
                     || authority.reason() != ScanAuthorityReason.AUTHORITY_UNAVAILABLE) {
                 throw new Version2ExecutionConflictException(

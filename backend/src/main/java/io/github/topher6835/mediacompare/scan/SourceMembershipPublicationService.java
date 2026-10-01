@@ -6,10 +6,9 @@ import io.github.topher6835.mediacompare.catalog.CatalogRepository;
 import io.github.topher6835.mediacompare.catalog.FileEntry;
 import io.github.topher6835.mediacompare.catalog.FileExtensionNormalizer;
 import io.github.topher6835.mediacompare.catalog.LocationContext;
-import io.github.topher6835.mediacompare.catalog.LocationContextAcceptanceAuthority;
+import io.github.topher6835.mediacompare.catalog.CurrentLocationAuthority;
 import io.github.topher6835.mediacompare.catalog.LocationContextRepository;
 import io.github.topher6835.mediacompare.catalog.Source;
-import io.github.topher6835.mediacompare.catalog.SourceBindingAuthority;
 import io.github.topher6835.mediacompare.catalog.SourceMembership;
 import io.github.topher6835.mediacompare.catalog.SourceMembershipRepository;
 import io.github.topher6835.mediacompare.location.LocationKey;
@@ -50,16 +49,16 @@ public class SourceMembershipPublicationService {
                 candidate.locationContextId(), candidate.locationContextRevision());
         Source source = catalog.findSourceById(candidate.sourceId()).orElseThrow();
         LocationContext context = contexts.findById(candidate.locationContextId()).orElseThrow();
-        var binding = SourceBindingAuthority.requireCurrentBound(source);
-        var acceptance = LocationContextAcceptanceAuthority.requireCurrentAccepted(context);
+        var route = CurrentLocationAuthority.requireCurrentHost(source, context);
         var fileLocation = candidate.fileLocationPath();
         require(LocationKeyCodec.matches(fileLocation, candidate.fileLocationKey())
-                && acceptance.macOsApfsEvidence().anchorLocationPath().contains(fileLocation)
-                && binding.macOsApfsSourceRootEvidence().rootLocationPath().contains(fileLocation)
+                && route.anchor().contains(fileLocation)
+                && route.root().contains(fileLocation)
                 && candidate.relativePath().equals(SourceRelativePath.from(
-                        binding.macOsApfsSourceRootEvidence().rootLocationPath(), fileLocation))
+                        route.root(), fileLocation))
                 && candidate.relativePathKey().equals(candidate.relativePath())
-                && acceptance.macOsApfsEvidence().volumeUuid().equals(candidate.volumeUuid()),
+                && route.fileSystemType().equals(candidate.fileSystemType())
+                && route.volumeId().equals(candidate.volumeUuid()),
                 "Resolved candidate disagrees with current Source/context authority");
         ScanRunSource runSource = scans.findScanRunSourceById(scanRunSourceId).orElseThrow();
         require(runSource.sourceId() == candidate.sourceId()
@@ -139,8 +138,8 @@ public class SourceMembershipPublicationService {
         requireCurrent(claim.sourceId(), claim.sourceLocationRevision(), claim.locationContextId(),
                 claim.locationContextRevision());
         Source source = catalog.findSourceById(claim.sourceId()).orElseThrow();
-        require(SourceBindingAuthority.requireCurrentBound(source)
-                .macOsApfsSourceRootEvidence().rootLocationPath().equals(claim.scope()),
+        require(CurrentLocationAuthority.requireCurrentHost(source, contexts.findById(claim.locationContextId())
+                .orElseThrow()).root().equals(claim.scope()),
                 "Missing claim scope disagrees with current Source root");
         ScanRunSource current = scans.findScanRunSourceById(runSource.id()).orElseThrow();
         require(current.sourceId() == claim.sourceId()
@@ -163,12 +162,7 @@ public class SourceMembershipPublicationService {
                 && context.revision() == contextRevision
                 && contextId.equals(source.boundLocationContextId()),
                 "Source or LocationContext authority changed");
-        var acceptance = LocationContextAcceptanceAuthority.requireCurrentAccepted(context);
-        var binding = SourceBindingAuthority.requireCurrentBound(source);
-        require(binding.macOsApfsSourceRootEvidence().locationContextRevision() == contextRevision
-                && acceptance.macOsApfsEvidence().volumeUuid().equals(
-                        binding.macOsApfsSourceRootEvidence().volumeUuid()),
-                "Source binding and accepted context disagree");
+        CurrentLocationAuthority.requireCurrentHost(source, context);
     }
 
     private static void requireValidResolved(FileEntry entry) {

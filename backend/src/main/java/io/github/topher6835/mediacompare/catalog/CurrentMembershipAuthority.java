@@ -48,13 +48,7 @@ public class CurrentMembershipAuthority {
                 || !contextId.equals(source.boundLocationContextId())) {
             throw new IllegalStateException("Source or LocationContext authority changed");
         }
-        var acceptance = LocationContextAcceptanceAuthority.requireCurrentAccepted(context);
-        var binding = SourceBindingAuthority.requireCurrentBound(source);
-        if (binding.macOsApfsSourceRootEvidence().locationContextRevision() != contextRevision
-                || !acceptance.macOsApfsEvidence().volumeUuid().equals(
-                        binding.macOsApfsSourceRootEvidence().volumeUuid())) {
-            throw new IllegalStateException("Source binding and accepted context disagree");
-        }
+        var route = CurrentLocationAuthority.requireCurrentHost(source, context);
         FileEntry entry = memberships.findById(fileEntryId).orElseThrow();
         SourceMembership member = memberships.findMembershipById(membershipId).orElseThrow();
         if (!isCurrentRoute(entry, member, source, context)) {
@@ -63,10 +57,10 @@ public class CurrentMembershipAuthority {
         try {
             var path = new LocationPathCodec().decode(entry.locationPath());
             if (!LocationKeyCodec.matches(path, LocationKey.parse(entry.locationKey()))
-                    || !acceptance.macOsApfsEvidence().anchorLocationPath().contains(path)
-                    || !binding.macOsApfsSourceRootEvidence().rootLocationPath().contains(path)
+                    || !route.anchor().contains(path)
+                    || !route.root().contains(path)
                     || !member.relativePath().equals(SourceRelativePath.from(
-                            binding.macOsApfsSourceRootEvidence().rootLocationPath(), path))
+                            route.root(), path))
                     || !member.pathKey().equals(member.relativePath())) {
                 throw new IllegalStateException("Resolved FileEntry or membership path disagrees with authority");
             }

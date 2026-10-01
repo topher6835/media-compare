@@ -105,6 +105,13 @@ Both JSON codecs require exact field sets and types; reject duplicate keys, trai
 
 Pure comparison returns one of `ACCEPTED`, `UNAVAILABLE`, `UNCERTAIN`, `MISMATCH`, `UNSUPPORTED`, or `ERROR` with a bounded enum reason. Comparison produces `ACCEPTED` for matching evidence, `MISMATCH` for coherent authoritative contradictions, and `UNCERTAIN` when a Source root is structurally outside its claimed context. The production macOS/APFS probe uses the same bounded categories for capture: accepted results alone carry evidence; unavailable paths/tools, internal instability, unsupported platform/filesystem, coherent context-volume mismatch, and infrastructure/parser errors remain distinct non-successes. No comparator or probe rewrites a baseline. Explicit context acceptance stores accepted context evidence; first-time Source binding consults it as current context authority, while indexing does not.
 
+### Implemented Windows/NTFS Evidence
+
+No schema migration was needed. `location_context.continuity_evidence_json` accepts a separate `windows-ntfs-context-v1` envelope with canonical context UUID/revision, drive-root `lp1` path and matching `lk1` key, 16-digit lowercase hexadecimal volume serial, and 32-digit lowercase hexadecimal 128-bit anchor file ID. `source.binding_evidence_json` accepts `windows-ntfs-source-v1` with Source ID/revision, context ID/revision, configured drive-rooted `lp1` path/key, and the Source root's volume serial/file ID. The strict bounded codecs reject malformed, mismatched, unknown-version, or noncanonical evidence. Existing APFS envelopes are unchanged; persisted identity is limited to context and Source continuity, while original-file IDs and native handles are operation-local.
+
+First binding changes the legacy Source dialect to `win-drive`, its root key to canonical `lk1`, and its context/evidence/revision in one guarded transaction with an open binding period. Explicit unbinding retains the structured root and closes that period; fixed-root NTFS rebinding requires a matching closed period and zero ACTIVE memberships. A current bound route requires matching accepted context and Source evidence, revisions, structured containment, and volume serial. v3 admission also requires the current Windows host; a Session opened elsewhere retains readable catalog data without live NTFS authority. UNC remains catalog-representable but is not a Source profile.
+Drive-letter casing is retained in catalog keys. Preparation refuses an existing active context on the same drive with different letter casing rather than creating an overlapping context; case-only original-file path checks use native file identity.
+
 ### `content_record`
 
 Implemented fields:
@@ -413,7 +420,7 @@ Catalog
 FileEntry ──→ LocationContext (resolved only)
 ```
 
-The pure `scan.authority` contract and v3 host adapter admit trusted local macOS/APFS observations. V3 retains `DISCOVERY -> RECONCILIATION -> CONTENT_ASSIGNMENT -> CONTENT_HASHING -> COMPLETED`, using SourceMembership for positive observations and complete-traversal missing claims. Unbound Sources, unsupported profiles, legacy raw acceptance evidence, and Windows hosts are ineligible for new v3 admission. Existing v1/v2 Jobs and ScanRuns keep their recorded meaning and remain readable; incompatible active work is failed during startup recovery. A later shortened SCAN, with hashing separate, requires execution version 4 or later.
+The pure `scan.authority` contract and v3 host adapters admit trusted local macOS/APFS or Windows/NTFS observations on their matching hosts. V3 retains `DISCOVERY -> RECONCILIATION -> CONTENT_ASSIGNMENT -> CONTENT_HASHING -> COMPLETED`, using SourceMembership for positive observations and complete-traversal missing claims. Unbound Sources, unsupported or foreign-host profiles, and legacy raw APFS acceptance evidence are ineligible for new v3 admission. Existing v1/v2 Jobs and ScanRuns keep their recorded meaning and remain readable; incompatible active work is failed during startup recovery. A later shortened SCAN, with hashing separate, requires execution version 4 or later.
 
 No global case folding, Unicode normalization, `toRealPath()` identity, hash/inode-only identity, automatic mapped-drive/UNC equivalence, or automatic rename/move/remount recognition is introduced. Distinct hard-link names remain distinct FileEntries. Catalog switching, other host/provider profiles, and automatic historical consolidation remain deferred.
 

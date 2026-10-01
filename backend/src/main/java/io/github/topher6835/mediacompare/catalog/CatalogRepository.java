@@ -58,9 +58,15 @@ public class CatalogRepository {
 
     public int bindUnboundSource(long sourceId, long expectedRevision, String configuredRootPath,
             String rootLocationKey, String contextId, String bindingEvidenceJson, long boundAtMs) {
+        return bindUnboundSource(sourceId, expectedRevision, configuredRootPath, "unix", rootLocationKey,
+                contextId, bindingEvidenceJson, boundAtMs);
+    }
+
+    public int bindUnboundSource(long sourceId, long expectedRevision, String configuredRootPath,
+            String dialect, String rootLocationKey, String contextId, String bindingEvidenceJson, long boundAtMs) {
         return jdbcTemplate.update("""
                 UPDATE source
-                SET root_path_dialect = 'unix', root_path_key = ?,
+                SET root_path_dialect = ?, root_path_key = ?,
                     bound_location_context_id = ?, binding_evidence_json = ?,
                     location_revision = ?, updated_at_ms = ?
                 WHERE id = ? AND location_revision = ?
@@ -68,7 +74,7 @@ public class CatalogRepository {
                     AND root_path_dialect IS NULL
                     AND binding_evidence_json IS NULL
                     AND root_path = ? AND root_path_key = ?
-                """, rootLocationKey, contextId, bindingEvidenceJson,
+                """, dialect, rootLocationKey, contextId, bindingEvidenceJson,
                 expectedRevision + 1, boundAtMs, sourceId, expectedRevision,
                 configuredRootPath, configuredRootPath);
     }
