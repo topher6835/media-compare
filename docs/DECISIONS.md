@@ -501,6 +501,13 @@ V5 implements LocationContext/Source binding storage, and V6/v3 use the pure sca
 - Persist versioned NTFS context and Source evidence in the existing JSON columns, including structured path/key and row revisions. Keep APFS evidence formats unchanged. A Windows Source is eligible for v3 only on Windows with matching accepted/bound NTFS evidence; scan start/end and traversal recheck native identity and reject reparse points or volume changes. Do not infer physical identity from path, case, size, or mtime.
 - Keep catalog display portable and host-independent. Defer Explorer reveal, packaging, and any claim of real NTFS validation until Windows-only acceptance tests run. Variant V1.1 remains frozen.
 
+## Windows V1 exFAT Source Profile
+
+- Require Windows V1 Sources on both local NTFS and local/mounted exFAT. VeraCrypt-mounted exFAT exposed as a normal Windows drive letter is a required acceptance scenario; a particular letter such as `Z:` is not a permanent requirement.
+- Keep NTFS and exFAT as distinct filesystem authority profiles wherever guarantees differ. The existing implementation is NTFS-specific, and NTFS authority must not be weakened to accommodate exFAT. Any exFAT support belongs behind the existing platform/filesystem boundary.
+- Before choosing exFAT's stable identity or continuity mechanism, empirically validate actual exFAT behavior on a Windows-mounted volume. Investigate file/directory and volume identity, case behavior, path comparison, timestamps, ACL expectations, link/junction/reparse behavior, metadata, replacement/stale detection, Source-root continuity, removable/mounted volumes, and VeraCrypt-mounted behavior. Do not assume NTFS IDs/APIs apply or that path, size, and mtime are sufficient. The identity mechanism remains undecided.
+- A Session/application may reside on NTFS while Sources reside on exFAT or other supported local drives. Sources on separate drives may be scanned independently; concurrent multi-drive scanning is not required for Windows V1.
+
 ## Development
 
 - Favor readable, conventional, learnable code over clever abstractions.

@@ -8,6 +8,8 @@ Local Windows drive Sources can now be prepared against an accepted NTFS drive-r
 
 The Windows adapter uses JNA Platform only behind the Windows filesystem implementation because Java 21 NIO can return a null Windows file key. Context and Source baselines persist volume serial plus 128-bit file/directory ID in the existing JSON columns; opened handles and original-file IDs remain operation-local. Symbolic links, junctions, and other reparse points fail closed. A second context for the same drive with different letter casing is refused; catalog path keys still preserve exact spelling. No migration or new catalog column was needed. Focused pure tests passed on macOS; Windows-only native, Source, scan, and file checks are ready but have not run on real NTFS. Real Windows/NTFS acceptance, Explorer reveal, and packaging remain next. Variant V1.1 remains frozen and unimplemented.
 
+Windows V1 also requires a separate local/mounted exFAT Source profile. The required acceptance case includes external exFAT mounted through VeraCrypt and exposed as a normal drive letter; `Z:` is an example, not a fixed requirement. The current Windows authority implementation is NTFS-specific. ExFAT identity and continuity design remains pending empirical validation on an actual Windows-mounted exFAT volume; exFAT support is not implemented. A Session/application may be on NTFS while a Source is on exFAT, and Sources on different drives may be scanned separately without concurrent multi-drive scanning.
+
 The complete macOS gate passed: `mvn -q test` (1,280 tests, zero failures/errors, three skips including Windows-only tests), `mvn -q package -DskipTests`, frontend lint/build, 59 frontend Node tests, and `git diff --check`. The packaged jar contains JNA Platform and JNA Core. No commit or push was made.
 
 ### Host Filesystem Validation Foundation
@@ -223,4 +225,13 @@ Physical-copy preview validation: `npm run lint && npm run build` passed in `fro
 
 ## Next Recommended Step
 
-Next validate Windows Source preparation, NTFS identity/reparse handling, v3 traversal, hashing, metadata, thumbnails, and stale-root rejection on a real Windows/NTFS machine. Windows Show in File Explorer and Windows V1 packaging/testing follow; then return to the defined, unimplemented Variant V1.1 fingerprint milestone. Variant pairwise matching/grouping and Semantic/AI work remain later. Real macOS/APFS validation of Library return position and Finder reveal, including HEIC and stale-file feedback, remains recommended. Side-by-side compare, manual overrides, persisted group IDs/memberships, group caches/background recomputation, medium/original previews, video grouping UI, and cache cleanup remain deferred.
+The remaining Windows V1 sequence is:
+
+1. Real Windows/NTFS acceptance.
+2. ExFAT/VeraCrypt investigation and authority design on the actual mounted drive.
+3. ExFAT implementation and real acceptance.
+4. Windows Show in File Explorer.
+5. Windows packaging and V1 testing.
+6. Variant V1.1 implementation.
+
+Real NTFS acceptance is still pending, and exFAT support is unimplemented. Variant V1.1 remains frozen until the Windows sequence is complete. Variant pairwise matching/grouping and Semantic/AI work remain later. Real macOS/APFS validation of Library return position and Finder reveal, including HEIC and stale-file feedback, remains recommended. Side-by-side compare, manual overrides, persisted group IDs/memberships, group caches/background recomputation, medium/original previews, video grouping UI, and cache cleanup remain deferred.
