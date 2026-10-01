@@ -145,7 +145,9 @@ public class Version3DiscoveryWalker {
                     return FileVisitResult.SKIP_SUBTREE;
                 }
                 try {
-                    LocationPath location = exactLocation(authority.sourceRoot(), root.relativize(directory));
+                    // Relativizing the root itself produces an empty Path with one empty segment.
+                    LocationPath location = directory.equals(root) ? authority.sourceRoot()
+                            : exactLocation(authority.sourceRoot(), root.relativize(directory));
                     var observed = WindowsNtfsPathInspector.inspect(location, true);
                     if (observed.status() != HostFileStatus.ESTABLISHED
                             || !authority.volumeId().equals(observed.identity().volumeSerial())) {

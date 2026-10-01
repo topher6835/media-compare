@@ -182,7 +182,8 @@ class MacOsApfsLogicalAnchorResolverTests {
         }
 
         ContinuityProbeResult<MountObservation> inspect(Path path) {
-            String key = path.toString();
+            // These injected observations use Unix text, independently of the test host's Path separators.
+            String key = path.toString().replace('\\', '/');
             calls.merge(key, 1, Integer::sum);
             Queue<ContinuityProbeResult<MountObservation>> sequence = results.get(key);
             if (sequence == null || sequence.isEmpty()) {

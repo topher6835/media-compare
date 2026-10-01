@@ -56,6 +56,8 @@ class SourceMembershipAuthorityTests {
     private static final LocationPath FILE = path("/Volumes/Archive/Photos/a.jpg");
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void overlappingSourcesShareOneResolvedFileInBothOrders() throws Exception {
         for (boolean parentFirst : List.of(true, false)) {
             try (var app = app()) {
@@ -78,6 +80,8 @@ class SourceMembershipAuthorityTests {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void concurrentOverlappingPublicationsShareOneResolvedFile() throws Exception {
         try (var app = app(); var workers = Executors.newFixedThreadPool(2)) {
             JdbcTemplate jdbc = app.getBean(JdbcTemplate.class);
@@ -102,6 +106,8 @@ class SourceMembershipAuthorityTests {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void missingAndReappearanceChangeMembershipButPreserveUnchangedContent() throws Exception {
         try (var app = app()) {
             JdbcTemplate jdbc = app.getBean(JdbcTemplate.class);
@@ -128,6 +134,8 @@ class SourceMembershipAuthorityTests {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void reconciliationOfParentDoesNotChangeOverlappingChildMembership() throws Exception {
         try (var app = app()) {
             JdbcTemplate jdbc = app.getBean(JdbcTemplate.class);
@@ -147,6 +155,8 @@ class SourceMembershipAuthorityTests {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void incompleteDiscoveryCannotMakeAMissingClaim() throws Exception {
         try (var app = app()) {
             JdbcTemplate jdbc = app.getBean(JdbcTemplate.class);
@@ -163,6 +173,8 @@ class SourceMembershipAuthorityTests {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void byteChangeAdvancesFileRevisionAndClearsContent() throws Exception {
         try (var app = app()) {
             JdbcTemplate jdbc = app.getBean(JdbcTemplate.class);
@@ -181,6 +193,8 @@ class SourceMembershipAuthorityTests {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void legacyPathCollisionRetiresWithoutRetargetingHistory() throws Exception {
         try (var app = app()) {
             JdbcTemplate jdbc = app.getBean(JdbcTemplate.class);
@@ -231,6 +245,8 @@ class SourceMembershipAuthorityTests {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void scanRunSourceRevisionMustMatchTrustedCandidateBeforePublication() throws Exception {
         try (var app = app()) {
             JdbcTemplate jdbc = app.getBean(JdbcTemplate.class);
@@ -247,6 +263,8 @@ class SourceMembershipAuthorityTests {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void v3AdmissionRequiresCurrentSupportedBindingForEverySource() throws Exception {
         try (var app = app()) {
             JdbcTemplate jdbc = app.getBean(JdbcTemplate.class);
@@ -309,6 +327,8 @@ class SourceMembershipAuthorityTests {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void legacyAcceptanceIsIneligibleButMalformedAcceptanceIsIntegrityFailure() throws Exception {
         try (var app = app()) {
             JdbcTemplate jdbc = app.getBean(JdbcTemplate.class);
@@ -329,6 +349,8 @@ class SourceMembershipAuthorityTests {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void duplicateSavingsCountSharedResolvedFileOnce() throws Exception {
         try (var app = app()) {
             JdbcTemplate jdbc = app.getBean(JdbcTemplate.class);
@@ -375,6 +397,8 @@ class SourceMembershipAuthorityTests {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void downstreamCandidatesUseTrustedResolvedMembershipOnly() throws Exception {
         try (var app = app()) {
             JdbcTemplate jdbc = app.getBean(JdbcTemplate.class);
@@ -412,6 +436,8 @@ class SourceMembershipAuthorityTests {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void staleMembershipAndFileRevisionsBlockDownstreamPublication() throws Exception {
         try (var app = app()) {
             JdbcTemplate jdbc = app.getBean(JdbcTemplate.class);

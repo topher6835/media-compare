@@ -32,6 +32,9 @@ public final class V3TestHost {
 
     public static Source boundSource(CatalogRepository catalog, JdbcTemplate jdbc,
             Path root, String name) throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                io.github.topher6835.mediacompare.filesystem.HostFileSystems.isMacOs(),
+                "This fixture combines APFS authority with real host paths; NTFS uses WindowsNtfsExecutionTests");
         Path exactRoot = root.toRealPath();
         var location = LocationPathParser.parse(LocationDialect.UNIX, exactRoot.toString());
         Source source = catalog.insert(new Source(null, name,

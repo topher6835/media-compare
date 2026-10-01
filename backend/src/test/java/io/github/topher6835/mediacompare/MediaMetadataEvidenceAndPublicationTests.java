@@ -350,6 +350,9 @@ class MediaMetadataEvidenceAndPublicationTests {
             paths.add(file);
         }
 
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                io.github.topher6835.mediacompare.filesystem.HostFileSystems.isMacOs(),
+                "This real-path fixture uses APFS authority");
         Source source = catalogRepository.insert(new Source(
                 null, directoryName, root.toString(), root.toString(), 0, 1, 1));
         LocationPath rootLocation = LocationPathParser.parse(LocationDialect.UNIX, root.toString());

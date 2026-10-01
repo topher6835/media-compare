@@ -40,6 +40,8 @@ import io.github.topher6835.mediacompare.location.SourceBindingEvidenceCodec;
 import io.github.topher6835.mediacompare.matching.ExactDuplicateService;
 import io.github.topher6835.mediacompare.scan.authority.ScanObservationAuthority;
 
+@org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+        disabledReason = "Combines deterministic APFS authority with real host paths")
 class Version3ExecutionTests {
     private static final String CONTEXT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     private static final String VOLUME_ID = "11111111-2222-3333-4444-555555555555";

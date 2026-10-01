@@ -38,6 +38,7 @@ import io.github.topher6835.mediacompare.location.ContinuityProbeResult;
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(SourcePreparationServiceTests.ProbeConfiguration.class)
+@org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 class SourceApiTests {
 
     @TempDir static Path databaseDirectory;
@@ -190,6 +191,8 @@ class SourceApiTests {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void preparesSourceAndRepeatedPrepareReturnsReady() throws Exception {
         register("Pictures", "/Users/chris/Pictures").andExpect(status().isCreated());
         long id = catalogRepository.findAllSources().getFirst().id();
@@ -210,6 +213,8 @@ class SourceApiTests {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void prepareUnknownAndPreviouslyUnboundSourcesFailClearly() throws Exception {
         mockMvc.perform(post("/api/sources/{id}/prepare", Long.MAX_VALUE))
                 .andExpect(status().isNotFound());
@@ -229,6 +234,8 @@ class SourceApiTests {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void prepareReportsUnavailableAndUnsupportedEvidence() throws Exception {
         register("Pictures", "/Users/chris/Pictures").andExpect(status().isCreated());
         long id = catalogRepository.findAllSources().getFirst().id();

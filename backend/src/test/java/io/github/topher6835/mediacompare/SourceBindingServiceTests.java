@@ -482,6 +482,8 @@ class SourceBindingServiceTests {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void rebindToAcceptedReplacementContextKeepsOldClosedHistory() {
         LocationContext oldContext = acceptedContext(anchor());
         Source unbound = structuredUnbound(oldContext);
@@ -760,6 +762,8 @@ class SourceBindingServiceTests {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void rebindPreservesRetiredMembershipAndArtifactsUntilFreshPositiveReactivatesSameRow() {
         LocationContext context = acceptedContext(anchor());
         Source legacy = legacySource("/Volumes/Archive/Photos");
@@ -822,6 +826,8 @@ class SourceBindingServiceTests {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void oldScanSnapshotCannotGainV3AdmissionAfterRebind() {
         LocationContext context = acceptedContext(anchor());
         Source unbound = structuredUnbound(context);
@@ -1027,6 +1033,8 @@ class SourceBindingServiceTests {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void relocationPreservesRetiredHistoryAndNewContextObservationCreatesNewFileEntry() {
         LocationContext oldContext = acceptedContext(anchor());
         Source legacy = legacySource("/Volumes/Archive/Photos");
@@ -1096,6 +1104,8 @@ class SourceBindingServiceTests {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void oldScanSnapshotCannotGainV3AuthorityAfterRelocation() {
         LocationContext context = acceptedContext(anchor());
         Source unbound = structuredUnbound(context);

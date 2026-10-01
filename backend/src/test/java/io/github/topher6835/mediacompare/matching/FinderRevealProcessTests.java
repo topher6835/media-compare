@@ -20,8 +20,9 @@ class FinderRevealProcessTests {
             timeout.set(limit);
             return new BoundedProcessExecutor.ExecutionFinished(0, new byte[0], new byte[0]);
         });
-        assertTrue(process.reveal(Path.of("/safe/a file.heic")));
-        assertEquals(List.of("/usr/bin/open", "-R", "/safe/a file.heic"), command.get());
+        Path file = Path.of("/safe/a file.heic");
+        assertTrue(process.reveal(file));
+        assertEquals(List.of("/usr/bin/open", "-R", file.toString()), command.get());
         assertEquals(Duration.ofSeconds(5), timeout.get());
     }
 

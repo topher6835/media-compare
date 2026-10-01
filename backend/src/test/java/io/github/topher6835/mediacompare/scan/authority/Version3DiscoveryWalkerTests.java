@@ -20,6 +20,8 @@ import io.github.topher6835.mediacompare.location.MacOsApfsMountInspector.MountO
 import io.github.topher6835.mediacompare.location.MacOsApfsSourceRootEvidence;
 import io.github.topher6835.mediacompare.scan.Version3DiscoveryWalker;
 
+@org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+        disabledReason = "Exercises the APFS walker with Unix host paths and injected mount observations")
 class Version3DiscoveryWalkerTests {
     private static final String CONTEXT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     private static final String VOLUME_ID = "11111111-2222-3333-4444-555555555555";

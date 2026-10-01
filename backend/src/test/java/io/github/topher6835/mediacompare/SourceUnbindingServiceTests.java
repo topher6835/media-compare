@@ -264,6 +264,8 @@ class SourceUnbindingServiceTests {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void publicationAndUnbindSerializeInEitherOrder() throws Exception {
         seed(5);
         insertRunSource(11, "DISCOVERING");
@@ -286,6 +288,8 @@ class SourceUnbindingServiceTests {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+            disabledReason = "Uses APFS authority for current-host admission/publication")
     void reconciliationAndUnbindSerializeWithoutNewMissingClaimAfterUnbind() throws Exception {
         seed(5);
         insertRunSource(11, "DISCOVERED");

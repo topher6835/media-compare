@@ -11,6 +11,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 record ThumbnailCatalogFixture(long entryId, long sourceId, String contextId, Path original) {
     static ThumbnailCatalogFixture create(Path directory, JdbcTemplate jdbc, CatalogRepository catalog, byte[] bytes)
             throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                io.github.topher6835.mediacompare.filesystem.HostFileSystems.isMacOs(),
+                "This fixture binds real original paths using APFS evidence; NTFS has separate acceptance coverage");
         Path root = Files.createTempDirectory(directory, "original-").toRealPath();
         Path original = Files.write(root.resolve("candidate.bin"), bytes);
         Source source = catalog.insert(new Source(null, "thumbnail", root.toString(), root.toString(), 0, 1, 1));

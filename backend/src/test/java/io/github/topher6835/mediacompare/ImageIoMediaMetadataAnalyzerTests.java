@@ -290,6 +290,9 @@ class ImageIoMediaMetadataAnalyzerTests {
     }
 
     private Fixture catalogFixture(Path root, String name, List<String> relativePaths) throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                io.github.topher6835.mediacompare.filesystem.HostFileSystems.isMacOs(),
+                "This real-path fixture uses APFS authority");
         Path exactRoot = root.toRealPath();
         Source source = catalogRepository.insert(new Source(
                 null, name, exactRoot.toString(), exactRoot.toString(), 0, 1, 1));

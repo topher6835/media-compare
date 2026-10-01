@@ -48,6 +48,8 @@ import io.github.topher6835.mediacompare.location.MacOsApfsSourceRootProbeReques
 
 @SpringBootTest
 @Import(SourcePreparationServiceTests.ProbeConfiguration.class)
+@org.junit.jupiter.api.condition.EnabledOnOs(value = org.junit.jupiter.api.condition.OS.MAC,
+        disabledReason = "Exercises the macOS/APFS preparation probe with Unix host paths")
 class SourcePreparationServiceTests {
     @TempDir static Path databaseDirectory;
     private static final String DATA_VOLUME = "11111111-2222-3333-4444-555555555555";

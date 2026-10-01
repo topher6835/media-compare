@@ -400,6 +400,9 @@ class MediaMetadataJobTests {
     }
 
     private Source insertSource(Path root, String name) {
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                io.github.topher6835.mediacompare.filesystem.HostFileSystems.isMacOs(),
+                "This real-path fixture uses APFS authority");
         Source source = catalog.insert(new Source(
                 null, name, root.toString(), root.toString(), 0, 1, 1));
         LocationPath location = LocationPathParser.parse(LocationDialect.UNIX, root.toString());
