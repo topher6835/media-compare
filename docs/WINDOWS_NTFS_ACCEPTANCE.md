@@ -66,13 +66,25 @@ Final `mvn -q test` passed with exit code 0: **1,289 tests, 1,002 passed, zero f
 
 `mvn -q package -DskipTests` passed with exit code 0. Frontend `npm run lint`, `npm run build`, and `node --test tests/*.test.mjs` passed with local lockfile dependencies; all 59 Node tests passed without skips. Repository-root `git diff --check` passed; `git status --short` was inspected. No commit or push was performed.
 
+## Manual frontend/backend smoke test
+
+This was a later manual UI run, separate from the automated acceptance gate above. On Windows 10, the real frontend in a browser communicated with the real backend jar running from NTFS and using a disposable Session on NTFS. Through the normal UI, an existing NTFS folder was registered as a Source, prepared, and analyzed. About 484 files completed analysis in a few minutes. The Library populated correctly; item thumbnails/previews, Exact badges/groups, and general browsing looked correct. This was not a performance benchmark.
+
+The Session remains reusable: starting the backend later with the same Session path reopens it. Original Source files were neither modified nor copied into the Session; only derived Session-owned assets such as cached previews were created.
+
+During the run, the frontend displayed `Current indexing progress could not be refreshed. Polling will continue.` a few times. The run still completed successfully. This is a non-blocking observation, not a diagnosed defect; no cause is known. Investigate it if it becomes reproducible or disruptive.
+
+The Windows Library/item UI still displays `Reveal in Finder`, and the action does not work on Windows. Reveal remains macOS/Finder-only in the current implementation. The planned Windows reveal milestone should provide platform-aware behavior, with `Reveal in Finder` on macOS and `Show in File Explorer` or equivalent on Windows, and no Finder-specific action exposed as usable Windows functionality. Explorer reveal was not implemented in this milestone.
+
+Two exact duplicate physical files appeared as two separate cards in Items. This is intentional: Items represent physical FileEntries, while the Exact badge communicates content grouping and Exact/group views may use one representative card. Any future optional “Collapse exact duplicates” presentation should remain display-only and preserve distinct FileEntries. No Library behavior was changed.
+
 ## Limits and next work
 
 - Symbolic-link rejection still needs a real run with symlink creation privileges. Junction rejection was exercised.
 - The macOS-only fixture skips are explicit coverage limits on this Windows run. No real macOS/APFS run was possible here; the APFS production path and evidence formats were unchanged.
 - Java NIO/native pathname observations do not provide atomic handle-relative traversal. Concurrent intermediate-path replacement remains a residual race; this milestone does not claim to solve every filesystem race.
 - Whole-volume replacement, remount/reboot continuity, other physical NTFS drives, long/device/UNC paths, and every reparse tag were not empirically qualified. No automatic remount identity was inferred.
-- Real Windows ffprobe `fd:` acceptance and manual browser interaction remain separate work.
+- Real Windows ffprobe `fd:` acceptance remains separate work. The manual UI smoke test above does not replace broader Windows UI acceptance.
 - exFAT/VeraCrypt support remains unimplemented; actual mounted-volume investigation and authority design is the next filesystem milestone. NTFS guarantees were not weakened.
 - Explorer reveal, packaging/installers, Variant V1.1, Variant matching/grouping, and Semantic/AI remain unimplemented.
 - No commit or push was performed.
