@@ -48,6 +48,9 @@ public class Version3DiscoveryWalker {
     public TraversalCompletion.Issue walk(Path root, ScanAuthoritySnapshot authority,
             Consumer<ResolvedFileCandidate> observer) throws IOException {
         if (authority.windowsNtfs()) return walkWindows(root, authority, observer);
+        if (authority.profile() != io.github.topher6835.mediacompare.filesystem.FileSystemProfile.APFS) {
+            return TraversalCompletion.Issue.UNSUPPORTED_CHILD_STORAGE;
+        }
         var anchor = inspectMount.apply(hostPath(authority.contextAnchor()));
         var source = inspectMount.apply(root);
         if (anchor.outcome() != ContinuityOutcome.ACCEPTED

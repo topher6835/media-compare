@@ -1,9 +1,8 @@
 package io.github.topher6835.mediacompare.catalog;
 
 import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
-import io.github.topher6835.mediacompare.filesystem.MacOsHostFileSystem;
+import io.github.topher6835.mediacompare.filesystem.FileSystemProfile;
 import io.github.topher6835.mediacompare.filesystem.WindowsNtfsEvidenceCodec;
-import io.github.topher6835.mediacompare.filesystem.WindowsNtfsHostFileSystem;
 import io.github.topher6835.mediacompare.location.LocationDialect;
 import io.github.topher6835.mediacompare.location.LocationKey;
 import io.github.topher6835.mediacompare.location.LocationKeyCodec;
@@ -57,8 +56,8 @@ public final class CurrentLocationAuthority {
     public static Route requireCurrentHost(Source source, LocationContext context) {
         Route route = requirePersisted(source, context);
         boolean supported = switch (route.fileSystemType()) {
-            case "apfs" -> HostFileSystems.current() instanceof MacOsHostFileSystem;
-            case "ntfs" -> HostFileSystems.current() instanceof WindowsNtfsHostFileSystem;
+            case "apfs" -> HostFileSystems.current().supportsProfile(FileSystemProfile.APFS);
+            case "ntfs" -> HostFileSystems.current().supportsProfile(FileSystemProfile.NTFS);
             default -> false;
         };
         if (!supported) throw new IllegalArgumentException("Source authority is foreign to current host");

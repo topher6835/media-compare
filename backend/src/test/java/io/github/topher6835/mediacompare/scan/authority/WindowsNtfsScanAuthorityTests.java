@@ -11,7 +11,6 @@ import io.github.topher6835.mediacompare.catalog.SourcePreparationState;
 import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
 import io.github.topher6835.mediacompare.filesystem.WindowsNtfsContextEvidence;
 import io.github.topher6835.mediacompare.filesystem.WindowsNtfsEvidenceCodec;
-import io.github.topher6835.mediacompare.filesystem.WindowsNtfsHostFileSystem;
 import io.github.topher6835.mediacompare.filesystem.WindowsNtfsIdentity;
 import io.github.topher6835.mediacompare.filesystem.WindowsNtfsSourceEvidence;
 import io.github.topher6835.mediacompare.location.LocationDialect;
@@ -92,7 +91,7 @@ class WindowsNtfsScanAuthorityTests {
 
     @Test
     void foreignHostCannotUsePortableWindowsAuthority() {
-        if (HostFileSystems.current() instanceof WindowsNtfsHostFileSystem) return;
+        if (HostFileSystems.isWindows()) return;
         var fixture = fixture();
         assertThrows(IllegalArgumentException.class,
                 () -> CurrentLocationAuthority.requireCurrentHost(fixture.source(), fixture.context()));

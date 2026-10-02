@@ -1,5 +1,7 @@
 package io.github.topher6835.mediacompare.catalog;
 
+import java.io.IOException;
+import java.nio.file.NoSuchFileException;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.UUID;
@@ -18,7 +20,8 @@ import io.github.topher6835.mediacompare.location.MacOsApfsContinuityVerifier;
 import io.github.topher6835.mediacompare.location.MacOsApfsLocationContextEvidence;
 import io.github.topher6835.mediacompare.location.MacOsApfsSourceRootProbeRequest;
 import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
-import io.github.topher6835.mediacompare.filesystem.WindowsNtfsHostFileSystem;
+import io.github.topher6835.mediacompare.filesystem.FileSystemProfile;
+import io.github.topher6835.mediacompare.filesystem.WindowsFileAccessException;
 
 /** Coordinates explicit first-time preparation without holding a transaction across probes. */
 @Service
@@ -56,7 +59,27 @@ public class SourcePreparationService {
             throw new SourcePreparationException(SourcePreparationException.Code.STATE_CHANGED);
         }
 
-        if (HostFileSystems.current() instanceof WindowsNtfsHostFileSystem) {
+        if (HostFileSystems.isWindows()) {
+            try {
+                var host = HostFileSystems.current();
+                var configured = LocationPathParser.parse(LocationDialect.WINDOWS_DRIVE, source.rootPath());
+                if (host.profile(host.path(configured)) != FileSystemProfile.NTFS) {
+                    throw new SourcePreparationException(SourcePreparationException.Code.PROFILE_UNSUPPORTED);
+                }
+            } catch (WindowsFileAccessException failure) {
+                throw new SourcePreparationException(switch (failure.reason()) {
+                    case UNSUPPORTED -> SourcePreparationException.Code.PROFILE_UNSUPPORTED;
+                    case UNAVAILABLE -> SourcePreparationException.Code.PATH_UNAVAILABLE;
+                    case UNCERTAIN -> SourcePreparationException.Code.EVIDENCE_UNCERTAIN;
+                    case NATIVE_ERROR -> SourcePreparationException.Code.PROBE_ERROR;
+                });
+            } catch (NoSuchFileException failure) {
+                throw new SourcePreparationException(SourcePreparationException.Code.PATH_UNAVAILABLE);
+            } catch (IOException failure) {
+                throw new SourcePreparationException(SourcePreparationException.Code.PROBE_ERROR);
+            } catch (IllegalArgumentException failure) {
+                throw new SourcePreparationException(SourcePreparationException.Code.PROFILE_UNSUPPORTED);
+            }
             return windows.prepare(source);
         }
 

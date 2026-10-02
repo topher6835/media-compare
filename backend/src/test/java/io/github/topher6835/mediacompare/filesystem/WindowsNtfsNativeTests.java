@@ -42,21 +42,17 @@ class WindowsNtfsNativeTests {
         assertNotEquals(folder.identity().fileId(), original.identity().fileId());
         assertEquals(original, WindowsNtfsNative.observe(file.resolveSibling("MIXEDCASE.JPG")));
         assertEquals(folder, WindowsNtfsNative.observe(Path.of(directory.toString().toUpperCase(Locale.ROOT))));
-        int handlesBefore = handleCount();
-        for (int index = 0; index < 512; index++) {
-            assertEquals(original, WindowsNtfsNative.observe(file));
-            assertEquals(folder, WindowsNtfsNative.observe(directory));
-            assertEquals(drive, WindowsNtfsNative.observe(directory.getRoot()));
-        }
-        assertTrue(handleCount() <= handlesBefore + 8, "Native observations must close their handles");
-        for (int index = 0; index < 64; index++) {
-            assertThrows(java.io.IOException.class,
-                    () -> WindowsNtfsNative.observe(directory.resolve("missing")));
-        }
-        assertTrue(handleCount() <= handlesBefore + 8, "Failed opens must not leak handles");
-        System.out.println("NTFS native acceptance: file=" + original.identity()
-                + ", directory=" + folder.identity() + ", drive=" + drive.identity()
-                + ", handles before=" + handlesBefore + ", after=" + handleCount());
+        // Other Spring tests leave background activity in the shared JVM. Isolate the process-wide count.
+        var process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java.exe").toString(),
+                "-cp", System.getProperty("java.class.path"), WindowsNtfsHandleProbe.class.getName(), file.toString())
+                .redirectErrorStream(true).start();
+        try {
+            assertTrue(process.waitFor(20, java.util.concurrent.TimeUnit.SECONDS), "Handle probe timed out");
+            String output = new String(process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            assertEquals(0, process.exitValue(), output);
+            System.out.println("NTFS native acceptance: file=" + original.identity()
+                    + ", directory=" + folder.identity() + ", drive=" + drive.identity() + "; " + output.strip());
+        } finally { if (process.isAlive()) process.destroyForcibly(); }
     }
 
     @Test
@@ -112,7 +108,7 @@ class WindowsNtfsNativeTests {
         assertNotEquals(folderIdentity, WindowsNtfsNative.observe(folder).identity());
     }
 
-    private static int handleCount() {
+    static int handleCount() {
         var count = new IntByReference();
         assertTrue(HandleCounter.INSTANCE.GetProcessHandleCount(Kernel32.INSTANCE.GetCurrentProcess(), count));
         return count.getValue();

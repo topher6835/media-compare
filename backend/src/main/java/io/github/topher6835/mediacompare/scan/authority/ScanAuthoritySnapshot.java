@@ -6,12 +6,14 @@ import io.github.topher6835.mediacompare.location.MacOsApfsSourceRootEvidence;
 import io.github.topher6835.mediacompare.filesystem.WindowsNtfsContextEvidence;
 import io.github.topher6835.mediacompare.filesystem.WindowsNtfsSourceEvidence;
 import io.github.topher6835.mediacompare.filesystem.WindowsNtfsIdentity;
+import io.github.topher6835.mediacompare.filesystem.FileSystemProfile;
 import io.github.topher6835.mediacompare.location.ContinuityOutcome;
 import io.github.topher6835.mediacompare.location.MacOsApfsContinuityVerifier;
 import io.github.topher6835.mediacompare.location.MacOsApfsSourceRootComparisonContext;
 
 /** Immutable current-row authority plus a fresh accepted context/root observation. */
 public final class ScanAuthoritySnapshot {
+    private final FileSystemProfile profile;
     private final long sourceId;
     private final long sourceRevision;
     private final String contextId;
@@ -33,6 +35,7 @@ public final class ScanAuthoritySnapshot {
             MacOsApfsLocationContextEvidence contextObservation,
             MacOsApfsSourceRootEvidence rootBaseline,
             MacOsApfsSourceRootEvidence rootObservation) {
+        this.profile = FileSystemProfile.APFS;
         this.sourceId = sourceId;
         this.sourceRevision = sourceRevision;
         this.contextId = contextId;
@@ -52,6 +55,7 @@ public final class ScanAuthoritySnapshot {
     ScanAuthoritySnapshot(long sourceId, long sourceRevision, String contextId, long contextRevision,
             WindowsNtfsContextEvidence contextBaseline, WindowsNtfsIdentity contextObservation,
             WindowsNtfsSourceEvidence rootBaseline, WindowsNtfsIdentity rootObservation) {
+        this.profile = FileSystemProfile.NTFS;
         this.sourceId = sourceId;
         this.sourceRevision = sourceRevision;
         this.contextId = contextId;
@@ -108,17 +112,27 @@ public final class ScanAuthoritySnapshot {
         return rootObservation;
     }
 
-    public boolean windowsNtfs() { return windowsContextBaseline != null; }
+    public FileSystemProfile profile() { return profile; }
+    public boolean windowsNtfs() { return profile == FileSystemProfile.NTFS; }
 
     public String volumeId() {
-        return windowsNtfs() ? windowsContextBaseline.identity().volumeSerial()
-                : contextBaseline.volumeUuid();
+        return switch (profile) {
+            case NTFS -> windowsContextBaseline.identity().volumeSerial();
+            case APFS -> contextBaseline.volumeUuid();
+            default -> throw new IllegalStateException("Unsupported scan authority profile");
+        };
     }
 
-    public String fileSystemType() { return windowsNtfs() ? "ntfs" : "apfs"; }
+    public String fileSystemType() {
+        return switch (profile) {
+            case NTFS -> "ntfs";
+            case APFS -> "apfs";
+            default -> throw new IllegalStateException("Unsupported scan authority profile");
+        };
+    }
 
     public boolean sameRootAs(ScanAuthoritySnapshot other) {
-        if (other == null || windowsNtfs() != other.windowsNtfs()
+        if (other == null || profile != other.profile
                 || sourceId != other.sourceId || sourceRevision != other.sourceRevision
                 || contextRevision != other.contextRevision || !contextId.equals(other.contextId)
                 || !sourceRoot.equals(other.sourceRoot)) return false;
@@ -126,20 +140,20 @@ public final class ScanAuthoritySnapshot {
             return windowsRootBaseline.equals(other.windowsRootBaseline)
                     && windowsRootObservation.equals(other.windowsRootObservation);
         }
-        return rootBaseline.equals(other.rootBaseline)
+        return profile == FileSystemProfile.APFS && rootBaseline.equals(other.rootBaseline)
                 && MacOsApfsContinuityVerifier.verifySourceRoot(new MacOsApfsSourceRootComparisonContext(
                         contextId, contextRevision, sourceRevision, contextBaseline),
                         rootObservation, other.rootObservation).outcome() == ContinuityOutcome.ACCEPTED;
     }
 
     public boolean sameContextAs(ScanAuthoritySnapshot other) {
-        if (other == null || windowsNtfs() != other.windowsNtfs()
+        if (other == null || profile != other.profile
                 || !contextId.equals(other.contextId) || contextRevision != other.contextRevision) return false;
         if (windowsNtfs()) {
             return windowsContextBaseline.equals(other.windowsContextBaseline)
                     && windowsContextObservation.equals(other.windowsContextObservation);
         }
-        return contextBaseline.equals(other.contextBaseline)
+        return profile == FileSystemProfile.APFS && contextBaseline.equals(other.contextBaseline)
                 && MacOsApfsContinuityVerifier.verifyLocationContext(
                         contextObservation, other.contextObservation).outcome() == ContinuityOutcome.ACCEPTED;
     }

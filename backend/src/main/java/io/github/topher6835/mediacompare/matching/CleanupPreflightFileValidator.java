@@ -161,6 +161,9 @@ public class CleanupPreflightFileValidator {
             if (observed.status() != HostFileStatus.ESTABLISHED) return AUTHORITY_UNAVAILABLE;
             return authority.volumeId().equals(observed.identity().volumeSerial()) ? null : AUTHORITY_CHANGED;
         }
+        if (authority.profile() != io.github.topher6835.mediacompare.filesystem.FileSystemProfile.APFS) {
+            return AUTHORITY_UNAVAILABLE;
+        }
         Path anchor = hostPath(authority.contextAnchor());
         // Inspect ancestors in order before probing any descendant path.
         java.util.List<Path> storagePaths = new java.util.ArrayList<>();

@@ -14,6 +14,12 @@ import io.github.topher6835.mediacompare.location.LocationPath;
 /** Local NTFS drive paths only; native IDs supply operation-local physical identity. */
 public final class WindowsNtfsHostFileSystem implements HostFileSystem {
     @Override
+    public boolean isWindows() { return true; }
+
+    @Override
+    public boolean supportsProfile(FileSystemProfile profile) { return profile == FileSystemProfile.NTFS; }
+
+    @Override
     public String pathText(LocationPath location) {
         if (location.dialect() != LocationDialect.WINDOWS_DRIVE) {
             throw new IllegalArgumentException("Only local Windows drive locations are supported");

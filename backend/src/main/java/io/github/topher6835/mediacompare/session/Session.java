@@ -37,6 +37,7 @@ public final class Session {
 
     public static Session open(Path selectedRoot) throws IOException {
         Path root = normalizedRoot(selectedRoot);
+        HostFileSystems.current().requireSessionStorage(root);
         requireDirectory(root, "Session root");
         Path manifest = child(root, "session.json");
         requireRegularFile(manifest, "Session manifest");
@@ -73,6 +74,7 @@ public final class Session {
 
     public static Session create(Path selectedRoot) throws IOException {
         Path root = normalizedRoot(selectedRoot);
+        HostFileSystems.current().requireSessionStorage(root);
         if (Files.exists(root, LinkOption.NOFOLLOW_LINKS)) {
             requireDirectory(root, "Session root");
             try (var entries = Files.list(root)) {

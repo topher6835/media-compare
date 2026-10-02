@@ -11,7 +11,7 @@ import io.github.topher6835.mediacompare.location.MacOsApfsContinuityProbe;
 import io.github.topher6835.mediacompare.location.MacOsApfsSourceRootProbeRequest;
 import io.github.topher6835.mediacompare.filesystem.HostFileStatus;
 import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
-import io.github.topher6835.mediacompare.filesystem.WindowsNtfsHostFileSystem;
+import io.github.topher6835.mediacompare.filesystem.FileSystemProfile;
 import io.github.topher6835.mediacompare.filesystem.WindowsNtfsPathInspector;
 import io.github.topher6835.mediacompare.location.LocationDialect;
 import io.github.topher6835.mediacompare.scan.authority.ScanAuthorityResult;
@@ -51,7 +51,7 @@ public class Version3AuthorityCapture {
 
     public ScanAuthorityResult<ScanAuthoritySnapshot> capture(Source source, LocationContext context) {
         if (LocationDialect.WINDOWS_DRIVE.persistedName().equals(source.rootPathDialect())) {
-            if (!(HostFileSystems.current() instanceof WindowsNtfsHostFileSystem)) {
+            if (!HostFileSystems.current().supportsProfile(FileSystemProfile.NTFS)) {
                 return ScanAuthorityResult.denied(ScanAuthorityOutcome.UNSUPPORTED,
                         ScanAuthorityReason.PROFILE_UNSUPPORTED);
             }
@@ -73,6 +73,10 @@ public class Version3AuthorityCapture {
                                 : ScanAuthorityReason.AUTHORITY_UNCERTAIN);
             }
             return WindowsNtfsScanAuthority.capture(source, context, anchor.identity(), root.identity());
+        }
+        if (!LocationDialect.UNIX.persistedName().equals(source.rootPathDialect())
+                || !HostFileSystems.current().supportsProfile(FileSystemProfile.APFS)) {
+            return ScanAuthorityResult.denied(ScanAuthorityOutcome.UNSUPPORTED, ScanAuthorityReason.PROFILE_UNSUPPORTED);
         }
         var eligible = ScanObservationAuthority.capture(source, context, null, null);
         if (context == null || eligible.reason() != ScanAuthorityReason.AUTHORITY_UNAVAILABLE) {

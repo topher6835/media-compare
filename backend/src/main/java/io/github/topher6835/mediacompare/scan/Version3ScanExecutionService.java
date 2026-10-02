@@ -7,8 +7,7 @@ import io.github.topher6835.mediacompare.analysis.Version2ContentHashingService;
 import io.github.topher6835.mediacompare.catalog.CatalogRepository;
 import io.github.topher6835.mediacompare.catalog.LocationContextRepository;
 import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
-import io.github.topher6835.mediacompare.filesystem.MacOsHostFileSystem;
-import io.github.topher6835.mediacompare.filesystem.WindowsNtfsHostFileSystem;
+import io.github.topher6835.mediacompare.filesystem.FileSystemProfile;
 import io.github.topher6835.mediacompare.location.LocationDialect;
 import io.github.topher6835.mediacompare.scan.authority.WindowsNtfsScanAuthority;
 import io.github.topher6835.mediacompare.job.Job;
@@ -71,8 +70,10 @@ public class Version3ScanExecutionService {
                 throw new Version2ExecutionConflictException("Source context is unavailable for v3 admission");
             }
             boolean windows = LocationDialect.WINDOWS_DRIVE.persistedName().equals(source.rootPathDialect());
-            if (windows ? !(HostFileSystems.current() instanceof WindowsNtfsHostFileSystem)
-                    : !(HostFileSystems.current() instanceof MacOsHostFileSystem)) {
+            FileSystemProfile profile = windows ? FileSystemProfile.NTFS
+                    : LocationDialect.UNIX.persistedName().equals(source.rootPathDialect())
+                            ? FileSystemProfile.APFS : FileSystemProfile.UNSUPPORTED;
+            if (!HostFileSystems.current().supportsProfile(profile)) {
                 throw new Version2ExecutionConflictException("Source profile is foreign to current host");
             }
             var authority = windows

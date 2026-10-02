@@ -18,10 +18,12 @@ public final class HostFileSystems {
         }
     }
 
+    public static boolean isWindows() { return current().isWindows(); }
+
     public static HostFileSystem select(String osName) {
         String name = osName == null ? "" : osName.toLowerCase(Locale.ROOT);
         if (name.startsWith("mac os")) return new MacOsHostFileSystem();
-        if (name.startsWith("windows")) return new WindowsNtfsHostFileSystem();
+        if (name.startsWith("windows")) return new WindowsHostFileSystem();
         throw new UnsupportedOperationException("Unsupported host platform: " + osName);
     }
 }

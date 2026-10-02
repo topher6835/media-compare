@@ -15,7 +15,7 @@ public final class WindowsNtfsPathInspector {
     private WindowsNtfsPathInspector() { }
 
     public static Result inspect(LocationPath location, boolean directory) {
-        if (!(HostFileSystems.current() instanceof WindowsNtfsHostFileSystem)
+        if (!HostFileSystems.current().supportsProfile(FileSystemProfile.NTFS)
                 || location.dialect() != LocationDialect.WINDOWS_DRIVE) {
             return Result.failed(HostFileStatus.UNVERIFIABLE);
         }

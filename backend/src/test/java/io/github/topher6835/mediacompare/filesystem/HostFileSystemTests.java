@@ -24,14 +24,14 @@ class HostFileSystemTests {
     @Test
     void selectsOnlyExplicitSupportedHosts() {
         assertInstanceOf(MacOsHostFileSystem.class, HostFileSystems.select("Mac OS X"));
-        assertInstanceOf(WindowsNtfsHostFileSystem.class, HostFileSystems.select("Windows 11"));
+        assertInstanceOf(WindowsHostFileSystem.class, HostFileSystems.select("Windows 11"));
         assertThrows(UnsupportedOperationException.class, () -> HostFileSystems.select("Linux"));
         assertThrows(UnsupportedOperationException.class, () -> HostFileSystems.select(null));
     }
 
     @Test
     void windowsDriveRenderingIsPureAndUncRemainsUnsupported() {
-        var windows = new WindowsNtfsHostFileSystem();
+        var windows = new WindowsHostFileSystem();
         assertEquals("C:\\", windows.pathText(LocationPathParser.parse(LocationDialect.WINDOWS_DRIVE, "c:\\")));
         assertEquals("D:\\Photos\\A.jpg", windows.pathText(
                 LocationPathParser.parse(LocationDialect.WINDOWS_DRIVE, "d:/Photos/A.jpg")));
@@ -78,7 +78,7 @@ class HostFileSystemTests {
 
     @Test
     void realWindowsNtfsFileCanBeCheckedWhenRunOnWindows() throws Exception {
-        Assumptions.assumeTrue(HostFileSystems.current() instanceof WindowsNtfsHostFileSystem);
+        Assumptions.assumeTrue(HostFileSystems.isWindows());
         Path file = Files.writeString(directory.resolve("image.jpg"), "bytes").toRealPath();
         Assumptions.assumeTrue("NTFS".equalsIgnoreCase(Files.getFileStore(file).type()));
         var modified = Files.getLastModifiedTime(file).toInstant();

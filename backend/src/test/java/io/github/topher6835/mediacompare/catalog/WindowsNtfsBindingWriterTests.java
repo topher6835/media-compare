@@ -16,7 +16,6 @@ import io.github.topher6835.mediacompare.location.LocationKeyCodec;
 import io.github.topher6835.mediacompare.location.LocationPathCodec;
 import io.github.topher6835.mediacompare.location.LocationPathParser;
 import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
-import io.github.topher6835.mediacompare.filesystem.WindowsNtfsHostFileSystem;
 import io.github.topher6835.mediacompare.scan.Version3ScanExecutionService;
 import io.github.topher6835.mediacompare.scan.Version2ExecutionConflictException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -52,7 +51,7 @@ class WindowsNtfsBindingWriterTests {
             assertEquals(1, bound.locationRevision());
             assertEquals("ntfs", CurrentLocationAuthority.requirePersisted(bound, context).fileSystemType());
             assertEquals(1, periods.findBySourceId(source.id()).size());
-            if (!(HostFileSystems.current() instanceof WindowsNtfsHostFileSystem)) {
+            if (!HostFileSystems.isWindows()) {
                 JdbcTemplate jdbc = app.getBean(JdbcTemplate.class);
                 jdbc.update("""
                         INSERT INTO scan_run (id, request_type, status, options_version,

@@ -16,7 +16,6 @@ import io.github.topher6835.mediacompare.MediaCompareApplication;
 import io.github.topher6835.mediacompare.catalog.SourcePreparationService;
 import io.github.topher6835.mediacompare.catalog.SourceService;
 import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
-import io.github.topher6835.mediacompare.filesystem.WindowsNtfsHostFileSystem;
 import io.github.topher6835.mediacompare.scan.authority.ScanAuthorityOutcome;
 import io.github.topher6835.mediacompare.filesystem.CheckoutTempDirFactory;
 import io.github.topher6835.mediacompare.filesystem.WindowsNtfsEvidenceCodec;
@@ -193,7 +192,7 @@ class WindowsNtfsExecutionTests {
 
     @Test
     void preparedSourceScansAndReplacementRootLosesAuthority() throws Exception {
-        Assumptions.assumeTrue(HostFileSystems.current() instanceof WindowsNtfsHostFileSystem);
+        Assumptions.assumeTrue(HostFileSystems.isWindows());
         Assumptions.assumeTrue("NTFS".equalsIgnoreCase(Files.getFileStore(directory).type()));
         Path sourceRoot = Files.createDirectory(directory.resolve("source"));
         Files.writeString(sourceRoot.resolve("photo.jpg"), "trusted bytes");

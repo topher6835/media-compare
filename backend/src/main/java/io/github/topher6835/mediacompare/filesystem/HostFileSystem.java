@@ -12,6 +12,26 @@ import io.github.topher6835.mediacompare.location.LocationPath;
 
 /** Narrow host boundary for original-file paths and operation-local identity checks. */
 public interface HostFileSystem {
+    default boolean isWindows() { return false; }
+
+    /** Host capability, without filesystem IO or decoding stored evidence. */
+    default boolean supportsProfile(FileSystemProfile profile) { return false; }
+
+    /** Fresh classification; a profile is not physical identity or permission to read. */
+    default FileSystemProfile profile(Path path) throws IOException {
+        return FileSystemProfile.fromType(Files.getFileStore(path).type());
+    }
+
+    default void requireSessionStorage(Path path) throws IOException {
+        Path existing = path;
+        while (existing != null && Files.notExists(existing, LinkOption.NOFOLLOW_LINKS)) {
+            existing = existing.getParent();
+        }
+        if (existing == null || !supportsProfile(profile(existing))) {
+            throw new IOException("Session storage is unsupported on the current host");
+        }
+    }
+
     String pathText(LocationPath location);
 
     default Path path(LocationPath location) {

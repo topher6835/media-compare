@@ -109,6 +109,8 @@ The Session-derived catalog URL also determines its `.lock` sidecar. A Java NIO 
 
 The [Windows exFAT production implementation plan](docs/WINDOWS_EXFAT_IMPLEMENTATION_PLAN.md) has been externally reviewed and approved as the implementation scope and sequence. It specifies gated coding slices and explicit live-authority/release behavior; production exFAT support and its migration remain unimplemented. Each coding slice requires separate authorization and an execution/review cycle. The API below describes current NTFS/APFS behavior.
 
+Slice 1 implements fresh Windows filesystem dispatch and protected native-access primitives behind a disabled production exFAT policy. NTFS still uses its existing FileIdInfo authority; exFAT Source preparation/scanning and Session storage remain unavailable. No V10 migration or later slice is implemented.
+
 `POST /api/sources/{id}/prepare` has no request body. It returns the Source with `preparationState: READY` after successful first-time preparation, and returns the current Source unchanged if it was already ready. Source registration returns `PREPARATION_REQUIRED` without probing the path. A previously bound, currently unbound Source reports `REBIND_REQUIRED`; preparation returns `409` for that state because rebinding is a separate operation. Unknown Sources return `404`. Unavailable or unsupported local storage and uncertain authority evidence return bounded `422` codes; probe infrastructure errors return `503`. Preparation supports local macOS/APFS and Windows/NTFS folders, with real NTFS acceptance recorded in [the acceptance report](docs/WINDOWS_NTFS_ACCEPTANCE.md).
 
 ## Exact-duplicate cleanup preflight API
