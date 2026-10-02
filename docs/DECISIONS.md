@@ -532,6 +532,13 @@ V5 implements LocationContext/Source binding storage, and V6/v3 use the pure sca
 
 ## Development
 
+### Windows exFAT Production Scoping — 2026-10-02 (Reviewed/Approved Scope; Not Implemented)
+
+- The user accepts the frozen restricted profile's occurrence churn and physical-action limits for implementation scope. External review of the implementation scope/sequencing plan is complete and the scope is approved. Earlier "product acceptance outstanding" statements describe their historical milestones; production implementation and real production acceptance remain outstanding.
+- [The implementation plan](WINDOWS_EXFAT_IMPLEMENTATION_PLAN.md) proposes extending the existing host boundary with fresh Windows filesystem dispatch and a separate retained-handle exFAT native adapter, preserving NTFS/APFS semantics. Exact process-local window/bundle references must accompany admission, queued work and publication; ordinary reacquisition changes no durable binding/history.
+- Propose two nullable paired FileEntry fields, null-token native address uniqueness, globally unique occurrence tokens and indexed exFAT history; no persistent window table. Capture SHA/receipt during protected discovery and use the existing four stages for later guarded assignment/hash publication. The detailed migration, API, decoder, lifecycle and file manifests are in the approved scope plan. Slice 1 is the next separately authorized coding milestone; each slice requires its own execution/review cycle.
+- Keep exFAT publicly disabled through five prerequisite slices; activate only in a sixth integrated API/UI slice with all safety guards/tests. Real production acceptance follows separately. Windows relocation, exFAT Session storage, Explorer reveal, destructive cleanup and broader decoder qualification are not prerequisites for initial fixed-root restricted scanning. No production code/schema/dependency was changed by scoping.
+
 - Favor readable, conventional, learnable code over clever abstractions.
 - Implement in small, understandable increments and avoid premature architecture.
 - Require explicit authorization before installing or modifying system software.

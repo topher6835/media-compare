@@ -2,6 +2,14 @@
 
 ## Current State
 
+### Windows exFAT Production Implementation Scope (Reviewed/Approved; Not Implemented)
+
+The scoping milestone inspected clean approved baseline `828a12e41b2b7ba10f2118cf21a8dad6c4a4cb56`. The user accepts the frozen restricted exFAT profile's occurrence churn, fresh hashes and physical-action restrictions as constraints for this implementation scope. [WINDOWS_EXFAT_IMPLEMENTATION_PLAN.md](WINDOWS_EXFAT_IMPLEMENTATION_PLAN.md) records actual production seams, proposed Windows host dispatch/separate native leases, process-local exact-window ownership, Prepare/Accept/release and asynchronous bundle API changes, the precise proposed occurrence/receipt columns/indexes, guarded discovery/four-stage adaptation, decoder compatibility, UI/test boundaries and six ordered gated coding slices with file manifests. External review is complete and this implementation scope/sequence is approved. Production implementation has not started; scope approval is neither implemented capability nor authorization to execute the coding slices. Each slice requires separate authorization and its own execution/review cycle; real VeraCrypt production acceptance follows later.
+
+Production remains macOS/APFS and Windows/NTFS; exFAT is still unimplemented. The plan preserves durable READY and binding history across routine closure/remount, captures every exFAT SHA during discovery, and keeps production acceptance disabled until the complete safe stack is present. Metadata and thumbnail queues need admission-time window capture; today's independent Jobs/path reopens cannot be reused unchanged. JPEG/PNG supplied-channel support needs targeted tests and real acceptance; other exFAT decoders can remain unsupported. Windows relocation can follow initial fixed-root scanning. ExFAT Session storage, Explorer reveal and destructive cleanup remain outside this scope.
+
+Only documentation changed. Inspection used Git baseline/status, rg inventories/call-site searches, PowerShell file reads and read-only official SQLite/Microsoft/JDK API verification. No production edit, migration, dependency change, build/test suite, diagnostic rerun, mounted-volume operation, commit or push occurred. Documentation checks passed `git diff --check`; final status contains only README and documentation changes. Next: separately authorize Slice 1 of the approved scope; no further authority experiment is required before beginning the restricted implementation.
+
 ### Windows exFAT Retained-Handle Qualification (Restricted V1 Authority Frozen; Not Implemented)
 
 The targeted standalone experiment began from clean approved baseline `725d6697140b72bafe4a687933836f4f5ab040c5` and is complete. [Qualification results](WINDOWS_EXFAT_RETAINED_HANDLE_QUALIFICATION.md) and [new raw evidence](evidence/windows-exfat-retained-handle-2026-10-02.log) record passing host/volume guards, directory/file sharing controls, incompatible writers and writable mappings, compatible native/NIO/BMP-decoder reads, same-retained-handle SHA-256, coherent observations, controlled normal dismount/remount, fresh acquisition and bounded cleanup. Directory/file mutations were denied with error 32; equal-size/same-mtime file replacement returned error 5. Unprotected controls succeeded. An initial overly strict error-32 assertion abort, successful cleanup and corrected rerun remain preserved; they were a harness issue, not an authority-mechanism failure.
@@ -272,8 +280,8 @@ Physical-copy preview validation: `npm run lint && npm run build` passed in `fro
 
 The remaining Windows V1 sequence is:
 
-1. Confirm product acceptance of the frozen restricted exFAT profile's occurrence churn and physical-action limits, then scope the smallest coherent production implementation. [Targeted qualification](WINDOWS_EXFAT_RETAINED_HANDLE_QUALIFICATION.md), the user-controlled normal dismount/remount, fresh acquisition and exact fixture cleanup are complete. Legacy index/metadata equality still cannot prove durable identity.
-2. Implement exFAT in a separately authorized milestone, including explicit runtime Prepare/Accept/release, exact-window/configuration admission/publication guards, protected same-handle observations and the minimal occurrence/receipt migration, followed by real production acceptance. Keep NTFS/APFS behavior unchanged.
+1. Separately authorize Slice 1 of [the externally reviewed/approved production implementation scope](WINDOWS_EXFAT_IMPLEMENTATION_PLAN.md): gated Windows dispatch/native access. Scope review, restricted-profile cost acceptance and targeted retained-handle qualification/remount/cleanup are complete; production implementation has not started. Legacy index/metadata equality still cannot prove durable identity.
+2. Execute the approved slices one at a time, each with separate authorization and its own execution/review cycle. Keep production exFAT inaccessible until the complete minimum stack is integrated, preserve NTFS/APFS, and then run separately authorized real VeraCrypt/exFAT production acceptance.
 3. Windows Show in File Explorer.
 4. Windows packaging and V1 testing.
 5. Variant V1.1 implementation.
