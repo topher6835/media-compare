@@ -75,6 +75,10 @@ class SourceMembershipAuthorityTests {
                 assertEquals("a.jpg", jdbc.queryForObject(
                         "SELECT relative_path FROM source_membership WHERE source_id = 2", String.class));
                 assertEquals(1, count(jdbc, "SELECT COUNT(*) FROM file_entry WHERE location_identity_status = 'RESOLVED'"));
+                assertEquals(0, count(jdbc, """
+                        SELECT COUNT(*) FROM file_entry
+                        WHERE occurrence_token IS NOT NULL OR observation_evidence_json IS NOT NULL
+                        """));
             }
         }
     }

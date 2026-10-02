@@ -164,6 +164,7 @@ public class CatalogRepository {
                 JOIN source ON source.id = membership.source_id
                 JOIN location_context AS context ON context.id = file_entry.location_context_id
                 WHERE file_entry.location_identity_status = 'RESOLVED'
+                  AND file_entry.occurrence_token IS NULL
                   AND membership.applicability_status = 'ACTIVE'
                   AND membership.presence_status = 'PRESENT'
                   AND membership.observed_file_entry_revision = file_entry.observation_revision
@@ -197,6 +198,7 @@ public class CatalogRepository {
                 SET current_content_id = ?
                   WHERE id = ?
                   AND location_identity_status = 'RESOLVED'
+                  AND occurrence_token IS NULL
                   AND location_context_id = ?
                   AND current_content_id IS NULL
                   AND observation_revision = ?
@@ -244,6 +246,7 @@ public class CatalogRepository {
                 JOIN source ON source.id = membership.source_id
                 JOIN location_context AS context ON context.id = file_entry.location_context_id
                 WHERE file_entry.location_identity_status = 'RESOLVED'
+                  AND file_entry.occurrence_token IS NULL
                   AND membership.applicability_status = 'ACTIVE'
                   AND membership.presence_status = 'PRESENT'
                   AND membership.observed_file_entry_revision = file_entry.observation_revision
@@ -282,6 +285,7 @@ public class CatalogRepository {
                 SET current_content_id = current_content_id
                 WHERE id = ?
                   AND location_identity_status = 'RESOLVED'
+                  AND occurrence_token IS NULL
                   AND location_context_id = ?
                   AND location_path = ? AND location_key = ?
                   AND current_content_id = ?
@@ -322,6 +326,7 @@ public class CatalogRepository {
     }
 
     public FileEntry insert(FileEntry fileEntry) {
+        OccurrenceProfileValidation.requireNative(fileEntry);
         var keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             PreparedStatement statement = connection.prepareStatement("""
@@ -453,7 +458,9 @@ public class CatalogRepository {
                 resultSet.getString("extension_key"),
                 resultSet.getLong("observation_revision"),
                 resultSet.getLong("first_seen_at_ms"),
-                resultSet.getLong("last_seen_at_ms"));
+                resultSet.getLong("last_seen_at_ms"),
+                resultSet.getString("occurrence_token"),
+                resultSet.getString("observation_evidence_json"));
     }
 
     private static Long nullableLong(ResultSet resultSet, String columnName) throws SQLException {

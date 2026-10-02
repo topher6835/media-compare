@@ -24,12 +24,14 @@ public class SourceMembershipRepository {
         return jdbc.query("""
                 SELECT * FROM file_entry
                 WHERE location_identity_status = 'RESOLVED'
+                  AND occurrence_token IS NULL
                   AND location_context_id = ? AND location_key = ?
                 """, SourceMembershipRepository::fileEntry, contextId, locationKey)
                 .stream().findFirst();
     }
 
     public FileEntry insertResolved(FileEntry entry) {
+        OccurrenceProfileValidation.requireNative(entry);
         var keys = new GeneratedKeyHolder();
         jdbc.update(connection -> {
             PreparedStatement statement = connection.prepareStatement("""
@@ -68,6 +70,7 @@ public class SourceMembershipRepository {
                     observation_revision = observation_revision + CASE WHEN ? THEN 1 ELSE 0 END,
                     last_seen_at_ms = ?
                 WHERE id = ? AND location_identity_status = 'RESOLVED'
+                  AND occurrence_token IS NULL
                   AND location_context_id = ? AND location_path = ? AND location_key = ?
                   AND observation_revision = ?
                   AND size_bytes = ? AND modified_time_epoch_second IS ? AND modified_time_nano IS ?
@@ -189,17 +192,18 @@ public class SourceMembershipRepository {
                 """, sourceId, scanRunSourceId, generation);
     }
 
-    private static FileEntry fileEntry(ResultSet row, int ignored) throws SQLException {
+    static FileEntry fileEntry(ResultSet row, int ignored) throws SQLException {
         return new FileEntry(row.getLong("id"), row.getString("location_identity_status"),
                 row.getString("location_context_id"), row.getString("location_path"),
                 row.getString("location_key"), nullableLong(row, "current_content_id"),
                 row.getLong("size_bytes"), nullableLong(row, "modified_time_epoch_second"),
                 nullableInteger(row, "modified_time_nano"), row.getString("extension_key"),
                 row.getLong("observation_revision"), row.getLong("first_seen_at_ms"),
-                row.getLong("last_seen_at_ms"));
+                row.getLong("last_seen_at_ms"), row.getString("occurrence_token"),
+                row.getString("observation_evidence_json"));
     }
 
-    private static SourceMembership membership(ResultSet row, int ignored) throws SQLException {
+    static SourceMembership membership(ResultSet row, int ignored) throws SQLException {
         return new SourceMembership(row.getLong("id"), row.getLong("source_id"),
                 row.getLong("file_entry_id"), row.getString("relative_path"),
                 row.getString("path_key"), row.getString("applicability_status"),

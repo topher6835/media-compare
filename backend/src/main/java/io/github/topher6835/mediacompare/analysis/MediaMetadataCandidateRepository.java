@@ -74,6 +74,7 @@ public class MediaMetadataCandidateRepository {
                       JOIN location_context AS context ON context.id = file_entry.location_context_id
                       WHERE file_entry.current_content_id = content_record.id
                         AND file_entry.location_identity_status = 'RESOLVED'
+                        AND file_entry.occurrence_token IS NULL
                         AND membership.applicability_status = 'ACTIVE'
                         AND membership.presence_status = 'PRESENT'
                         AND membership.observed_file_entry_revision = file_entry.observation_revision
@@ -116,6 +117,7 @@ public class MediaMetadataCandidateRepository {
                 WHERE file_entry.current_content_id = ?
                   AND content_record.size_bytes = ?
                   AND file_entry.location_identity_status = 'RESOLVED'
+                  AND file_entry.occurrence_token IS NULL
                   AND file_entry.id > ?
                 ORDER BY file_entry.id
                 LIMIT ?
@@ -132,6 +134,7 @@ public class MediaMetadataCandidateRepository {
         return jdbcTemplate.query(OCCURRENCE_SELECT + """
                 WHERE file_entry.id = ?
                   AND file_entry.location_identity_status = 'RESOLVED'
+                  AND file_entry.occurrence_token IS NULL
                   AND file_entry.size_bytes = content_record.size_bytes
                   AND file_entry.modified_time_epoch_second IS NOT NULL
                   AND file_entry.modified_time_nano IS NOT NULL
@@ -145,6 +148,7 @@ public class MediaMetadataCandidateRepository {
                 SET current_content_id = current_content_id
                 WHERE id = ?
                   AND location_identity_status = 'RESOLVED'
+                  AND occurrence_token IS NULL
                   AND location_context_id = ?
                   AND location_path = ? AND location_key = ?
                   AND current_content_id = ?

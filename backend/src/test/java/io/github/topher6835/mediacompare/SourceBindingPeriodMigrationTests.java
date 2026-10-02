@@ -38,7 +38,10 @@ class SourceBindingPeriodMigrationTests {
         migrate(url, null);
         try (Connection connection = DriverManager.getConnection(url)) {
             for (int index = 0; index < PRESERVED_TABLES.size(); index++) {
-                assertEquals(before.get(index), rows(connection,
+                List<String> expected = "file_entry".equals(PRESERVED_TABLES.get(index))
+                        ? before.get(index).stream().map(row -> row + "|null|null").toList()
+                        : before.get(index);
+                assertEquals(expected, rows(connection,
                         "SELECT * FROM " + PRESERVED_TABLES.get(index) + " ORDER BY id"));
             }
             assertEquals(List.of("10|4|" + CONTEXT_ID

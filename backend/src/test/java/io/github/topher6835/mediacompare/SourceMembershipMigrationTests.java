@@ -91,9 +91,9 @@ class SourceMembershipMigrationTests {
         migrate(url, null);
         try (Connection connection = DriverManager.getConnection(url)) {
             assertEquals(List.of(
-                    "40|UNRESOLVED|null|null|null|100|42|500|123|jpg|4|1000|1001",
-                    "41|UNRESOLVED|null|null|null|101|42|500|123|jpg|5|1002|1003",
-                    "42|UNRESOLVED|null|null|null|null|0|null|null|jpg|0|1004|1005"),
+                    "40|UNRESOLVED|null|null|null|100|42|500|123|jpg|4|1000|1001|null|null",
+                    "41|UNRESOLVED|null|null|null|101|42|500|123|jpg|5|1002|1003|null|null",
+                    "42|UNRESOLVED|null|null|null|null|0|null|null|jpg|0|1004|1005|null|null"),
                     rows(connection, "SELECT * FROM file_entry ORDER BY id"));
             assertEquals(List.of(
                     "10|40|Photos/a.JPG|Photos/a.JPG|ACTIVE|PRESENT|0|4|1000|1001|30|2|null|null",

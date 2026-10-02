@@ -532,6 +532,13 @@ V5 implements LocationContext/Source binding storage, and V6/v3 use the pure sca
 
 ## Development
 
+### Windows exFAT Slice 2 — 2026-10-02 (Storage Implemented; Production Disabled)
+
+- Implement the approved V10 SQL exactly: paired nullable token/receipt, canonical lowercase UUID, resolved-only 1 MiB UTF-8 evidence, native null-token address uniqueness, global token uniqueness and indexed occurrence history. Preserve all existing IDs/FKs/content and null/null legacy rows. Do not infer profile from Windows dialect or add tables/triggers/current flags.
+- Keep native generated keys and null evidence; explicitly scope address lookup/refresh and current assignment/hash/metadata paths to null tokens. Store immutable `windows-exfat-observation-v1` provenance with strict typed validation and deterministic serialization; receipt/window UUIDs never establish runtime authority. External-review correction enforces canonical IETF variant-2/version-4 application UUIDs (occurrence/context/bundle/window) in Java, matching existing random UUID creation. OS volume GUID routes retain separate canonical validation; V10 remains structural.
+- Allocate explicit FileEntry/membership IDs from checked maxima under the existing SQLite writer reservation and one caller-owned writable catalog transaction. Encode resulting membership IDs before insertion; no provisional row or staging. Profile guards consume validated context/Source profiles, while their exFAT envelopes and live/catalog checks remain separately scoped work.
+- Keep `WindowsExfatSupport.PRODUCTION` false. No runtime windows, preparation, scanning, publication, pipeline/decoder/API/UI activation or mounted exFAT acceptance is included. Slice 3 requires separate authorization after Slice 2 review. Operational rollback retains V10/history with exFAT disabled; older binaries cannot safely open same-address occurrence history, and there is no destructive down migration.
+
 ### Windows exFAT Slice 1 — 2026-10-02 (Implemented Primitives; Production Disabled)
 
 - Implement the approved Windows facade/profile dispatch and separate exFAT native lease/channel boundary, preserving the NTFS FileIdInfo adapter. Keep `WindowsExfatSupport.PRODUCTION` false, with no configuration switch; package-local injected policy/native calls permit boundary tests only. Windows Sessions explicitly require NTFS before create/open writes.

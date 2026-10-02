@@ -98,6 +98,10 @@ class WindowsNtfsExecutionTests {
             assertEquals(4, count(jdbc, "file_entry"));
             assertEquals(4, count(jdbc, "content_record"));
             assertEquals(4, count(jdbc, "source_membership"));
+            assertEquals(0, jdbc.queryForObject("""
+                    SELECT COUNT(*) FROM file_entry
+                    WHERE occurrence_token IS NOT NULL OR observation_evidence_json IS NOT NULL
+                    """, Integer.class));
 
             var metadata = app.getBean(ImageIoMediaMetadataAnalyzer.class);
             var candidates = app.getBean(MediaMetadataCandidateRepository.class);

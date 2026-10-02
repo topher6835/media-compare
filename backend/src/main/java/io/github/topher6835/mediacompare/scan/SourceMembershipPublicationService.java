@@ -50,6 +50,8 @@ public class SourceMembershipPublicationService {
         Source source = catalog.findSourceById(candidate.sourceId()).orElseThrow();
         LocationContext context = contexts.findById(candidate.locationContextId()).orElseThrow();
         var route = CurrentLocationAuthority.requireCurrentHost(source, context);
+        require("apfs".equals(route.fileSystemType()) || "ntfs".equals(route.fileSystemType()),
+                "Native publication does not accept exFAT occurrence history");
         var fileLocation = candidate.fileLocationPath();
         require(LocationKeyCodec.matches(fileLocation, candidate.fileLocationKey())
                 && route.anchor().contains(fileLocation)

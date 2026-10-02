@@ -42,7 +42,7 @@ class SessionStartupTests {
                 try (var migrations = connection.createStatement().executeQuery(
                         "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1")) {
                     assertTrue(migrations.next());
-                    assertEquals(9, migrations.getInt(1));
+                    assertEquals(10, migrations.getInt(1));
                 }
             }
         }

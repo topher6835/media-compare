@@ -43,7 +43,9 @@ class WindowsNtfsNativeTests {
         assertEquals(original, WindowsNtfsNative.observe(file.resolveSibling("MIXEDCASE.JPG")));
         assertEquals(folder, WindowsNtfsNative.observe(Path.of(directory.toString().toUpperCase(Locale.ROOT))));
         // Other Spring tests leave background activity in the shared JVM. Isolate the process-wide count.
+        // Bound JVM worker sizing so compiler/GC startup does not dominate the native leak check.
         var process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java.exe").toString(),
+                "-XX:ActiveProcessorCount=2",
                 "-cp", System.getProperty("java.class.path"), WindowsNtfsHandleProbe.class.getName(), file.toString())
                 .redirectErrorStream(true).start();
         try {

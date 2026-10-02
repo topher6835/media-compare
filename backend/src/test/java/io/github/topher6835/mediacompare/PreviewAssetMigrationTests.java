@@ -168,7 +168,7 @@ class PreviewAssetMigrationTests {
                 """);
     }
 
-    private static void insert(Connection connection, String key, String generator, String version,
+    static void insert(Connection connection, String key, String generator, String version,
             long configurationVersion, String hash) throws SQLException {
         try (var statement = connection.prepareStatement("""
                 INSERT INTO preview_asset (asset_key, file_entry_id, content_record_id, file_observation_revision,
@@ -193,7 +193,7 @@ class PreviewAssetMigrationTests {
         }
     }
 
-    private static void seedCatalog(Connection connection) throws SQLException {
+    static void seedCatalog(Connection connection) throws SQLException {
         for (String sql : List.of(
                 """
                 INSERT INTO location_context (id, anchor_location_path, anchor_location_key, lifecycle_status,
@@ -244,7 +244,7 @@ class PreviewAssetMigrationTests {
         }
     }
 
-    private static Map<String, List<String>> snapshot(Connection connection) throws SQLException {
+    static Map<String, List<String>> snapshot(Connection connection) throws SQLException {
         Map<String, List<String>> result = new LinkedHashMap<>();
         for (String table : rows(connection, """
                 SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
