@@ -114,7 +114,7 @@ Drive-letter casing is retained in catalog keys. Preparation refuses an existing
 
 ### Proposed Windows/exFAT Storage (Not Implemented)
 
-The [recommended authority design](ARCHITECTURE.md#recommended-windows-exfat-v1-authority-proposed-qualification-required) is not frozen: retained-handle sharing/invalidation needs targeted qualification. V1–V9, all current rows and the Session manifest remain unchanged in this documentation milestone.
+The [restricted authority design](ARCHITECTURE.md#recommended-windows-exfat-v1-authority-restricted-profile-frozen-not-implemented) is frozen after [targeted qualification](WINDOWS_EXFAT_RETAINED_HANDLE_QUALIFICATION.md) for the tested Windows/VeraCrypt/exFAT scenario. Proposed storage remains unimplemented and unchanged by that result: V1–V9, all current rows and the Session manifest retain their existing meaning; no migration is introduced in this diagnostic/documentation milestone.
 
 Versioned exFAT context and Source envelopes would use the existing evidence JSON columns and binding-period snapshots. They record profile, canonical paths/keys, row revisions, 32-bit serial, volume GUID and initial durable acceptance/binding provenance, not the identifier/state of a current runtime window. Legacy root index/times, if retained, are supplemental diagnostics; no legacy file index becomes a persistent physical identifier. Serialized evidence cannot recreate a live window or authorize a foreign-host/runtime Session.
 
