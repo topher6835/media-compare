@@ -4,20 +4,26 @@ import java.util.NoSuchElementException;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import io.github.topher6835.mediacompare.location.LocationAnchorPolicy;
 
 @Service
 public class LocationContextRetirementService {
     private final LocationContextRepository contexts;
+    private ExfatLifecycleTransactions lifecycle;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void lifecycle(ExfatLifecycleTransactions lifecycle) { this.lifecycle = lifecycle; }
 
     public LocationContextRetirementService(LocationContextRepository contexts) {
         this.contexts = contexts;
     }
 
-    @Transactional
     public LocationContext retireActive(String contextId, long expectedRevision, long retiredAtMs) {
+        return lifecycle.context(contextId, () -> retireInTransaction(contextId, expectedRevision, retiredAtMs));
+    }
+
+    private LocationContext retireInTransaction(String contextId, long expectedRevision, long retiredAtMs) {
         requireCanonicalId(contextId);
         if (expectedRevision < 0 || retiredAtMs < 0) {
             throw new IllegalArgumentException("Expected revision and retirement timestamp must not be negative");

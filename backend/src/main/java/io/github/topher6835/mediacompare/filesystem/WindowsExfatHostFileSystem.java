@@ -139,15 +139,17 @@ public final class WindowsExfatHostFileSystem implements HostFileSystem {
         }
     }
 
-    public final class DirectoryChain implements AutoCloseable {
+    public final class DirectoryChain implements ExfatRetainedRoot {
         private final Path root;
         private final WindowsVolumeProbe.Result expected;
         private final List<Path> paths;
         private final List<WindowsExfatNativeAccess.Lease> leases;
         private final List<WindowsExfatNativeAccess.Observation> observations;
         private int fileUsers;
-        private boolean closing, closed;
+        private volatile boolean closing;
+        private boolean closed;
         private IOException closeFailure;
+        private Object runtimeOwner;
 
         private DirectoryChain(Path root, WindowsVolumeProbe.Result expected, List<Path> paths,
                 List<WindowsExfatNativeAccess.Lease> leases, List<WindowsExfatNativeAccess.Observation> observations) {
@@ -159,6 +161,22 @@ public final class WindowsExfatHostFileSystem implements HostFileSystem {
         }
 
         private WindowsExfatHostFileSystem owner() { return WindowsExfatHostFileSystem.this; }
+
+        @Override public io.github.topher6835.mediacompare.location.LocationPath resolvedRoot() {
+            return ExfatReceiptValues.finalRoute(observations.getLast().finalPath());
+        }
+        @Override public WindowsExfatVolumeEvidence volumeEvidence() {
+            var volume = expected.nativeVolume();
+            return new WindowsExfatVolumeEvidence("EXFAT", volume.serial(),
+                    volume.guid().substring(0, 11) + volume.guid().substring(11).toLowerCase(java.util.Locale.ROOT),
+                    resolvedRoot().rootFields().getFirst() + ":\\");
+        }
+        @Override public int directoryCount() { return leases.size(); }
+        @Override public boolean available() { return !closing; }
+        @Override public synchronized void claimOwnership(Object owner) {
+            if (closing || owner == null || runtimeOwner != null) throw new IllegalStateException("Chain already owned or closed");
+            runtimeOwner = owner;
+        }
 
         public synchronized void revalidate() throws IOException {
             if (closing) throw uncertain("Directory chain is closing");

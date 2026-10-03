@@ -4,7 +4,6 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 /** Explicitly withdraws one Source's current binding without observing the filesystem. */
 @Service
@@ -13,6 +12,10 @@ public class SourceUnbindingService {
     private final LocationContextRepository contexts;
     private final SourceBindingPeriodRepository periods;
     private final SourceMembershipRepository memberships;
+    private ExfatLifecycleTransactions lifecycle;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void lifecycle(ExfatLifecycleTransactions lifecycle) { this.lifecycle = lifecycle; }
 
     public SourceUnbindingService(CatalogRepository sources, LocationContextRepository contexts,
             SourceBindingPeriodRepository periods, SourceMembershipRepository memberships) {
@@ -22,8 +25,11 @@ public class SourceUnbindingService {
         this.memberships = memberships;
     }
 
-    @Transactional
     public Source unbind(long sourceId, long expectedSourceLocationRevision, long unboundAtMs) {
+        return lifecycle.source(sourceId, () -> unbindInTransaction(sourceId, expectedSourceLocationRevision, unboundAtMs));
+    }
+
+    private Source unbindInTransaction(long sourceId, long expectedSourceLocationRevision, long unboundAtMs) {
         if (sourceId <= 0 || expectedSourceLocationRevision < 0 || unboundAtMs < 0) {
             throw new IllegalArgumentException("Source ID, revision, and timestamp must be valid");
         }

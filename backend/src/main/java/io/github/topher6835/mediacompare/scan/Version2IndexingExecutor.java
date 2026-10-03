@@ -16,6 +16,10 @@ import org.springframework.stereotype.Component;
 public class Version2IndexingExecutor implements DisposableBean {
     private static final Logger log = LoggerFactory.getLogger(Version2IndexingExecutor.class);
     private final CatalogOwnership ownership;
+    private io.github.topher6835.mediacompare.filesystem.ExfatAuthorityWindowRegistry exfat;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void exfatLifecycle(io.github.topher6835.mediacompare.filesystem.ExfatAuthorityWindowRegistry exfat) { this.exfat = exfat; }
     private final ThreadPoolExecutor executor = new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(1), task -> {
                 Thread thread = new Thread(task, "media-compare-indexing");
@@ -34,6 +38,7 @@ public class Version2IndexingExecutor implements DisposableBean {
 
     @Override
     public void destroy() {
+        if (exfat != null) exfat.shutdown();
         shutdown(Duration.ofSeconds(30));
     }
 

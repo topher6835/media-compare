@@ -17,6 +17,10 @@ public class MediaMetadataExecutor implements DisposableBean {
 
     private static final Logger log = LoggerFactory.getLogger(MediaMetadataExecutor.class);
     private final CatalogOwnership ownership;
+    private io.github.topher6835.mediacompare.filesystem.ExfatAuthorityWindowRegistry exfat;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void exfatLifecycle(io.github.topher6835.mediacompare.filesystem.ExfatAuthorityWindowRegistry exfat) { this.exfat = exfat; }
     private final ThreadPoolExecutor executor = new ThreadPoolExecutor(
             1,
             1,
@@ -40,6 +44,7 @@ public class MediaMetadataExecutor implements DisposableBean {
 
     @Override
     public void destroy() {
+        if (exfat != null) exfat.shutdown();
         shutdown(Duration.ofSeconds(30));
     }
 

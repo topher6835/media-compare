@@ -20,6 +20,41 @@ class WindowsProtectedAccessTests {
     @TempDir(factory = CheckoutTempDirFactory.class) Path directory;
 
     @Test
+    void registryOwnsQualifiedDriveToRootChainAndReleaseClosesItExactlyOnce() throws Exception {
+        Path root = Files.createDirectories(directory.resolve("Source/Child")).toRealPath();
+        var access = new FakeAccess();
+        var host = new WindowsExfatHostFileSystem(access, fakeVolumes(), new WindowsExfatSupport(true));
+        var chain = host.openDirectoryChain(root);
+        assertTrue(chain.available());
+        assertEquals(root.getNameCount() + 1, chain.directoryCount());
+        assertEquals(root.getRoot(), access.opened.getFirst());
+        assertEquals(root, access.opened.getLast());
+        assertEquals("EXFAT", chain.volumeEvidence().filesystemProfile());
+        var scope = ExfatSlice3Fixtures.scope(1, ExfatSlice3Fixtures.CONTEXT, 1, 1,
+                chain.resolvedRoot(), chain.volumeEvidence());
+        try (var ownership = io.github.topher6835.mediacompare.config.CatalogOwnership.acquire("jdbc:sqlite::memory:")) {
+            var registry = new ExfatAuthorityWindowRegistry(ownership);
+            try {
+                ExfatAuthorityWindowRegistry.WindowId id;
+                try (var attempt = registry.begin(1, chain.directoryCount())) {
+                    id = registry.installing(attempt, () -> registry.install(attempt, scope, chain));
+                }
+                try (var operation = registry.requireExact(scope, id)) { operation.revalidate(); }
+                assertEquals(0, access.closed.size());
+                assertEquals(ExfatAuthorityWindowRegistry.ReleaseState.RELEASED, registry.release(id).releaseState());
+                assertFalse(chain.available());
+                var reverse = new ArrayList<>(access.opened);
+                java.util.Collections.reverse(reverse);
+                assertEquals(reverse, access.closed);
+                registry.release(id);
+                chain.close();
+                assertEquals(reverse, access.closed);
+                assertThrows(IOException.class, chain::revalidate);
+            } finally { registry.destroy(); }
+        }
+    }
+
+    @Test
     void realNativeChannelReadsSeeksObservesAndClosesOnNtfs() throws Exception {
         assertEquals("NTFS", Files.getFileStore(directory).type().toUpperCase());
         Path file = Files.write(directory.resolve("Protected data.bin"), new byte[] {1, 2, 3, 4}).toRealPath();

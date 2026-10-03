@@ -8,6 +8,8 @@ import io.github.topher6835.mediacompare.location.LocationKeyCodec;
 import io.github.topher6835.mediacompare.location.LocationPath;
 import io.github.topher6835.mediacompare.location.LocationPathParser;
 import io.github.topher6835.mediacompare.filesystem.WindowsNtfsEvidenceCodec;
+import io.github.topher6835.mediacompare.filesystem.WindowsDurableEvidenceFormat;
+import io.github.topher6835.mediacompare.filesystem.FileSystemProfile;
 
 /** Product state derived from the current durable Source binding shape. */
 public enum SourcePreparationState {
@@ -20,6 +22,18 @@ public enum SourcePreparationState {
         if (source.boundLocationContextId() != null) {
             // A foreign-host Source remains catalog-visible; live use is checked separately.
             if (LocationDialect.WINDOWS_DRIVE.persistedName().equals(source.rootPathDialect())) {
+                if (WindowsDurableEvidenceFormat.sourceProfile(source.bindingEvidenceJson()) == FileSystemProfile.EXFAT) {
+                    var evidence = new io.github.topher6835.mediacompare.filesystem.WindowsExfatEvidenceCodec()
+                            .decodeSource(source.bindingEvidenceJson());
+                    if (source.id() == null || evidence.sourceId() != source.id()
+                            || evidence.sourceRevision() != source.locationRevision()
+                            || !evidence.contextId().equals(source.boundLocationContextId())
+                            || !evidence.configuredRoot().equals(source.rootPath())
+                            || !evidence.configuredRootLocationKey().equals(source.rootPathKey())) {
+                        throw new IllegalStateException("Invalid bound exFAT Source configuration");
+                    }
+                    return READY;
+                }
                 var root = LocationPathParser.parse(LocationDialect.WINDOWS_DRIVE, source.rootPath());
                 var evidence = new WindowsNtfsEvidenceCodec().decodeSource(source.bindingEvidenceJson());
                 if (!LocationKeyCodec.matches(root, LocationKey.parse(source.rootPathKey()))

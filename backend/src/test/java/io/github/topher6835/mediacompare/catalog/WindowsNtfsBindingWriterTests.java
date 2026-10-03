@@ -50,6 +50,8 @@ class WindowsNtfsBindingWriterTests {
             assertEquals("win-drive", bound.rootPathDialect());
             assertEquals(1, bound.locationRevision());
             assertEquals("ntfs", CurrentLocationAuthority.requirePersisted(bound, context).fileSystemType());
+            assertEquals(SourcePreparationState.READY, SourcePreparationState.from(bound));
+            assertEquals(bound, app.getBean(SourcePreparationService.class).prepare(bound.id()));
             assertEquals(1, periods.findBySourceId(source.id()).size());
             if (!HostFileSystems.isWindows()) {
                 JdbcTemplate jdbc = app.getBean(JdbcTemplate.class);

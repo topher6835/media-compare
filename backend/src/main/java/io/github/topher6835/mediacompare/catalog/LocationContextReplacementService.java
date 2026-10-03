@@ -4,7 +4,6 @@ import java.util.NoSuchElementException;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import io.github.topher6835.mediacompare.location.LocationAnchorPolicy;
 import io.github.topher6835.mediacompare.location.LocationPath;
@@ -12,13 +11,22 @@ import io.github.topher6835.mediacompare.location.LocationPath;
 @Service
 public class LocationContextReplacementService {
     private final LocationContextRepository contexts;
+    private ExfatLifecycleTransactions lifecycle;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void lifecycle(ExfatLifecycleTransactions lifecycle) { this.lifecycle = lifecycle; }
 
     public LocationContextReplacementService(LocationContextRepository contexts) {
         this.contexts = contexts;
     }
 
-    @Transactional
     public LocationContext replaceActive(String oldContextId, long expectedRevision, long replacedAtMs,
+            LocationContext newContext) {
+        return lifecycle.context(oldContextId,
+                () -> replaceInTransaction(oldContextId, expectedRevision, replacedAtMs, newContext));
+    }
+
+    private LocationContext replaceInTransaction(String oldContextId, long expectedRevision, long replacedAtMs,
             LocationContext newContext) {
         requireCanonicalId(oldContextId);
         if (expectedRevision < 0 || replacedAtMs < 0) {

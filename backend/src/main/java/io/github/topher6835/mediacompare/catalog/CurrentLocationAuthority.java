@@ -3,6 +3,7 @@ package io.github.topher6835.mediacompare.catalog;
 import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
 import io.github.topher6835.mediacompare.filesystem.FileSystemProfile;
 import io.github.topher6835.mediacompare.filesystem.WindowsNtfsEvidenceCodec;
+import io.github.topher6835.mediacompare.filesystem.WindowsDurableEvidenceFormat;
 import io.github.topher6835.mediacompare.location.LocationDialect;
 import io.github.topher6835.mediacompare.location.LocationKey;
 import io.github.topher6835.mediacompare.location.LocationKeyCodec;
@@ -35,6 +36,29 @@ public final class CurrentLocationAuthority {
                     "apfs", anchor.volumeUuid());
         }
         if (LocationDialect.WINDOWS_DRIVE.persistedName().equals(source.rootPathDialect())) {
+            var profile = WindowsDurableEvidenceFormat.sourceProfile(source.bindingEvidenceJson());
+            if (profile != WindowsDurableEvidenceFormat.contextProfile(context.continuityEvidenceJson())) {
+                throw new IllegalStateException("Windows Source/context evidence profiles disagree");
+            }
+            if (profile == FileSystemProfile.EXFAT) {
+                var codec = new io.github.topher6835.mediacompare.filesystem.WindowsExfatEvidenceCodec();
+                var anchor = codec.decodeContext(context.continuityEvidenceJson());
+                var root = codec.decodeSource(source.bindingEvidenceJson());
+                var paths = new io.github.topher6835.mediacompare.location.LocationPathCodec();
+                LocationPath resolved = paths.decode(root.resolvedRootLocationPath());
+                LocationPath domain = paths.decode(anchor.anchorLocationPath());
+                if (!anchor.contextId().equals(context.id()) || anchor.contextRevision() != context.revision()
+                        || !anchor.anchorLocationPath().equals(context.anchorLocationPath())
+                        || !anchor.anchorLocationKey().equals(context.anchorLocationKey())
+                        || root.sourceId() != source.id() || root.sourceRevision() != source.locationRevision()
+                        || !root.contextId().equals(context.id()) || root.contextRevision() != context.revision()
+                        || !root.configuredRoot().equals(source.rootPath())
+                        || !root.configuredRootLocationKey().equals(source.rootPathKey())
+                        || !anchor.volume().equals(root.volume()) || !domain.contains(resolved)) {
+                    throw new IllegalStateException("exFAT Source/context configuration disagrees");
+                }
+                return new Route(resolved, domain, "exfat", anchor.volume().volumeSerial());
+            }
             var anchor = WINDOWS.decodeContext(context.continuityEvidenceJson());
             var root = WINDOWS.decodeSource(source.bindingEvidenceJson());
             LocationPath configured = LocationPathParser.parse(LocationDialect.WINDOWS_DRIVE, source.rootPath());

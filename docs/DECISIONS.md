@@ -532,6 +532,14 @@ V5 implements LocationContext/Source binding storage, and V6/v3 use the pure sca
 
 ## Development
 
+### Windows exFAT Slice 3 — 2026-10-02 (Internal Runtime Lifecycle Implemented; Production Disabled)
+
+- Implement the frozen durable-configuration/runtime-authority distinction using `windows-exfat-context-v1` and `windows-exfat-source-v1` in existing JSON columns. Persist no runtime window or live state. Source configured spelling/key remains distinct from resolved canonical spelling/key, preserving current binding/unbinding invariants.
+- Own authority by exact selected catalog runtime object/UUID, Source/context/open-period snapshots and fresh random v4 window UUID. One current window and one pending Prepare attempt per Source; no worker can borrow a later UUID. Independent protected directory chains remain bounded and independently releasable; there is no directory pooling in this slice.
+- First Prepare accepts/binds through a short transaction before installing retained authority. Routine reacquisition reserves the writer for an unchanged reread and changes no durable rows/history/membership. Existing live Prepare freshly revalidates and keeps UUID/deadline. True fixed-root rebind remains a separate internal command.
+- Keep monitor/native IO separate and the publication gate outside catalog transactions through commit. Explicit release/timeout/shutdown and true durable transitions revoke authority; asynchronous closure reports DRAINING until resources actually close. Use the approved five-minute Prepare, two-minute handoff, 30-second drain, 64-window/4096-directory/depth-256 bounds. On uncertain closure retain catalog ownership until process exit and deny further exFAT acquisition.
+- Keep production policy false, existing native-profile behavior and null-token/null-receipt production flows intact. No scan/file publication, content/decoder consumption, frontend/API activation or mounted exFAT production acceptance is included. Review Slice 3 before separately authorizing Slice 4.
+
 ### Windows exFAT Slice 2 — 2026-10-02 (Storage Implemented; Production Disabled)
 
 - Implement the approved V10 SQL exactly: paired nullable token/receipt, canonical lowercase UUID, resolved-only 1 MiB UTF-8 evidence, native null-token address uniqueness, global token uniqueness and indexed occurrence history. Preserve all existing IDs/FKs/content and null/null legacy rows. Do not infer profile from Windows dialect or add tables/triggers/current flags.

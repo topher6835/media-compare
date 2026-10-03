@@ -24,6 +24,10 @@ public class ThumbnailScheduler implements DisposableBean {
 
     private static final Logger log = LoggerFactory.getLogger(ThumbnailScheduler.class);
     private final CatalogOwnership ownership;
+    private io.github.topher6835.mediacompare.filesystem.ExfatAuthorityWindowRegistry exfat;
+
+    @Autowired
+    void exfatLifecycle(io.github.topher6835.mediacompare.filesystem.ExfatAuthorityWindowRegistry exfat) { this.exfat = exfat; }
     private final LongFunction<ThumbnailGenerationResult> generate;
     private final Set<Long> queuedOrRunning = new HashSet<>();
     private final ThreadPoolExecutor executor = new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS,
@@ -86,6 +90,7 @@ public class ThumbnailScheduler implements DisposableBean {
 
     @Override
     public void destroy() {
+        if (exfat != null) exfat.shutdown();
         shutdown(Duration.ofSeconds(30));
     }
 

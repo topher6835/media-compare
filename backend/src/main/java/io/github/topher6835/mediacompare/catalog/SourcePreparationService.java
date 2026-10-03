@@ -34,6 +34,10 @@ public class SourcePreparationService {
     private final SourcePreparationProbe probe;
     private final WindowsNtfsSourcePreparationService windows;
     private final LocationPathCodec paths = new LocationPathCodec();
+    private WindowsExfatSourcePreparationService exfat;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void exfatPreparation(WindowsExfatSourcePreparationService exfat) { this.exfat = exfat; }
 
     public SourcePreparationService(CatalogRepository sources, LocationContextRepository contexts,
             LocationContextActivationService activation, LocationContextAcceptanceService acceptance,
@@ -52,6 +56,16 @@ public class SourcePreparationService {
         Source source = sources.findSourceById(sourceId)
                 .orElseThrow(() -> new NoSuchElementException("Source " + sourceId + " does not exist"));
         SourcePreparationState state = SourcePreparationState.from(source);
+        if (source.boundLocationContextId() != null
+                && LocationDialect.WINDOWS_DRIVE.persistedName().equals(source.rootPathDialect())) {
+            var context = contexts.findById(source.boundLocationContextId())
+                    .orElseThrow(() -> new IllegalStateException("Bound Windows Source lacks LocationContext"));
+            var authority = CurrentLocationAuthority.requirePersisted(source, context);
+            if ("exfat".equals(authority.fileSystemType())) {
+                if (exfat == null) throw new SourcePreparationException(SourcePreparationException.Code.PROFILE_UNSUPPORTED);
+                return exfat.prepare(sourceId);
+            }
+        }
         if (state == SourcePreparationState.READY) {
             return source;
         }
@@ -63,7 +77,9 @@ public class SourcePreparationService {
             try {
                 var host = HostFileSystems.current();
                 var configured = LocationPathParser.parse(LocationDialect.WINDOWS_DRIVE, source.rootPath());
-                if (host.profile(host.path(configured)) != FileSystemProfile.NTFS) {
+                var profile = host.profile(host.path(configured));
+                if (profile == FileSystemProfile.EXFAT && exfat != null) return exfat.prepare(sourceId);
+                if (profile != FileSystemProfile.NTFS) {
                     throw new SourcePreparationException(SourcePreparationException.Code.PROFILE_UNSUPPORTED);
                 }
             } catch (WindowsFileAccessException failure) {

@@ -17,6 +17,14 @@ import org.springframework.core.env.Environment;
 @Configuration(proxyBeanMethods = false)
 public class CatalogConfiguration {
     @Bean
+    io.github.topher6835.mediacompare.filesystem.ExfatAuthorityWindowRegistry exfatAuthorityWindowRegistry(
+            CatalogPaths paths, CatalogOwnership ownership) {
+        // This instance is owned by exactly this selected catalog runtime, including its shutdown order.
+        java.util.Objects.requireNonNull(paths);
+        return new io.github.topher6835.mediacompare.filesystem.ExfatAuthorityWindowRegistry(ownership);
+    }
+
+    @Bean
     CatalogPaths catalogPaths(Environment environment) throws IOException {
         String selectedRoot = environment.getProperty("media-compare.session-root");
         if (selectedRoot != null && !selectedRoot.isBlank()) {
