@@ -16,6 +16,9 @@ public class Version3DiscoveryCompletionWriter {
     private final LocationContextRepository contexts;
     private final SourceMembershipPublicationService memberships;
     private final DiscoveryExecutionState state;
+    private ExfatScanBundles bundles;
+    @org.springframework.beans.factory.annotation.Autowired
+    void exfatBundles(ExfatScanBundles bundles) { this.bundles = bundles; }
 
     public Version3DiscoveryCompletionWriter(LocationContextRepository contexts,
             SourceMembershipPublicationService memberships, DiscoveryExecutionState state) {
@@ -36,7 +39,12 @@ public class Version3DiscoveryCompletionWriter {
             if (claim == null || claim.sourceLocationRevision() != source.source().locationRevision()) {
                 throw new IllegalStateException("Missing or stale Source traversal authority");
             }
-            memberships.requireCurrent(claim.sourceId(), claim.sourceLocationRevision(),
+            if (claim.exfat() != null) {
+                var a = claim.exfat();
+                if (a.scanRunSourceId() != source.scanRunSource().id() || a.generation() != source.traversalGeneration()
+                        || a.jobId() != job.id() || !a.missingClaim().equals(claim)) throw new IllegalStateException("Foreign exFAT completion claim");
+                bundles.requireCatalog(a, ScanExecutionDefinition.DISCOVERY, "DISCOVERING");
+            } else memberships.requireCurrent(claim.sourceId(), claim.sourceLocationRevision(),
                     claim.locationContextId(), claim.locationContextRevision());
         }
         state.complete(job, stage, sources, count, completedAtMs);

@@ -30,6 +30,62 @@ public class SourceMembershipPublicationService {
     private final SourceMembershipRepository memberships;
     private final ScanRepository scans;
     private final LocationPathCodec paths = new LocationPathCodec();
+    private io.github.topher6835.mediacompare.catalog.ExfatOccurrenceRepository occurrences;
+    private ExfatScanBundles bundles;
+    @org.springframework.beans.factory.annotation.Autowired
+    void exfatBundles(ExfatScanBundles bundles) { this.bundles = bundles; }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void exfatOccurrences(io.github.topher6835.mediacompare.catalog.ExfatOccurrenceRepository occurrences) { this.occurrences = occurrences; }
+
+    /** Caller owns the exact window gate and writer; the final receipt already contains reserved IDs. */
+    @Transactional
+    public FileEntry publishExfat(long fileId, io.github.topher6835.mediacompare.filesystem.ExfatObservationReceipt receipt) {
+        contexts.reserveWrite();
+        for (var source : receipt.sources()) {
+            var a = bundles.require(receipt.scanRunId(), source.sourceId());
+            require(a.window().windowId().equals(source.windowUuid()) && a.bundleUuid().equals(receipt.bundleUuid())
+                    && a.scanRunSourceId() == source.scanRunSourceId() && a.generation() == source.generation()
+                    && a.jobId() == receipt.scanJobId(), "Receipt publication authority disagrees");
+            bundles.requireCatalog(a, ScanExecutionDefinition.DISCOVERY, "DISCOVERING");
+        }
+        var filePath = paths.decode(receipt.locationPath());
+        require(occurrences.findNativeAddressConflict(receipt.contextId(), receipt.locationKey()).isEmpty(),
+                "Native resolved address contradicts exFAT occurrence profile");
+        long after = 0;
+        while (true) {
+            var page = occurrences.activeRoutes(receipt.contextId(), after, 250);
+            if (page.isEmpty()) break;
+            for (var old : page) {
+                after = old.id();
+                if (WindowsExfatDiscoveryWalker.sameWindowsRoute(paths.decode(old.locationPath()), filePath)) {
+                    require(old.occurrenceToken() != null, "Native resolved alias contradicts exFAT profile");
+                    occurrences.retireOccurrence(old);
+                }
+            }
+        }
+        for (var source : receipt.sources()) {
+            var collision = memberships.findActiveAtPath(source.sourceId(), source.relativeRoute()).orElse(null);
+            if (collision != null) {
+                var old = memberships.findById(collision.fileEntryId()).orElseThrow();
+                require("UNRESOLVED".equals(old.locationIdentityStatus()), "Active route contradicts new occurrence");
+                occurrences.retireChecked(collision);
+            }
+        }
+        long now = receipt.observationFinishedAtMs();
+        var file = new FileEntry(fileId, "RESOLVED", receipt.contextId(), receipt.locationPath(), receipt.locationKey(),
+                null, receipt.sizeBytes(), receipt.modifiedTimeEpochSecond(), receipt.modifiedTimeNano(),
+                FileExtensionNormalizer.fromRelativePath(receipt.sources().getFirst().relativeRoute()), 0, now, now,
+                receipt.occurrenceToken(), new io.github.topher6835.mediacompare.filesystem.ExfatObservationReceiptCodec().encode(receipt));
+        occurrences.insertOccurrence(file, io.github.topher6835.mediacompare.filesystem.FileSystemProfile.EXFAT,
+                io.github.topher6835.mediacompare.filesystem.FileSystemProfile.EXFAT);
+        for (var source : receipt.sources()) {
+            occurrences.insertOccurrenceMembership(new SourceMembership(source.membershipId(), source.sourceId(), fileId,
+                    source.relativeRoute(), source.relativeRoute(), "ACTIVE", "PRESENT", 0, 0, now, now,
+                    source.scanRunSourceId(), source.generation(), source.sourceRevision(), receipt.contextRevision()));
+        }
+        return file;
+    }
 
     public SourceMembershipPublicationService(CatalogRepository catalog,
             LocationContextRepository contexts, SourceMembershipRepository memberships,
@@ -137,6 +193,16 @@ public class SourceMembershipPublicationService {
     public int reconcile(MissingClaimAuthority claim, ScanRunSource runSource, long completedAtMs) {
         Objects.requireNonNull(claim, "Missing-claim authority");
         contexts.reserveWrite();
+        if (claim.exfat() != null) {
+            var a = claim.exfat();
+            require(a.missingClaim().equals(claim) && a.scanRunSourceId() == runSource.id()
+                    && a.generation() == runSource.traversalGeneration(), "Foreign exFAT missing claim");
+            bundles.requireCatalog(a, ScanExecutionDefinition.RECONCILIATION, "DISCOVERED");
+            int changed = occurrences.markUnseenMissing(claim.sourceId(), claim.locationContextId(), a.scanRunSourceId(), a.generation());
+            require(scans.completeSourceReconciliation(a.scanRunSourceId(), a.generation(), completedAtMs) == 1,
+                    "exFAT reconciliation generation changed");
+            return changed;
+        }
         requireCurrent(claim.sourceId(), claim.sourceLocationRevision(), claim.locationContextId(),
                 claim.locationContextRevision());
         Source source = catalog.findSourceById(claim.sourceId()).orElseThrow();

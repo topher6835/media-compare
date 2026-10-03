@@ -31,6 +31,13 @@ public class Version3DiscoveryService {
     private final DiscoveryBatchWriter batches;
     private final DiscoveryExecutionState state;
     private final Version3DiscoveryCompletionWriter completion;
+    private ExfatScanBundles bundles;
+    private WindowsExfatDiscoveryWalker exfatWalker;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void exfatDiscovery(ExfatScanBundles bundles, WindowsExfatDiscoveryWalker walker) {
+        this.bundles = bundles; this.exfatWalker = walker;
+    }
 
     public Version3DiscoveryService(ScanRepository scans, JobRepository jobs, CatalogRepository catalog,
             Version3AuthorityCapture capture, Version3DiscoveryWalker walker,
@@ -48,12 +55,22 @@ public class Version3DiscoveryService {
 
     public Map<Long, MissingClaimAuthority> execute(long scanRunId) {
         Plan plan = preflight(scanRunId);
-        state.start(scanRunId, plan.job(), plan.stage(), plan.sources(), System.currentTimeMillis());
+        if (bundles != null) {
+            try (var lease = bundles.lease(bundles.authorities(scanRunId))) {
+                lease.checkpoint();
+                state.start(scanRunId, plan.job(), plan.stage(), plan.sources(), System.currentTimeMillis());
+            }
+        } else state.start(scanRunId, plan.job(), plan.stage(), plan.sources(), System.currentTimeMillis());
         Map<Long, MissingClaimAuthority> claims = new HashMap<>();
         long discovered = 0;
         DiscoverySource active = plan.sources().getFirst();
         try {
+            if (exfatWalker != null) {
+                var result = exfatWalker.walk(scanRunId, discovered);
+                discovered = result.physicalCount(); claims.putAll(result.claims());
+            }
             for (DiscoverySource source : plan.sources()) {
+                if (claims.containsKey(source.source().id())) continue;
                 IndexingInterruptedException.check();
                 active = source;
                 var start = capture.capture(source.source().id());
@@ -66,6 +83,7 @@ public class Version3DiscoveryService {
                 List<ResolvedFileCandidate> batch = new ArrayList<>(DiscoveryBatchWriter.MAX_BATCH_SIZE);
                 long[] count = { discovered };
                 TraversalCompletion.Issue issue = walker.walk(root, snapshot, candidate -> {
+                    if (bundles != null && !bundles.authorities(scanRunId).isEmpty()) bundles.progress(scanRunId);
                     batch.add(candidate);
                     if (batch.size() == DiscoveryBatchWriter.MAX_BATCH_SIZE) {
                         count[0] = flush(plan, source, batch, count[0]);
@@ -84,8 +102,12 @@ public class Version3DiscoveryService {
                 }
                 claims.put(source.source().id(), result.value().orElseThrow());
             }
-            completion.complete(plan.job(), plan.stage(), plan.sources(), claims,
-                    discovered, System.currentTimeMillis());
+            if (bundles != null) {
+                try (var lease = bundles.lease(bundles.authorities(scanRunId))) {
+                    lease.checkpoint();
+                    completion.complete(plan.job(), plan.stage(), plan.sources(), claims, discovered, System.currentTimeMillis());
+                }
+            } else completion.complete(plan.job(), plan.stage(), plan.sources(), claims, discovered, System.currentTimeMillis());
             return Map.copyOf(claims);
         } catch (IOException | RuntimeException exception) {
             IndexingInterruptedException.propagateIfInterrupted(exception);
@@ -125,6 +147,11 @@ public class Version3DiscoveryService {
                 throw new IllegalStateException("Version-3 Source discovery snapshot changed");
             }
             sources.add(new DiscoverySource(source, row, 1));
+            if ("win-drive".equals(source.rootPathDialect()) && io.github.topher6835.mediacompare.filesystem.WindowsDurableEvidenceFormat
+                    .identify(source.bindingEvidenceJson()) == io.github.topher6835.mediacompare.filesystem.WindowsDurableEvidenceFormat.EXFAT_SOURCE) {
+                if (bundles == null) throw new IllegalStateException("exFAT lacks admitted bundle");
+                bundles.require(scanRunId, source.id());
+            }
         }
         if (sources.isEmpty()) {
             throw new IllegalStateException("Version-3 scan has no Sources");

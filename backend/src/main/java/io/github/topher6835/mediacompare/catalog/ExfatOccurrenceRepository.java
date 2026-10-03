@@ -12,7 +12,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-/** Inert storage primitives for a future guarded writer; no live publication or supersession. */
+/** Occurrence persistence used only beneath the exact runtime publication gate. */
 @Repository
 public class ExfatOccurrenceRepository {
     private final JdbcTemplate jdbc;
@@ -50,6 +50,82 @@ public class ExfatOccurrenceRepository {
 
     public Optional<FileEntry> findNativeAddressConflict(String contextId, String key) {
         return memberships.findResolved(contextId, key);
+    }
+
+    /** Page all active resolved routes, including native contradictions and ACTIVE/MISSING history. */
+    public List<FileEntry> activeRoutes(String contextId, long afterId, int limit) {
+        return jdbc.query("""
+                SELECT * FROM file_entry f WHERE f.location_identity_status = 'RESOLVED'
+                  AND f.location_context_id = ? AND f.id > ?
+                  AND (f.occurrence_token IS NULL OR EXISTS (SELECT 1 FROM source_membership m WHERE m.file_entry_id = f.id
+                    AND m.applicability_status = 'ACTIVE')) ORDER BY f.id LIMIT ?
+                """, SourceMembershipRepository::fileEntry, contextId, afterId, limit);
+    }
+
+    public void retireOccurrence(FileEntry file) {
+        requireWriterTransaction();
+        OccurrenceProfileValidation.requireExfat(file);
+        var active = jdbc.query("SELECT * FROM source_membership WHERE file_entry_id = ? AND applicability_status = 'ACTIVE' ORDER BY id",
+                SourceMembershipRepository::membership, file.id());
+        for (var member : active) retireChecked(member);
+    }
+
+    public void retireChecked(SourceMembership member) {
+        requireWriterTransaction();
+        Math.incrementExact(member.membershipRevision());
+        if (memberships.retire(member) != 1) throw new IllegalStateException("Superseded membership changed");
+    }
+
+    public int markUnseenMissing(long sourceId, String contextId, long rowId, long generation) {
+        requireWriterTransaction();
+        long after = 0;
+        while (true) {
+            var page = jdbc.query("""
+                    SELECT f.* FROM file_entry f JOIN source_membership m ON m.file_entry_id = f.id
+                    WHERE m.source_id = ? AND m.applicability_status = 'ACTIVE'
+                      AND f.location_identity_status = 'RESOLVED' AND f.id > ? ORDER BY f.id LIMIT 250
+                    """, SourceMembershipRepository::fileEntry, sourceId, after);
+            if (page.isEmpty()) break;
+            for (var file : page) {
+                after = file.id();
+                var receipt = OccurrenceProfileValidation.requireExfat(file);
+                if (!contextId.equals(receipt.contextId())) throw new IllegalStateException("Missing sweep has a foreign occurrence profile/context");
+            }
+        }
+        Integer overflow = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM source_membership WHERE source_id = ? AND applicability_status = 'ACTIVE'
+                  AND presence_status = 'PRESENT' AND membership_revision = 9223372036854775807
+                  AND (last_positive_scan_run_source_id IS NOT ? OR last_positive_traversal_generation IS NOT ?)
+                """, Integer.class, sourceId, rowId, generation);
+        if (overflow != 0) throw new ArithmeticException("Missing membership revision overflow");
+        return memberships.markUnseenMissing(sourceId, rowId, generation);
+    }
+
+    /** Include malformed/stale occurrences for validation rather than silently filtering them out. */
+    public List<FileEntry> scanOccurrences(long scanRunId, List<Long> exfatSourceIds, long afterId, int limit) {
+        String participating = exfatSourceIds.isEmpty() ? "NULL" : String.join(",", java.util.Collections.nCopies(exfatSourceIds.size(), "?"));
+        String sql = """
+                SELECT * FROM file_entry f WHERE f.id > ? AND EXISTS (
+                  SELECT 1 FROM source_membership m JOIN scan_run_source r
+                    ON r.id = m.last_positive_scan_run_source_id
+                  WHERE m.file_entry_id = f.id AND r.scan_run_id = ?
+                    AND (f.occurrence_token IS NOT NULL OR f.observation_evidence_json IS NOT NULL
+                         OR r.source_id IN (%s)))
+                ORDER BY f.id LIMIT ?
+                """.formatted(participating);
+        var arguments = new ArrayList<Object>();
+        arguments.add(afterId); arguments.add(scanRunId); arguments.addAll(exfatSourceIds); arguments.add(limit);
+        return jdbc.query(sql, SourceMembershipRepository::fileEntry, arguments.toArray());
+    }
+
+    public void attachContent(FileEntry file, long contentId) {
+        requireWriterTransaction();
+        if (jdbc.update("""
+                UPDATE file_entry SET current_content_id = ? WHERE id = ? AND current_content_id IS NULL
+                  AND occurrence_token = ? AND observation_revision = ? AND observation_evidence_json = ?
+                """, contentId, file.id(), file.occurrenceToken(), file.observationRevision(), file.observationEvidenceJson()) != 1) {
+            throw new IllegalStateException("Occurrence changed during content assignment");
+        }
     }
 
     /** Reserve SQLite's writer before reading maxima; caller must retain this same transaction through insertion. */

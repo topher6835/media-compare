@@ -17,6 +17,9 @@ public class Version2ContentAssignmentService {
     private final ContentAssignmentService contentAssignmentService;
     private final ContentAssignmentStageResultCodec resultCodec;
     private final Version2ExecutionState executionState;
+    private ExfatScanBundles bundles;
+    @org.springframework.beans.factory.annotation.Autowired
+    void exfatBundles(ExfatScanBundles bundles) { this.bundles = bundles; }
 
     public Version2ContentAssignmentService(ScanRepository scanRepository, JobRepository jobRepository,
             ContentAssignmentService contentAssignmentService,
@@ -39,16 +42,25 @@ public class Version2ContentAssignmentService {
     }
 
     private ContentAssignmentStageResult execute(long scanRunId, long executionVersion) {
+        if (bundles != null) {
+            try (var lease = bundles.retain(bundles.checkedAuthorities(scanRunId))) {
+                lease.checkpoint(); return executeUnderAuthority(scanRunId, executionVersion);
+            }
+        }
+        return executeUnderAuthority(scanRunId, executionVersion);
+    }
+
+    private ContentAssignmentStageResult executeUnderAuthority(long scanRunId, long executionVersion) {
         AssignmentPlan plan = preflight(scanRunId, executionVersion);
-        executionState.startStage(plan.job(), plan.stage(), System.currentTimeMillis());
+        publish(scanRunId, () -> executionState.startStage(plan.job(), plan.stage(), System.currentTimeMillis()));
 
         try {
             ContentAssignmentResult assignment = contentAssignmentService.assignSources(scanRunId, plan.sources());
             IndexingInterruptedException.check();
             ContentAssignmentStageResult result = ContentAssignmentStageResult.from(assignment);
             long processedCount = result.assignedCount() + result.skippedCount();
-            executionState.completeAssignment(
-                    plan.job(), plan.stage(), resultCodec.write(result), processedCount, System.currentTimeMillis());
+            publish(scanRunId, () -> executionState.completeAssignment(
+                    plan.job(), plan.stage(), resultCodec.write(result), processedCount, System.currentTimeMillis()));
             return result;
         } catch (RuntimeException exception) {
             IndexingInterruptedException.propagateIfInterrupted(exception);
@@ -57,6 +69,10 @@ public class Version2ContentAssignmentService {
                     scanRunId, plan.job(), plan.stage(), System.currentTimeMillis(), errorMessage);
             throw new Version2ExecutionFailedException(errorMessage, exception);
         }
+    }
+
+    private void publish(long scanRunId, Runnable transaction) {
+        if (bundles == null) transaction.run(); else bundles.publishing(scanRunId, transaction);
     }
 
     private AssignmentPlan preflight(long scanRunId, long executionVersion) {

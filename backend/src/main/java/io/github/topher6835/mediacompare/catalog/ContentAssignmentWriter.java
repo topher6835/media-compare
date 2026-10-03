@@ -8,6 +8,12 @@ public class ContentAssignmentWriter {
 
     private final CatalogRepository catalogRepository;
     private final CurrentMembershipAuthority authority;
+    private io.github.topher6835.mediacompare.scan.ExfatReceiptAuthority receipts;
+    private ExfatOccurrenceRepository occurrences;
+    @org.springframework.beans.factory.annotation.Autowired
+    void exfatReceipts(io.github.topher6835.mediacompare.scan.ExfatReceiptAuthority receipts, ExfatOccurrenceRepository occurrences) {
+        this.receipts = receipts; this.occurrences = occurrences;
+    }
 
     public ContentAssignmentWriter(CatalogRepository catalogRepository,
             CurrentMembershipAuthority authority) {
@@ -26,5 +32,14 @@ public class ContentAssignmentWriter {
         if (updatedRows != 1) {
             throw new StaleContentAssignmentException(candidate.fileEntryId());
         }
+    }
+
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public boolean assignExfat(FileEntry captured, long scanRunId, long createdAtMs) {
+        receipts.reserveAndRequire(captured, scanRunId, "CONTENT_ASSIGNMENT");
+        if (captured.currentContentId() != null) { receipts.requireContent(captured); return false; }
+        var content = catalogRepository.insert(new ContentRecord(null, captured.sizeBytes(), createdAtMs));
+        occurrences.attachContent(captured, content.id());
+        return true;
     }
 }

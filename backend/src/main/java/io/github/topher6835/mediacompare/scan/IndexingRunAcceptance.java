@@ -9,17 +9,22 @@ public class IndexingRunAcceptance {
     private final ScanRepository scans;
     private final ScanRunService requests;
     private final Version3ScanExecutionService executions;
+    private final ExfatScanBundles bundles;
 
-    public IndexingRunAcceptance(ScanRepository scans, ScanRunService requests, Version3ScanExecutionService executions) {
+    public IndexingRunAcceptance(ScanRepository scans, ScanRunService requests, Version3ScanExecutionService executions,
+            ExfatScanBundles bundles) {
         this.scans = scans;
         this.requests = requests;
         this.executions = executions;
+        this.bundles = bundles;
     }
 
-    @Transactional
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NEVER)
     public ScanExecutionDetails accept(String key, List<Long> sourceIds) {
-        scans.reserveExecutionWrite();
-        ScanRunDetails request = requests.create(sourceIds, key);
-        return executions.create(request.scanRun().id());
+        return bundles.admit(sourceIds, prepared -> {
+            scans.reserveExecutionWrite();
+            ScanRunDetails request = requests.create(sourceIds, key);
+            return executions.create(request.scanRun().id(), prepared);
+        });
     }
 }

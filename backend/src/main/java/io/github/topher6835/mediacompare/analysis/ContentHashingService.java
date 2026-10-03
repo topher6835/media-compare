@@ -34,6 +34,12 @@ public class ContentHashingService {
     private final AnalysisRepository analysisRepository;
     private final ContentHashFileHasher fileHasher;
     private final ContentHashWriter contentHashWriter;
+    private io.github.topher6835.mediacompare.scan.ExfatReceiptProcessingService exfat;
+    private io.github.topher6835.mediacompare.scan.ExfatScanBundles bundles;
+    @org.springframework.beans.factory.annotation.Autowired
+    void exfatReceipts(io.github.topher6835.mediacompare.scan.ExfatReceiptProcessingService exfat) { this.exfat = exfat; }
+    @org.springframework.beans.factory.annotation.Autowired
+    void exfatBundles(io.github.topher6835.mediacompare.scan.ExfatScanBundles bundles) { this.bundles = bundles; }
 
     public ContentHashingService(ScanRepository scanRepository, JobRepository jobRepository,
             CatalogRepository catalogRepository, AnalysisRepository analysisRepository,
@@ -56,6 +62,10 @@ public class ContentHashingService {
         long cachedCount = 0;
         long skippedCount = 0;
         long failedCount = 0;
+        if (exfat != null) {
+            var result = exfat.hash(scanRunId);
+            hashedCount = result.hashedCount(); cachedCount = result.cachedCount();
+        }
 
         for (ScanRunSource scanRunSource : sources) {
             long afterFileEntryId = 0;
@@ -71,6 +81,7 @@ public class ContentHashingService {
                 for (ContentHashCandidate candidate : candidates) {
                     IndexingInterruptedException.check();
                     afterFileEntryId = candidate.fileEntryId();
+                    if (bundles != null && !bundles.authorities(scanRunId).isEmpty()) bundles.progress(scanRunId);
                     CacheState cacheState = cacheState(candidate);
                     if (cacheState == CacheState.REUSABLE) {
                         cachedCount++;
@@ -94,7 +105,8 @@ public class ContentHashingService {
 
                     long startedAtMs = System.currentTimeMillis();
                     try {
-                        String digestHex = fileHasher.hash(candidate);
+                        String digestHex = bundles != null && !bundles.authorities(scanRunId).isEmpty()
+                                ? fileHasher.hash(candidate, () -> bundles.progress(scanRunId)) : fileHasher.hash(candidate);
                         IndexingInterruptedException.check();
                         contentHashWriter.publish(
                                 candidate, digestHex, startedAtMs, System.currentTimeMillis());

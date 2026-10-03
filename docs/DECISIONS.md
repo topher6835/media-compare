@@ -532,6 +532,15 @@ V5 implements LocationContext/Source binding storage, and V6/v3 use the pure sca
 
 ## Development
 
+### Windows exFAT Slice 4 - 2026-10-03 (Internal Observation/Receipts; Production Disabled)
+
+- Implement the approved exact runtime/window/bundle/ScanRun/SCAN Job/Source-generation association atomically with v3 admission; scheduling follows commit. Failed admission or scheduling revokes transient ownership; request-key replay never attaches a newer window.
+- Share maximal-root traversal only across selected prepared Sources in the same verified context. Each independent file observation gets a fresh token/FileEntry and full SHA through one continuously held protected file handle. Only fan-out from that same observation shares an occurrence; commit precedes file closure.
+- Construct the final immutable receipt using reserved FileEntry/membership IDs in the same short writer transaction as publication/progress and positive supersession. Retire all equivalent historical ACTIVE exFAT routes, preserving presence/history, including unselected Source routes. Exact held enumeration confirms Windows alias candidates; persist no folded path key and reopen no historical route.
+- Keep MISSING Source-local and conditional on complete traversal under the original exact window/scope/bundle/generation. Validate receipt/current catalog authority before assignment and hash cache lookup. Assign distinct ContentRecords and publish the receipt SHA through existing writers; perform no later exFAT original-path hash.
+- Retain resources during IO without holding the short publication gate; acquire that gate before the writer and retain it through commit. Actual progress renews a constructor-configurable bundle inactivity deadline (five-minute default), never an authority UUID or a total-runtime allowance. Release/expiry cancels work and drains users; close uncertainty preserves committed evidence, denies acquisition and retains catalog ownership. Interrupted work cannot resume under a later window or runtime.
+- Keep production policy false, native NTFS/APFS behavior and null evidence unchanged, and schema at V10. Metadata/preview original reads, protected later-read API, public/frontend activation and mounted production acceptance remain unimplemented. Review Slice 4 before separately authorizing Slice 5.
+
 ### Windows exFAT Slice 3 — 2026-10-02 (Internal Runtime Lifecycle Implemented; Production Disabled)
 
 - Implement the frozen durable-configuration/runtime-authority distinction using `windows-exfat-context-v1` and `windows-exfat-source-v1` in existing JSON columns. Persist no runtime window or live state. Source configured spelling/key remains distinct from resolved canonical spelling/key, preserving current binding/unbinding invariants.

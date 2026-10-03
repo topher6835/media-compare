@@ -30,6 +30,7 @@ public final class ExfatAuthorityWindowRegistry implements DisposableBean {
     public record ReleaseResult(ReleaseState releaseState, boolean otherWindowsOnVolumeRemain) { }
     public static final Duration PREPARE_TIMEOUT = Duration.ofMinutes(5);
     public static final Duration HANDOFF_TIMEOUT = Duration.ofMinutes(2);
+    public static final Duration NO_PROGRESS_TIMEOUT = Duration.ofMinutes(5);
     public static final Duration DRAIN_BUDGET = Duration.ofSeconds(30);
     private static final int MAX_WINDOWS = 64, MAX_DIRECTORIES = 4096;
 
@@ -42,6 +43,7 @@ public final class ExfatAuthorityWindowRegistry implements DisposableBean {
     private final Map<Long, Long> generations = new HashMap<>();
     private final LongSupplier ticks;
     private final Duration drainBudget;
+    private final Duration noProgressTimeout;
     private final CatalogOwnership ownership;
     private final ScheduledExecutorService maintenance = Executors.newSingleThreadScheduledExecutor(task -> {
         Thread thread = new Thread(task, "media-compare-exfat-expiry");
@@ -57,9 +59,15 @@ public final class ExfatAuthorityWindowRegistry implements DisposableBean {
 
     // Internal clock/budget injection; no system property or production activation seam.
     ExfatAuthorityWindowRegistry(CatalogOwnership ownership, LongSupplier ticks, Duration drainBudget) {
+        this(ownership, ticks, drainBudget, NO_PROGRESS_TIMEOUT);
+    }
+
+    ExfatAuthorityWindowRegistry(CatalogOwnership ownership, LongSupplier ticks, Duration drainBudget, Duration noProgressTimeout) {
+        if (noProgressTimeout.isZero() || noProgressTimeout.isNegative()) throw new IllegalArgumentException("Invalid no-progress deadline");
         this.ownership = ownership;
         this.ticks = ticks;
         this.drainBudget = drainBudget;
+        this.noProgressTimeout = noProgressTimeout;
         maintenance.scheduleWithFixedDelay(this::expire, 1, 1, TimeUnit.SECONDS);
     }
 
@@ -213,9 +221,13 @@ public final class ExfatAuthorityWindowRegistry implements DisposableBean {
 
     public final class Operation implements AutoCloseable {
         private final Window window;
+        private final boolean holdsPublicationGate;
         private final Thread owner = Thread.currentThread();
         private boolean closed;
-        private Operation(Window window) { this.window = window; }
+        private Operation(Window window) { this(window, true); }
+        private Operation(Window window, boolean holdsPublicationGate) {
+            this.window = window; this.holdsPublicationGate = holdsPublicationGate;
+        }
         public void revalidate() throws IOException {
             requireOwner();
             if (closed) throw invalid();
@@ -227,15 +239,61 @@ public final class ExfatAuthorityWindowRegistry implements DisposableBean {
             synchronized (monitor) { requireLocked(window.scope, window.id); }
         }
         public boolean cancelled() { synchronized (monitor) { return !usable(window); } }
+        /** Pure exact-reference check, including bundle ownership; no native IO. */
+        public void checkpoint(String bundleId, long scanRunId, long jobId) {
+            requireOwner();
+            synchronized (monitor) {
+                if (closed || requireLocked(window.scope, window.id) != window
+                        || window.phase != Phase.IN_BUNDLE || !java.util.Objects.equals(window.bundleId, bundleId)
+                        || window.scanRunId != scanRunId || window.jobId != jobId) throw invalid();
+            }
+        }
+        public DirectoryReservation reserveDirectories(int count) {
+            requireOwner();
+            synchronized (monitor) {
+                if (closed || !usable(window) || count < 1 || directories + count > MAX_DIRECTORIES) throw invalid();
+                directories += count;
+                return new DirectoryReservation(count);
+            }
+        }
+        /** Actual IO/catalog progress renews inactivity only, never the authority UUID. */
+        public void progress() {
+            requireOwner();
+            synchronized (monitor) {
+                if (closed || requireLocked(window.scope, window.id) != window || window.phase != Phase.IN_BUNDLE) throw invalid();
+                window.lastProgress = ticks.getAsLong();
+            }
+        }
         @Override public void close() {
             requireOwner();
             if (closed) return;
             closed = true;
             synchronized (monitor) { window.users--; monitor.notifyAll(); }
-            gate.readLock().unlock();
+            if (holdsPublicationGate) gate.readLock().unlock();
         }
         private void requireOwner() {
             if (Thread.currentThread() != owner) throw new IllegalStateException("Operation leases are thread-confined");
+        }
+    }
+
+    /** Retain resources for acquisition/hash IO without holding the short publication gate. */
+    public Operation retainBundle(ExfatAuthorityScope scope, WindowId id, String bundleId, long scanRunId, long jobId) {
+        requireOutsideTransaction();
+        synchronized (monitor) {
+            Window window = requireLocked(scope, id);
+            if (window.phase != Phase.IN_BUNDLE || !java.util.Objects.equals(window.bundleId, bundleId)
+                    || window.scanRunId != scanRunId || window.jobId != jobId) throw invalid();
+            window.users++;
+            return new Operation(window, false);
+        }
+    }
+
+    public final class DirectoryReservation implements AutoCloseable {
+        private final int count;
+        private boolean closed;
+        private DirectoryReservation(int count) { this.count = count; }
+        @Override public void close() {
+            synchronized (monitor) { if (!closed) { closed = true; directories -= count; } }
         }
     }
 
@@ -249,12 +307,45 @@ public final class ExfatAuthorityWindowRegistry implements DisposableBean {
     private boolean usable(Window window) {
         return !shutdown && window.phase != Phase.REVOKED && window.phase != Phase.CLOSED
                 && window.root.available() && (window.phase == Phase.IN_BUNDLE
-                    || ticks.getAsLong() - window.phaseStarted < timeout(window.phase).toNanos());
+                    ? ticks.getAsLong() - window.lastProgress < noProgressTimeout.toNanos()
+                    : ticks.getAsLong() - window.phaseStarted < timeout(window.phase).toNanos());
     }
 
     private static Duration timeout(Phase phase) { return phase == Phase.HANDOFF ? HANDOFF_TIMEOUT : PREPARE_TIMEOUT; }
 
-    /** Runtime hooks only; no Job submission, scan publication or content work is enabled. */
+    /** All members are checked before any association changes; caller brackets the catalog commit. */
+    public void associateAll(java.util.List<Association> associations) {
+        if (!gate.isWriteLockedByCurrentThread()) throw new IllegalStateException("Admission requires outer gate");
+        synchronized (monitor) {
+            var seen = new java.util.HashSet<Long>();
+            Association first = associations.getFirst();
+            for (Association member : associations) {
+                ExfatReceiptValues.uuid(member.bundleId());
+                ExfatReceiptValues.positive(member.scanRunId(), member.jobId());
+                Window window = requireLocked(member.scope(), member.id());
+                if (!seen.add(member.id().sourceId()) || window.phase != Phase.PREPARED
+                        || !first.bundleId().equals(member.bundleId()) || first.scanRunId() != member.scanRunId()
+                        || first.jobId() != member.jobId()) throw invalid();
+            }
+            for (Association member : associations) {
+                Window window = requireLocked(member.scope(), member.id());
+                window.bundleId = member.bundleId(); window.scanRunId = member.scanRunId();
+                window.jobId = member.jobId(); window.phase = Phase.IN_BUNDLE; window.lastProgress = ticks.getAsLong();
+            }
+        }
+    }
+
+    public record Association(ExfatAuthorityScope scope, WindowId id, String bundleId, long scanRunId, long jobId) { }
+
+    public void revokeJob(long jobId) {
+        synchronized (monitor) {
+            for (Window window : new ArrayList<>(current.values())) {
+                if (window.jobId == jobId) revokeBundleLocked(window);
+            }
+        }
+    }
+
+    /** Single-member lifecycle compatibility hook. */
     public void associate(ExfatAuthorityScope scope, WindowId id, String bundleId, long scanRunId, long jobId) {
         ExfatReceiptValues.uuid(bundleId); ExfatReceiptValues.positive(scanRunId, jobId);
         gate.writeLock().lock();
@@ -263,6 +354,7 @@ public final class ExfatAuthorityWindowRegistry implements DisposableBean {
             if (window.phase != Phase.PREPARED) throw invalid();
             window.bundleId = bundleId; window.scanRunId = scanRunId; window.jobId = jobId;
             window.phase = Phase.IN_BUNDLE;
+            window.lastProgress = ticks.getAsLong();
         } } finally { gate.writeLock().unlock(); }
     }
 
@@ -378,6 +470,13 @@ public final class ExfatAuthorityWindowRegistry implements DisposableBean {
             window.drainStarted = true;
         }
         Thread drain = new Thread(() -> {
+            // Wait without the gate: an IO user must be able to leave or attempt (and reject) publication.
+            synchronized (monitor) {
+                while (window.users != 0) {
+                    try { monitor.wait(); }
+                    catch (InterruptedException failure) { Thread.currentThread().interrupt(); return; }
+                }
+            }
             gate.writeLock().lock();
             try {
                 try {
@@ -442,6 +541,7 @@ public final class ExfatAuthorityWindowRegistry implements DisposableBean {
         final Instant acquiredAt = Instant.now();
         Phase phase = Phase.PREPARED;
         long phaseStarted = ticks.getAsLong();
+        long lastProgress = phaseStarted;
         String bundleId;
         long scanRunId, jobId;
         int users;

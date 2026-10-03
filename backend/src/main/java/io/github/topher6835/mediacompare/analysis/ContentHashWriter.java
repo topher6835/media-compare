@@ -15,6 +15,9 @@ public class ContentHashWriter {
     private final CatalogRepository catalogRepository;
     private final AnalysisRepository analysisRepository;
     private final CurrentMembershipAuthority authority;
+    private io.github.topher6835.mediacompare.scan.ExfatReceiptAuthority receipts;
+    @org.springframework.beans.factory.annotation.Autowired
+    void exfatReceipts(io.github.topher6835.mediacompare.scan.ExfatReceiptAuthority receipts) { this.receipts = receipts; }
 
     public ContentHashWriter(CatalogRepository catalogRepository, AnalysisRepository analysisRepository,
             CurrentMembershipAuthority authority) {
@@ -36,9 +39,22 @@ public class ContentHashWriter {
             throw new StaleContentHashException(candidate.fileEntryId(), "catalog evidence changed");
         }
 
+        insertHash(candidate.contentRecordId(), digestHex, startedAtMs, finishedAtMs);
+    }
+
+    /** Receipt processor has already guarded the occurrence, memberships and exact bundle under the writer. */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public void publishExfat(io.github.topher6835.mediacompare.catalog.FileEntry captured,
+            long scanRunId, long finishedAtMs) {
+        var receipt = receipts.reserveAndRequire(captured, scanRunId, "CONTENT_HASHING");
+        receipts.requireContent(captured);
+        insertHash(captured.currentContentId(), receipt.sha256(), receipt.observationStartedAtMs(), finishedAtMs);
+    }
+
+    private void insertHash(long contentRecordId, String digestHex, long startedAtMs, long finishedAtMs) {
         AnalysisRecord analysisRecord = analysisRepository.insert(new AnalysisRecord(
                 null,
-                candidate.contentRecordId(),
+                contentRecordId,
                 Sha256AnalysisDefinition.ANALYSIS_TYPE,
                 Sha256AnalysisDefinition.ANALYZER_ID,
                 Sha256AnalysisDefinition.ANALYZER_VERSION,

@@ -12,6 +12,9 @@ public final class ExfatSlice3Fixtures {
     public static final String GUID = "\\\\?\\Volume{5b22bd93-5d21-11ec-bf63-7085c24c9111}\\";
     public static final LocationPath ROOT = path("C:\\Photos");
     public static WindowsExfatSupport enabledForTests() { return new WindowsExfatSupport(true); }
+    public static ExfatAuthorityWindowRegistry shortDrainRegistry(io.github.topher6835.mediacompare.config.CatalogOwnership ownership) {
+        return new ExfatAuthorityWindowRegistry(ownership, System::nanoTime, java.time.Duration.ofMillis(40));
+    }
     public static LocationPath path(String text) { return LocationPathParser.parse(LocationDialect.WINDOWS_DRIVE, text); }
     public static String lp(LocationPath value) { return new LocationPathCodec().encode(value); }
     public static String key(LocationPath value) { return LocationKeyCodec.encode(value).value(); }

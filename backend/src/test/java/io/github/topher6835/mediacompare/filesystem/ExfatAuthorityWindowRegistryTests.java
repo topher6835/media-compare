@@ -27,6 +27,22 @@ class ExfatAuthorityWindowRegistryTests {
     }
     @AfterEach void shutdown() throws Exception { registry.destroy(); ownership.close(); }
 
+    @Test void bundleDeadlineTracksActualProgressRatherThanTotalRunningTime() {
+        var root = new Root(ROOT); var id = acquire(scope(), root); String bundle = UUID.randomUUID().toString();
+        registry.associate(scope(), id, bundle, 1, 2);
+        try (var retained = registry.retainBundle(scope(), id, bundle, 1, 2)) {
+            for (int i = 0; i < 10; i++) {
+                time.addAndGet(ExfatAuthorityWindowRegistry.NO_PROGRESS_TIMEOUT.toNanos() / 2);
+                retained.progress(); registry.expire(); retained.checkpoint(bundle, 1, 2);
+            }
+            assertTrue(registry.project(scope()).liveAuthorityAvailable());
+            time.addAndGet(ExfatAuthorityWindowRegistry.NO_PROGRESS_TIMEOUT.toNanos()); registry.expire();
+            assertTrue(retained.cancelled()); assertEquals(0, root.closes.get(), "IO still retains resources while cancelled");
+            assertThrows(IllegalStateException.class, retained::progress);
+        }
+        assertEquals(ExfatAuthorityWindowRegistry.ReleaseState.RELEASED, registry.release(id).releaseState());
+    }
+
     @Test void exactRuntimeSourceContextRevisionsRootEvidenceAndPeriodAreRequired() throws Exception {
         var scope = scope();
         var root = new Root(ROOT);

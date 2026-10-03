@@ -24,6 +24,12 @@ public class ContentAssignmentService {
     private final JobRepository jobRepository;
     private final CatalogRepository catalogRepository;
     private final ContentAssignmentWriter contentAssignmentWriter;
+    private ExfatReceiptProcessingService exfat;
+    private ExfatScanBundles bundles;
+    @org.springframework.beans.factory.annotation.Autowired
+    void exfatReceipts(ExfatReceiptProcessingService exfat) { this.exfat = exfat; }
+    @org.springframework.beans.factory.annotation.Autowired
+    void exfatBundles(ExfatScanBundles bundles) { this.bundles = bundles; }
 
     public ContentAssignmentService(ScanRepository scanRepository, JobRepository jobRepository,
             CatalogRepository catalogRepository, ContentAssignmentWriter contentAssignmentWriter) {
@@ -41,6 +47,10 @@ public class ContentAssignmentService {
     ContentAssignmentResult assignSources(long scanRunId, List<ScanRunSource> sources) {
         long assignedCount = 0;
         long skippedCount = 0;
+        if (exfat != null) {
+            var result = exfat.assign(scanRunId);
+            assignedCount = result.assignedCount(); skippedCount = result.skippedCount();
+        }
 
         for (ScanRunSource source : sources) {
             long afterFileEntryId = 0;
@@ -61,6 +71,7 @@ public class ContentAssignmentService {
                     } catch (StaleContentAssignmentException exception) {
                         skippedCount++;
                     }
+                    if (bundles != null && !bundles.authorities(scanRunId).isEmpty()) bundles.progress(scanRunId);
                 }
             }
         }

@@ -12,6 +12,9 @@ public class Version2ExecutionState {
 
     private final ScanRepository scanRepository;
     private final JobRepository jobRepository;
+    private ExfatScanBundles bundles;
+    @org.springframework.beans.factory.annotation.Autowired
+    void exfatBundles(ExfatScanBundles bundles) { this.bundles = bundles; }
 
     public Version2ExecutionState(ScanRepository scanRepository, JobRepository jobRepository) {
         this.scanRepository = scanRepository;
@@ -29,6 +32,7 @@ public class Version2ExecutionState {
     @Transactional
     public void completeAssignment(Job job, JobStage stage, String resultJson,
             long progressCompleted, long completedAtMs) {
+        if (bundles != null) bundles.requireStageCompletion(job);
         requireOne(jobRepository.completeVersion2Stage(
                 job.id(), stage.id(), ScanExecutionDefinition.CONTENT_ASSIGNMENT,
                 resultJson, progressCompleted, completedAtMs), "complete CONTENT_ASSIGNMENT");
@@ -54,6 +58,7 @@ public class Version2ExecutionState {
     @Transactional
     public void completeHashing(long scanRunId, Job job, JobStage stage, String resultJson,
             long progressCompleted, long completedAtMs) {
+        if (bundles != null) bundles.requireStageCompletion(job);
         requireOne(jobRepository.completeVersion2Stage(
                 job.id(), stage.id(), ScanExecutionDefinition.CONTENT_HASHING,
                 resultJson, progressCompleted, completedAtMs), "complete CONTENT_HASHING");

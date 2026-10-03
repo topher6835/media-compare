@@ -25,6 +25,9 @@ public class Version2ContentHashingService {
     private final ContentHashingService contentHashingService;
     private final ContentHashingStageResultCodec resultCodec;
     private final Version2ExecutionState executionState;
+    private io.github.topher6835.mediacompare.scan.ExfatScanBundles bundles;
+    @org.springframework.beans.factory.annotation.Autowired
+    void exfatBundles(io.github.topher6835.mediacompare.scan.ExfatScanBundles bundles) { this.bundles = bundles; }
 
     public Version2ContentHashingService(ScanRepository scanRepository, JobRepository jobRepository,
             ContentHashingService contentHashingService,
@@ -47,8 +50,17 @@ public class Version2ContentHashingService {
     }
 
     private ContentHashingStageResult execute(long scanRunId, long executionVersion) {
+        if (bundles != null) {
+            try (var lease = bundles.retain(bundles.checkedAuthorities(scanRunId))) {
+                lease.checkpoint(); return executeUnderAuthority(scanRunId, executionVersion);
+            }
+        }
+        return executeUnderAuthority(scanRunId, executionVersion);
+    }
+
+    private ContentHashingStageResult executeUnderAuthority(long scanRunId, long executionVersion) {
         HashingPlan plan = preflight(scanRunId, executionVersion);
-        executionState.startStage(plan.job(), plan.stage(), System.currentTimeMillis());
+        publish(scanRunId, () -> executionState.startStage(plan.job(), plan.stage(), System.currentTimeMillis()));
 
         try {
             ContentHashingResult hashing = contentHashingService.hashSources(scanRunId, plan.sources());
@@ -56,8 +68,8 @@ public class Version2ContentHashingService {
             ContentHashingStageResult result = ContentHashingStageResult.from(hashing);
             long processedCount = result.hashedCount() + result.cachedCount()
                     + result.skippedCount() + result.failedCount();
-            executionState.completeHashing(scanRunId, plan.job(), plan.stage(),
-                    resultCodec.write(result), processedCount, System.currentTimeMillis());
+            publish(scanRunId, () -> executionState.completeHashing(scanRunId, plan.job(), plan.stage(),
+                    resultCodec.write(result), processedCount, System.currentTimeMillis()));
             return result;
         } catch (RuntimeException exception) {
             IndexingInterruptedException.propagateIfInterrupted(exception);
@@ -66,6 +78,10 @@ public class Version2ContentHashingService {
                     scanRunId, plan.job(), plan.stage(), System.currentTimeMillis(), errorMessage);
             throw new Version2ExecutionFailedException(errorMessage, exception);
         }
+    }
+
+    private void publish(long scanRunId, Runnable transaction) {
+        if (bundles == null) transaction.run(); else bundles.publishing(scanRunId, transaction);
     }
 
     private HashingPlan preflight(long scanRunId, long executionVersion) {

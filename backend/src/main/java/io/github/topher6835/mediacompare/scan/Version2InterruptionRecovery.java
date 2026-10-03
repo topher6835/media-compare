@@ -21,6 +21,10 @@ public class Version2InterruptionRecovery {
     private final JobRepository jobs;
     private final ScanRepository scans;
     private final ContentAssignmentStageResultCodec assignmentCodec;
+    private ExfatScanBundles bundles;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void exfatBundles(ExfatScanBundles bundles) { this.bundles = bundles; }
 
     public Version2InterruptionRecovery(JobRepository jobs, ScanRepository scans,
             ContentAssignmentStageResultCodec assignmentCodec) {
@@ -32,6 +36,8 @@ public class Version2InterruptionRecovery {
     /** Caller owns the catalog and has stopped this execution; never race a live worker. */
     @Transactional
     public void failIfActive(long jobId, String message) {
+        // Revocation is immediate/nonblocking; it never waits for the publication gate under the writer.
+        if (bundles != null) bundles.revokeJob(jobId);
         Job job = jobs.findJobById(jobId).orElseThrow();
         if (job.executionVersion() == 1 && "SCAN".equals(job.jobType())
                 && List.of("PENDING", "RUNNING").contains(job.status())) {

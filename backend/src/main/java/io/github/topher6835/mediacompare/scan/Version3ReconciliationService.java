@@ -18,6 +18,9 @@ public class Version3ReconciliationService {
     private final ReconciliationExecutionState state;
     private final Version3ReconciliationWriter writer;
     private final Version2ExecutionState failureState;
+    private ExfatScanBundles bundles;
+    @org.springframework.beans.factory.annotation.Autowired
+    void exfatBundles(ExfatScanBundles bundles) { this.bundles = bundles; }
 
     public Version3ReconciliationService(ScanRepository scans, JobRepository jobs,
             ReconciliationExecutionState state, Version3ReconciliationWriter writer,
@@ -54,10 +57,20 @@ public class Version3ReconciliationService {
                 if (claim == null) {
                     throw new IllegalStateException("Source has no trusted missing-claim authority");
                 }
-                writer.reconcile(job.id(), stage.id(), source, claim,
-                        ++completed, System.currentTimeMillis());
+                if (claim.exfat() != null) {
+                    if (bundles == null) throw new IllegalStateException("exFAT reconciliation lacks runtime authority");
+                    try (var lease = bundles.lease(List.of(claim.exfat()))) {
+                        lease.checkpoint();
+                        writer.reconcile(job.id(), stage.id(), source, claim, ++completed, System.currentTimeMillis());
+                    }
+                } else writer.reconcile(job.id(), stage.id(), source, claim, ++completed, System.currentTimeMillis());
             }
-            state.complete(scanRunId, job, stage, sources.size(), System.currentTimeMillis());
+            if (bundles != null) {
+                try (var lease = bundles.lease(bundles.authorities(scanRunId))) {
+                    lease.checkpoint();
+                    state.complete(scanRunId, job, stage, sources.size(), System.currentTimeMillis());
+                }
+            } else state.complete(scanRunId, job, stage, sources.size(), System.currentTimeMillis());
         } catch (RuntimeException exception) {
             IndexingInterruptedException.propagateIfInterrupted(exception);
             failureState.failCurrentStage(scanRunId, job, stage, System.currentTimeMillis(),

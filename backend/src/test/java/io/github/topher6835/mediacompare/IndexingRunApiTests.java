@@ -319,8 +319,9 @@ class IndexingRunApiTests {
         @Bean @Primary ControlledExecutor controlledExecutor(CatalogOwnership ownership, Version2IndexingStartup startup, JdbcTemplate jdbc) {
             return new ControlledExecutor(ownership, startup, jdbc);
         }
-        @Bean @Primary BarrierAcceptance barrierAcceptance(ScanRepository scans, ScanRunService requests, Version3ScanExecutionService executions) {
-            return new BarrierAcceptance(scans, requests, executions);
+        @Bean @Primary BarrierAcceptance barrierAcceptance(ScanRepository scans, ScanRunService requests, Version3ScanExecutionService executions,
+                io.github.topher6835.mediacompare.scan.ExfatScanBundles bundles) {
+            return new BarrierAcceptance(scans, requests, executions, bundles);
         }
     }
 
@@ -360,10 +361,11 @@ class IndexingRunApiTests {
     static class BarrierAcceptance extends IndexingRunAcceptance {
         volatile CyclicBarrier barrier;
         final AtomicInteger attempts = new AtomicInteger();
-        BarrierAcceptance(ScanRepository scans, ScanRunService requests, Version3ScanExecutionService executions) { super(scans, requests, executions); }
+        BarrierAcceptance(ScanRepository scans, ScanRunService requests, Version3ScanExecutionService executions,
+                io.github.topher6835.mediacompare.scan.ExfatScanBundles bundles) { super(scans, requests, executions, bundles); }
         public void setBarrier(CyclicBarrier barrier) { this.barrier = barrier; attempts.set(0); }
         public int attemptCount() { return attempts.get(); }
-        @Override @Transactional
+        @Override @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NEVER)
         public ScanExecutionDetails accept(String key, List<Long> sourceIds) {
             if (barrier != null) {
                 attempts.incrementAndGet();

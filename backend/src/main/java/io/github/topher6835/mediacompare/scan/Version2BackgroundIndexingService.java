@@ -14,6 +14,10 @@ public class Version2BackgroundIndexingService {
     private final Version3ScanExecutionService executions;
     private final Version2IndexingExecutor executor;
     private final Version2InterruptionRecovery recovery;
+    private ExfatScanBundles bundles;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void exfatBundles(ExfatScanBundles bundles) { this.bundles = bundles; }
 
     public Version2BackgroundIndexingService(Version3ScanExecutionService executions,
             Version2IndexingExecutor executor, Version2InterruptionRecovery recovery) {
@@ -33,8 +37,11 @@ public class Version2BackgroundIndexingService {
     @Transactional(propagation = Propagation.NEVER)
     public void submitAccepted(ScanExecutionDetails accepted) {
         try {
+            if (bundles != null) {
+                try (var lease = bundles.lease(bundles.authorities(accepted.job().scanRunId()))) { lease.checkpoint(); }
+            }
             executor.execute(() -> run(accepted.job().scanRunId(), accepted.job().id()));
-        } catch (RejectedExecutionException exception) {
+        } catch (RuntimeException exception) {
             recovery.failIfActive(accepted.job().id(), "Execution could not be scheduled");
             throw new Version2SchedulingException(exception);
         }

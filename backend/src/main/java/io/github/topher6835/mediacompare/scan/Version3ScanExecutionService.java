@@ -31,6 +31,10 @@ public class Version3ScanExecutionService {
     private final Version3ReconciliationService reconciliation;
     private final Version2ContentAssignmentService assignment;
     private final Version2ContentHashingService hashing;
+    private ExfatScanBundles bundles;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void exfatBundles(ExfatScanBundles bundles) { this.bundles = bundles; }
 
     public Version3ScanExecutionService(ScanRepository scans, JobRepository jobs,
             CatalogRepository catalog, LocationContextRepository contexts,
@@ -48,6 +52,11 @@ public class Version3ScanExecutionService {
 
     @Transactional
     public ScanExecutionDetails create(long scanRunId) {
+        return create(scanRunId, List.of());
+    }
+
+    @Transactional
+    ScanExecutionDetails create(long scanRunId, List<ExfatScanBundles.Prepared> prepared) {
         scans.reserveExecutionWrite();
         ScanRun scan = scans.findScanRunById(scanRunId).orElseThrow();
         if (!"INDEX".equals(scan.requestType()) || !"PENDING".equals(scan.status())
@@ -70,6 +79,15 @@ public class Version3ScanExecutionService {
                 throw new Version2ExecutionConflictException("Source context is unavailable for v3 admission");
             }
             boolean windows = LocationDialect.WINDOWS_DRIVE.persistedName().equals(source.rootPathDialect());
+            if (windows && io.github.topher6835.mediacompare.filesystem.WindowsDurableEvidenceFormat
+                    .identify(source.bindingEvidenceJson()) == io.github.topher6835.mediacompare.filesystem.WindowsDurableEvidenceFormat.EXFAT_SOURCE) {
+                var captured = prepared.stream().filter(p -> p.scope().source().id() == source.id())
+                        .findFirst().orElseThrow(() -> new Version2ExecutionConflictException("exFAT requires exact prepared admission"));
+                if (!captured.scope().source().equals(source) || !captured.scope().context().equals(context)) {
+                    throw new Version2ExecutionConflictException("exFAT admission snapshot changed");
+                }
+                continue;
+            }
             FileSystemProfile profile = windows ? FileSystemProfile.NTFS
                     : LocationDialect.UNIX.persistedName().equals(source.rootPathDialect())
                             ? FileSystemProfile.APFS : FileSystemProfile.UNSUPPORTED;
@@ -103,10 +121,16 @@ public class Version3ScanExecutionService {
     }
 
     public ScanExecutionDetails run(long scanRunId) {
-        var claims = discovery.execute(scanRunId);
-        reconciliation.execute(scanRunId, claims);
-        assignment.executeVersion3(scanRunId);
-        hashing.executeVersion3(scanRunId);
-        return findByScanRunId(scanRunId).orElseThrow();
+        try {
+            var claims = discovery.execute(scanRunId);
+            reconciliation.execute(scanRunId, claims);
+            assignment.executeVersion3(scanRunId);
+            hashing.executeVersion3(scanRunId);
+            if (bundles != null) bundles.handoff(scanRunId);
+            return findByScanRunId(scanRunId).orElseThrow();
+        } catch (RuntimeException failure) {
+            if (bundles != null) findByScanRunId(scanRunId).ifPresent(e -> bundles.revokeJob(e.job().id()));
+            throw failure;
+        }
     }
 }

@@ -28,6 +28,11 @@ public class ContentHashFileHasher {
     private static final int BUFFER_SIZE = 64 * 1024;
 
     public String hash(ContentHashCandidate candidate) throws IOException {
+        return hash(candidate, () -> { });
+    }
+
+    /** Native reads in a mixed bundle report buffer progress without changing native file authority. */
+    public String hash(ContentHashCandidate candidate, Runnable progress) throws IOException {
         HostFileCheck before = inspect(candidate);
         Path file = before.path();
 
@@ -36,13 +41,14 @@ public class ContentHashFileHasher {
         long bytesRead = 0;
         try (SeekableByteChannel channel = Files.newByteChannel(
                 file, Set.of(StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS))) {
-            int count;
-            while ((count = read(channel, buffer)) != -1) {
-                bytesRead += count;
+            int read;
+            while ((read = read(channel, buffer)) != -1) {
+                bytesRead += read;
                 if (bytesRead > candidate.sizeBytes()) {
                     throw stale(candidate, "file grew during hashing");
                 }
                 IndexingInterruptedException.check();
+                if (read > 0) progress.run();
                 buffer.flip();
                 digest.update(buffer);
                 buffer.clear();
