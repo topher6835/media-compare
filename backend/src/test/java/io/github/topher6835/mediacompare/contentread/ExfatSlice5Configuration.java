@@ -17,23 +17,48 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** Explicit constructor seams only; no production property, JNI, source pathname or mounted volume. */
 @TestConfiguration(proxyBeanMethods = false)
 public class ExfatSlice5Configuration {
     @Bean public FakeHost slice5Host() { return new FakeHost(); }
+    @Bean public PublicationTransactions slice5PublicationTransactions(PlatformTransactionManager manager) {
+        return new PublicationTransactions(manager);
+    }
     @Bean @Primary public ExfatContentReadBundles slice5Bundles(ExfatAuthorityWindowRegistry registry,
             ExfatContentReadCatalog catalog, ExfatScanBundles scans, JobRepository jobs, PlatformTransactionManager manager) {
         return new ExfatContentReadBundles(registry, catalog, scans, jobs, manager, true);
     }
     @Bean @Primary public ExfatProtectedOriginalAccess slice5Originals(ExfatAuthorityWindowRegistry registry,
-            ExfatContentReadCatalog catalog, SessionSourceBoundary boundary, PlatformTransactionManager manager, FakeHost host) {
-        return new ExfatProtectedOriginalAccess(registry, catalog, boundary, manager, () -> host);
+            ExfatContentReadCatalog catalog, SessionSourceBoundary boundary, PublicationTransactions transactions, FakeHost host) {
+        return new ExfatProtectedOriginalAccess(registry, catalog, boundary, transactions.observed(), () -> host);
     }
     public static ExfatContentReadBundles enabledBundles(ExfatAuthorityWindowRegistry registry,
             ExfatContentReadCatalog catalog, JobRepository jobs, PlatformTransactionManager manager) {
         return new ExfatContentReadBundles(registry, catalog, null, jobs, manager, true);
+    }
+    /** Observe actual transaction completion, without querying SQLite from original.close(). */
+    public static final class PublicationTransactions {
+        private final PlatformTransactionManager delegate;
+        public Runnable beforeCommit = () -> {}, afterCommit = () -> {};
+        PublicationTransactions(PlatformTransactionManager delegate) { this.delegate = delegate; }
+        PlatformTransactionManager observed() {
+            return new PlatformTransactionManager() {
+                @Override public TransactionStatus getTransaction(TransactionDefinition definition) {
+                    return delegate.getTransaction(definition);
+                }
+                @Override public void commit(TransactionStatus status) {
+                    assertTrue(status.isNewTransaction());
+                    beforeCommit.run();
+                    delegate.commit(status);
+                    afterCommit.run();
+                }
+                @Override public void rollback(TransactionStatus status) { delegate.rollback(status); }
+            };
+        }
     }
     public static final class FakeHost implements HostFileSystem {
         public final Map<String, byte[]> bytes = new HashMap<>();

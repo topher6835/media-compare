@@ -179,8 +179,22 @@ class ExfatSlice5FlowTests extends ExfatSlice4TestSupport {
     @Test void protectedPreviewCommitCacheAndPhysicalDenialAreCatalogOnly() throws Exception {
         imageScan("png"); var file = onlyFile(); var batch = batch(); var capture = capture(batch);
         var item = batch.admitItem(); batch.seal();
-        host.onClose = () -> assertEquals(1, count("preview_asset"));
+        var events = new ArrayList<String>();
+        var transactions = app.getBean(ExfatSlice5Configuration.PublicationTransactions.class);
+        transactions.beforeCommit = () -> {
+            assertTrue(host.held.open); assertEquals(0, host.closes.get());
+            assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
+            assertEquals(1, count("preview_asset")); // Same writer connection, before its real commit.
+            events.add("publication");
+        };
+        transactions.afterCommit = () -> {
+            assertTrue(host.held.open); assertEquals(0, host.closes.get());
+            events.add("commit");
+        };
+        host.onClose = () -> events.add("close");
         var preview = app.getBean(ExfatThumbnailService.class).generate(capture); item.close();
+        assertEquals(List.of("publication", "commit", "close"), events);
+        assertEquals(1, count("preview_asset"));
         assertEquals(ThumbnailGenerationResult.Outcome.GENERATED, preview.outcome());
         assertTrue(batch.drained());
         assertEquals(ThumbnailGenerationResult.Outcome.REUSED, app.getBean(SmallThumbnailService.class).generate(file.id()).outcome());
@@ -356,7 +370,7 @@ class ExfatSlice5FlowTests extends ExfatSlice4TestSupport {
         var cache = app.getBean(PreviewCacheWriter.class); var temporary = cache.createTemporary(relative, key);
         record Prepared(PreviewAsset asset, PreviewCacheWriter.PreparedPublication output) { }
         try (item) {
-            assertThrows(IllegalStateException.class, () -> app.getBean(ExfatProtectedOriginalAccess.class).read(captured,
+            var failure = assertThrows(IllegalStateException.class, () -> app.getBean(ExfatProtectedOriginalAccess.class).read(captured,
                     input -> {
                         var dimensions = app.getBean(SmallThumbnailRenderer.class).render(input, temporary).orElseThrow();
                         long bytes = cache.validateTemporary(temporary, dimensions);
@@ -369,6 +383,7 @@ class ExfatSlice5FlowTests extends ExfatSlice4TestSupport {
                         app.getBean(ThumbnailPublisher.class).publishProtected(captured, proof, prepared.asset(), prepared.output());
                         throw new IllegalStateException("Injected post-install SQLite rollback");
                     }));
+            assertEquals("Injected post-install SQLite rollback", failure.getMessage());
         } finally { java.nio.file.Files.deleteIfExists(temporary); }
         assertEquals(0, count("preview_asset"));
         assertTrue(java.nio.file.Files.exists(directory.resolve("previews").resolve(relative)), "Disposable orphan remains inaccessible without catalog row");

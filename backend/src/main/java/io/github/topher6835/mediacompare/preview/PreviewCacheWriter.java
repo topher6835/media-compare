@@ -1,6 +1,7 @@
 package io.github.topher6835.mediacompare.preview;
 
 import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
+import io.github.topher6835.mediacompare.filesystem.WindowsNtfsNative;
 
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
@@ -74,29 +75,31 @@ public class PreviewCacheWriter {
         }
         requireOutputMetadata(asset);
         Path target = prepareTarget(asset.relativePath(), asset.assetKey());
+        var staged = state(temporary);
         if (!temporary.getParent().equals(target.getParent())
                 || inspectPng(temporary, asset.pixelWidth(), asset.pixelHeight()) != asset.assetSizeBytes()) {
             throw new IOException("Invalid prepared thumbnail");
         }
-        BasicFileAttributes occupied = null;
+        FileState occupied = null;
         try {
+            var before = state(target);
             validatePublished(asset);
             if (Files.mismatch(temporary, target) != -1) throw new IOException("Existing preview differs");
-            occupied = attributes(target);
+            occupied = state(target);
+            requireSame(before, occupied);
         } catch (java.nio.file.NoSuchFileException missing) { }
-        var staged = attributes(temporary);
         String digest = hashOutput(temporary, asset.assetSizeBytes());
-        requireSame(staged, attributes(temporary));
-        return new PreparedPublication(temporary, target, staged, occupied, attributes(target.getParent()), digest);
+        requireSame(staged, state(temporary));
+        return new PreparedPublication(temporary, target, staged, occupied, state(target.getParent()), digest);
     }
 
     public final class PreparedPublication {
         private final Path temporary, target;
-        private final BasicFileAttributes staged, occupied, parent;
+        private final FileState staged, occupied, parent;
         private final String sha256;
         private boolean consumed;
-        private PreparedPublication(Path temporary, Path target, BasicFileAttributes staged,
-                BasicFileAttributes occupied, BasicFileAttributes parent, String sha256) {
+        private PreparedPublication(Path temporary, Path target, FileState staged,
+                FileState occupied, FileState parent, String sha256) {
             this.temporary = temporary; this.target = target; this.staged = staged;
             this.occupied = occupied; this.parent = parent; this.sha256 = sha256;
         }
@@ -108,15 +111,16 @@ public class PreviewCacheWriter {
                 throw new IllegalStateException("Prepared preview installation requires guarded writer");
             }
             consumed = true;
-            requireSame(staged, attributes(temporary));
-            var nowParent = attributes(target.getParent());
-            if (!nowParent.isDirectory() || !java.util.Objects.equals(parent.fileKey(), nowParent.fileKey())) {
+            requireSame(staged, state(temporary));
+            var nowParent = state(target.getParent());
+            if (!nowParent.attributes().isDirectory() || parent.identity() == null
+                    || !parent.identity().equals(nowParent.identity())) {
                 throw new IOException("Preview parent changed");
             }
-            if (occupied != null) { requireSame(occupied, attributes(target)); return false; }
+            if (occupied != null) { requireSame(occupied, state(target)); return false; }
             // A racing occupied target has not been validated: fail closed, never decode inside writer.
             Files.createLink(target, temporary);
-            requireSame(staged, attributes(target));
+            requireSame(staged, state(target));
             return true;
         }
     }
@@ -140,13 +144,31 @@ public class PreviewCacheWriter {
         return java.util.HexFormat.of().formatHex(digest.digest());
     }
 
-    private static BasicFileAttributes attributes(Path path) throws IOException {
-        return Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+    private record FileState(BasicFileAttributes attributes, Object identity) { }
+
+    private static FileState state(Path path) throws IOException {
+        var attributes = Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        Object identity = attributes.fileKey();
+        if (identity == null && HostFileSystems.current().isWindows()) {
+            // Windows' fast NIO stat may omit fileKey. Observe the cache entry via a bounded
+            // no-follow handle instead. This ID lives only for this prepared publication;
+            // it is neither exFAT original authority nor durable physical identity.
+            var observed = WindowsNtfsNative.observe(path);
+            if (observed.reparsePoint() || observed.directory() != attributes.isDirectory()) {
+                throw new IOException("Prepared preview entry is unsafe");
+            }
+            identity = observed.identity();
+        }
+        return new FileState(attributes, identity);
     }
-    private static void requireSame(BasicFileAttributes expected, BasicFileAttributes actual) throws IOException {
-        if (!actual.isRegularFile() || actual.isSymbolicLink() || expected.fileKey() == null
-                || !expected.fileKey().equals(actual.fileKey()) || expected.size() != actual.size()
-                || !expected.lastModifiedTime().equals(actual.lastModifiedTime())) throw new IOException("Prepared preview changed");
+    private static void requireSame(FileState expected, FileState actual) throws IOException {
+        var before = expected.attributes();
+        var after = actual.attributes();
+        if (!after.isRegularFile() || after.isSymbolicLink() || expected.identity() == null
+                || !expected.identity().equals(actual.identity()) || before.size() != after.size()
+                || !before.lastModifiedTime().equals(after.lastModifiedTime())) {
+            throw new IOException("Prepared preview changed");
+        }
     }
 
     private Path prepareTarget(String relativePath, String assetKey) throws IOException {
