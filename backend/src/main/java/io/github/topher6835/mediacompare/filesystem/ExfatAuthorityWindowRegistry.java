@@ -1,6 +1,9 @@
 package io.github.topher6835.mediacompare.filesystem;
 
+import io.github.topher6835.mediacompare.location.LocationPathCodec;
+
 import java.io.IOException;
+import io.github.topher6835.mediacompare.contentread.ExfatContentReadAuthority;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -152,7 +155,7 @@ public final class ExfatAuthorityWindowRegistry implements DisposableBean {
         requireOutsideTransaction();
         if (!gate.isWriteLockedByCurrentThread()) throw new IllegalStateException("Installation requires outer gate");
         var evidence = new WindowsExfatEvidenceCodec().decodeSource(scope.source().bindingEvidenceJson());
-        var path = new io.github.topher6835.mediacompare.location.LocationPathCodec()
+        var path = new LocationPathCodec()
                 .decode(evidence.resolvedRootLocationPath());
         if (!root.available() || root.directoryCount() != attempt.count || !root.resolvedRoot().equals(path)
                 || !root.volumeEvidence().equals(evidence.volume()) || scope.source().id() != attempt.sourceId
@@ -227,6 +230,7 @@ public final class ExfatAuthorityWindowRegistry implements DisposableBean {
         private Operation(Window window) { this(window, true); }
         private Operation(Window window, boolean holdsPublicationGate) {
             this.window = window; this.holdsPublicationGate = holdsPublicationGate;
+            if (window.contentOwner != null) window.workers.merge(owner, 1, Integer::sum);
         }
         public void revalidate() throws IOException {
             requireOwner();
@@ -248,6 +252,14 @@ public final class ExfatAuthorityWindowRegistry implements DisposableBean {
                         || window.scanRunId != scanRunId || window.jobId != jobId) throw invalid();
             }
         }
+        public void checkpointContent(ExfatContentReadAuthority authority) {
+            requireOwner();
+            synchronized (monitor) {
+                if (closed || requireLocked(authority.scope(), authority.window()) != window
+                        || window.phase != Phase.IN_BUNDLE || !authority.equals(window.contentOwner)) throw invalid();
+            }
+            if (Thread.currentThread().isInterrupted()) throw invalid();
+        }
         public DirectoryReservation reserveDirectories(int count) {
             requireOwner();
             synchronized (monitor) {
@@ -268,7 +280,11 @@ public final class ExfatAuthorityWindowRegistry implements DisposableBean {
             requireOwner();
             if (closed) return;
             closed = true;
-            synchronized (monitor) { window.users--; monitor.notifyAll(); }
+            synchronized (monitor) {
+                window.users--;
+                window.workers.computeIfPresent(owner, (thread, count) -> count == 1 ? null : count - 1);
+                monitor.notifyAll();
+            }
             if (holdsPublicationGate) gate.readLock().unlock();
         }
         private void requireOwner() {
@@ -285,6 +301,63 @@ public final class ExfatAuthorityWindowRegistry implements DisposableBean {
                     || window.scanRunId != scanRunId || window.jobId != jobId) throw invalid();
             window.users++;
             return new Operation(window, false);
+        }
+    }
+
+    /** Later reads have their own owner; no synthetic SCAN/generation identifiers. */
+    public Operation retainContent(ExfatContentReadAuthority authority) {
+        requireOutsideTransaction();
+        synchronized (monitor) {
+            Window window = requireLocked(authority.scope(), authority.window());
+            if (!authority.equals(window.contentOwner) || window.phase != Phase.IN_BUNDLE) throw invalid();
+            window.users++;
+            return new Operation(window, false);
+        }
+    }
+
+    public Operation requireContent(ExfatContentReadAuthority authority) {
+        Operation operation = requireExact(authority.scope(), authority.window());
+        try { operation.checkpointContent(authority); return operation; }
+        catch (RuntimeException failure) { operation.close(); throw failure; }
+    }
+
+    public boolean liveHandoff(ExfatAuthorityScope scope, WindowId id, String bundle) {
+        synchronized (monitor) {
+            try {
+                Window window = requireLocked(scope, id);
+                return window.phase == Phase.HANDOFF && bundle.equals(window.bundleId);
+            } catch (IllegalStateException unavailable) { return false; }
+        }
+    }
+
+    /** Validate the entire exact set before transferring any member; caller holds gate through commit. */
+    public void associateContent(java.util.List<ExfatContentReadAuthority> authorities, String handoffBundle) {
+        if (!gate.isWriteLockedByCurrentThread() || authorities.isEmpty()) throw invalid();
+        synchronized (monitor) {
+            var seen = new java.util.HashSet<Long>();
+            var first = authorities.getFirst();
+            for (var a : authorities) {
+                Window w = requireLocked(a.scope(), a.window());
+                if (!seen.add(a.window().sourceId()) || !first.bundleId().equals(a.bundleId())
+                        || !java.util.Objects.equals(first.metadataJobId(), a.metadataJobId())
+                        || !java.util.Objects.equals(first.thumbnailBatchId(), a.thumbnailBatchId())
+                        || (handoffBundle == null ? w.phase != Phase.PREPARED
+                            : w.phase != Phase.HANDOFF || !handoffBundle.equals(w.bundleId))) throw invalid();
+            }
+            for (var a : authorities) {
+                Window w = requireLocked(a.scope(), a.window());
+                w.contentOwner = a; w.bundleId = a.bundleId();
+                w.jobId = a.metadataJobId() == null ? 0 : a.metadataJobId();
+                w.phase = Phase.IN_BUNDLE; w.lastProgress = ticks.getAsLong();
+            }
+        }
+    }
+
+    public void revokeContent(String bundle) {
+        synchronized (monitor) {
+            for (Window w : new ArrayList<>(current.values())) {
+                if (w.contentOwner != null && bundle.equals(w.contentOwner.bundleId())) revokeBundleLocked(w);
+            }
         }
     }
 
@@ -431,6 +504,10 @@ public final class ExfatAuthorityWindowRegistry implements DisposableBean {
 
     private void revokeLocked(Window window) {
         window.phase = Phase.REVOKED;
+        // Checkpoints stop bounded reads; interruption also reaches cooperative decoders.
+        for (Thread worker : window.workers.keySet()) {
+            if (worker != Thread.currentThread()) worker.interrupt();
+        }
         current.remove(window.id.sourceId(), window);
         closing.put(window.id, window);
     }
@@ -543,6 +620,8 @@ public final class ExfatAuthorityWindowRegistry implements DisposableBean {
         long phaseStarted = ticks.getAsLong();
         long lastProgress = phaseStarted;
         String bundleId;
+        ExfatContentReadAuthority contentOwner;
+        final Map<Thread, Integer> workers = new HashMap<>();
         long scanRunId, jobId;
         int users;
         boolean drainStarted;

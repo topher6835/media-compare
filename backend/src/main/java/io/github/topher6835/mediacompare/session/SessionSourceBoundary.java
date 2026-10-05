@@ -15,6 +15,24 @@ public class SessionSourceBoundary {
         sessionRoot = validatedSessionRoot;
     }
 
+    /** Fresh validation for protected content reads; native structural checks stay unchanged. */
+    public void requireFreshSeparate(String sourceRoot) throws IOException {
+        if (sessionRoot == null) return;
+        var attributes = Files.readAttributes(sessionRoot, java.nio.file.attribute.BasicFileAttributes.class,
+                LinkOption.NOFOLLOW_LINKS);
+        if (!attributes.isDirectory() || attributes.isSymbolicLink()
+                || !sessionRoot.equals(sessionRoot.toRealPath(LinkOption.NOFOLLOW_LINKS))
+                || !sessionRoot.equals(sessionRoot.toRealPath())) throw new SourceWorkspaceOverlapException();
+        if (!Session.open(sessionRoot).root().equals(sessionRoot)) throw new SourceWorkspaceOverlapException();
+        Path source = Path.of(sourceRoot);
+        if (!source.isAbsolute() || !Files.isDirectory(source, LinkOption.NOFOLLOW_LINKS)
+                || !source.toString().equals(source.toRealPath(LinkOption.NOFOLLOW_LINKS).toString())
+                || !source.toRealPath(LinkOption.NOFOLLOW_LINKS).equals(source.toRealPath())) {
+            throw new SourceWorkspaceOverlapException();
+        }
+        requireSeparate(source.toRealPath().toString());
+    }
+
     public void requireSeparate(String sourceRoot) {
         if (sessionRoot == null) return; // Isolated catalog tests have no Session.
         Path source;

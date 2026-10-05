@@ -1,5 +1,8 @@
 package io.github.topher6835.mediacompare.analysis;
 
+import io.github.topher6835.mediacompare.contentread.ExfatContentReadBundles;
+import io.github.topher6835.mediacompare.web.CreateMediaMetadataRunRequest;
+
 import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -27,6 +30,17 @@ public class MediaMetadataJobAcceptance {
         } finally {
             admissionLock.unlock();
         }
+    }
+
+    private ExfatContentReadBundles contentBundles;
+    @org.springframework.beans.factory.annotation.Autowired
+    void contentBundles(ExfatContentReadBundles bundles) { contentBundles = bundles; }
+
+    public ExfatContentReadBundles.MetadataAdmission create(
+            CreateMediaMetadataRunRequest request) {
+        admissionLock.lock();
+        try { return contentBundles.admitMetadata(request, transactions::create); }
+        finally { admissionLock.unlock(); }
     }
 
     @Component

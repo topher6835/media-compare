@@ -67,6 +67,88 @@ public class PreviewCacheWriter {
         }
     }
 
+    /** Decode/equivalence checks happen before original's second hash and before the writer. */
+    public PreparedPublication preparePublication(Path temporary, PreviewAsset asset) throws IOException {
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("Preview validation must precede writer");
+        }
+        requireOutputMetadata(asset);
+        Path target = prepareTarget(asset.relativePath(), asset.assetKey());
+        if (!temporary.getParent().equals(target.getParent())
+                || inspectPng(temporary, asset.pixelWidth(), asset.pixelHeight()) != asset.assetSizeBytes()) {
+            throw new IOException("Invalid prepared thumbnail");
+        }
+        BasicFileAttributes occupied = null;
+        try {
+            validatePublished(asset);
+            if (Files.mismatch(temporary, target) != -1) throw new IOException("Existing preview differs");
+            occupied = attributes(target);
+        } catch (java.nio.file.NoSuchFileException missing) { }
+        var staged = attributes(temporary);
+        String digest = hashOutput(temporary, asset.assetSizeBytes());
+        requireSame(staged, attributes(temporary));
+        return new PreparedPublication(temporary, target, staged, occupied, attributes(target.getParent()), digest);
+    }
+
+    public final class PreparedPublication {
+        private final Path temporary, target;
+        private final BasicFileAttributes staged, occupied, parent;
+        private final String sha256;
+        private boolean consumed;
+        private PreparedPublication(Path temporary, Path target, BasicFileAttributes staged,
+                BasicFileAttributes occupied, BasicFileAttributes parent, String sha256) {
+            this.temporary = temporary; this.target = target; this.staged = staged;
+            this.occupied = occupied; this.parent = parent; this.sha256 = sha256;
+        }
+        /** Transient derived-output provenance; never physical identity or persisted authority. */
+        public String validatedSha256() { return sha256; }
+        /** Only bounded stat/link operations here: no PNG decoder, digest, or mismatch scan. */
+        public boolean install() throws IOException {
+            if (consumed || !org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()) {
+                throw new IllegalStateException("Prepared preview installation requires guarded writer");
+            }
+            consumed = true;
+            requireSame(staged, attributes(temporary));
+            var nowParent = attributes(target.getParent());
+            if (!nowParent.isDirectory() || !java.util.Objects.equals(parent.fileKey(), nowParent.fileKey())) {
+                throw new IOException("Preview parent changed");
+            }
+            if (occupied != null) { requireSame(occupied, attributes(target)); return false; }
+            // A racing occupied target has not been validated: fail closed, never decode inside writer.
+            Files.createLink(target, temporary);
+            requireSame(staged, attributes(target));
+            return true;
+        }
+    }
+    private static String hashOutput(Path output, long expectedLength) throws IOException {
+        java.security.MessageDigest digest;
+        try { digest = java.security.MessageDigest.getInstance("SHA-256"); }
+        catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+        long count = 0;
+        var buffer = java.nio.ByteBuffer.allocate(64 * 1024);
+        try (var channel = Files.newByteChannel(output, java.nio.file.StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) {
+            while (true) {
+                int read = channel.read(buffer);
+                if (read < 0) break;
+                if (read == 0) continue;
+                count = Math.addExact(count, read);
+                if (count > expectedLength) throw new IOException("Generated preview length changed");
+                buffer.flip(); digest.update(buffer); buffer.clear();
+            }
+        }
+        if (count != expectedLength) throw new IOException("Generated preview length changed");
+        return java.util.HexFormat.of().formatHex(digest.digest());
+    }
+
+    private static BasicFileAttributes attributes(Path path) throws IOException {
+        return Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+    }
+    private static void requireSame(BasicFileAttributes expected, BasicFileAttributes actual) throws IOException {
+        if (!actual.isRegularFile() || actual.isSymbolicLink() || expected.fileKey() == null
+                || !expected.fileKey().equals(actual.fileKey()) || expected.size() != actual.size()
+                || !expected.lastModifiedTime().equals(actual.lastModifiedTime())) throw new IOException("Prepared preview changed");
+    }
+
     private Path prepareTarget(String relativePath, String assetKey) throws IOException {
         PreviewCacheLayout.requireAssetPath(relativePath, PreviewKind.SMALL_THUMBNAIL, assetKey);
         if (configuredRoot.getParent() != null) {

@@ -1,5 +1,10 @@
 package io.github.topher6835.mediacompare.analysis;
 
+import io.github.topher6835.mediacompare.contentread.ExfatContentReadCapture;
+import io.github.topher6835.mediacompare.contentread.ExfatContentReadCatalog;
+import io.github.topher6835.mediacompare.contentread.ExfatProtectedOriginalAccess;
+import io.github.topher6835.mediacompare.filesystem.ExfatAuthorityWindowRegistry;
+
 import java.util.Objects;
 import java.util.Optional;
 import io.github.topher6835.mediacompare.catalog.CurrentMembershipAuthority;
@@ -49,6 +54,11 @@ public class MediaMetadataPublisher {
                     candidate.fileEntryId(), "catalog evidence changed");
         }
 
+        return storeCompleted(candidate, definition, resultJson, startedAtMs, finishedAtMs);
+    }
+
+    private AnalysisRecord storeCompleted(MediaMetadataFileCandidate candidate, MediaMetadataAnalysisDefinition definition,
+            String resultJson, long startedAtMs, long finishedAtMs) {
         Optional<AnalysisRecord> existing = findCompatible(candidate, definition);
         if (existing.isEmpty()) {
             return analysisRepository.insert(new AnalysisRecord(
@@ -101,6 +111,11 @@ public class MediaMetadataPublisher {
                     candidate.fileEntryId(), "catalog evidence changed");
         }
 
+        return storeFailure(candidate, definition, startedAtMs, finishedAtMs, safeError);
+    }
+
+    private AnalysisRecord storeFailure(MediaMetadataFileCandidate candidate, MediaMetadataAnalysisDefinition definition,
+            long startedAtMs, long finishedAtMs, String safeError) {
         Optional<AnalysisRecord> existing = findCompatible(candidate, definition);
         if (existing.isEmpty()) {
             return analysisRepository.insert(new AnalysisRecord(
@@ -131,6 +146,30 @@ public class MediaMetadataPublisher {
             throw new IllegalStateException("Compatible media metadata analysis is already in progress");
         }
         return analysisRepository.findAnalysisRecordById(stored.id()).orElseThrow();
+    }
+
+    private ExfatContentReadCatalog contentCatalog;
+    private ExfatAuthorityWindowRegistry contentRegistry;
+    @org.springframework.beans.factory.annotation.Autowired
+    void contentGuard(ExfatContentReadCatalog catalog,
+            ExfatAuthorityWindowRegistry registry) {
+        contentCatalog = catalog; contentRegistry = registry;
+    }
+
+    /** Only the protected coordinator may call this, after its exact capture/writer guard. */
+    public AnalysisRecord publishProtected(ExfatContentReadCapture capture,
+            ExfatProtectedOriginalAccess.VerifiedRead proof,
+            MediaMetadataFileCandidate candidate, MediaMetadataAnalysisDefinition definition,
+            MediaMetadataResult result, long startedAtMs, long finishedAtMs, boolean failed) {
+        if (!org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()
+                || capture.file().id() != candidate.fileEntryId()
+                || capture.content().id() != candidate.contentRecordId()) throw new IllegalStateException("Protected publication requires guarded writer");
+        proof.require(capture);
+        try (var held = contentRegistry.requireContent(capture.authority())) {
+            contentCatalog.require(capture, true);
+        }
+        return failed ? storeFailure(candidate, definition, startedAtMs, finishedAtMs, "Image metadata extraction failed")
+                : storeCompleted(candidate, definition, resultCodec.write(result), startedAtMs, finishedAtMs);
     }
 
     private Optional<AnalysisRecord> findCompatible(

@@ -1,5 +1,8 @@
 package io.github.topher6835.mediacompare.filesystem;
 
+import io.github.topher6835.mediacompare.contentread.ExfatContentReadCapture;
+import io.github.topher6835.mediacompare.location.LocationPathCodec;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -41,6 +44,62 @@ public final class WindowsExfatHostFileSystem implements HostFileSystem {
     @Override public void requireSessionStorage(Path path) throws IOException {
         throw new WindowsFileAccessException(WindowsFileAccessException.Reason.UNSUPPORTED,
                 "exFAT Session storage is unsupported");
+    }
+
+    @Override public ProtectedOriginal openExfatOriginal(
+            ExfatContentReadCapture capture,
+            WindowsExfatNativeAccess.Checkpoint checkpoint) throws IOException {
+        support.requireAvailable();
+        var location = new LocationPathCodec()
+                .decode(capture.file().locationPath());
+        Path file = path(location);
+        DirectoryChain chain = openDirectoryChain(file.getParent());
+        WindowsExfatNativeAccess.FileLease lease;
+        try { lease = openProtectedFile(file, chain, checkpoint); }
+        catch (IOException | RuntimeException failure) {
+            try { chain.close(); } catch (IOException closeFailure) { failure.addSuppressed(closeFailure); }
+            throw failure;
+        }
+        try {
+            var baseline = lease.observe();
+            var volume = new WindowsExfatEvidenceCodec().decodeSource(
+                    capture.authority().scope().source().bindingEvidenceJson()).volume();
+            if (!chain.volumeEvidence().volumeSerial().equals(volume.volumeSerial())
+                    || !chain.volumeEvidence().volumeGuid().equals(volume.volumeGuid())) throw uncertain("Source volume changed");
+            requireExactSpelling(file, baseline);
+            return new ProtectedOriginal() {
+                @Override public java.nio.channels.SeekableByteChannel channel() { return lease.channel(); }
+                @Override public void revalidate() throws IOException {
+                    checkpoint.check();
+                    var current = lease.observe();
+                    requireExactSpelling(file, current);
+                    if (baseline.attributes() != current.attributes() || baseline.size() != current.size()
+                            || baseline.creation100ns() != current.creation100ns() || baseline.modified100ns() != current.modified100ns()
+                            || !baseline.volumeSerial().equals(current.volumeSerial())
+                            || !baseline.legacyIndex().equals(current.legacyIndex())
+                            || !baseline.finalPath().equals(current.finalPath())) throw uncertain("Protected original changed during read");
+                }
+                @Override public void close() throws IOException {
+                    IOException failure = null;
+                    try { lease.close(); } catch (IOException e) { failure = e; }
+                    try { chain.close(); } catch (IOException e) {
+                        if (failure == null) failure = e; else failure.addSuppressed(e);
+                    }
+                    if (failure != null) throw failure;
+                }
+            };
+        } catch (IOException | RuntimeException failure) {
+            try { lease.close(); } catch (IOException closeFailure) { failure.addSuppressed(closeFailure); }
+            try { chain.close(); } catch (IOException closeFailure) { failure.addSuppressed(closeFailure); }
+            throw failure;
+        }
+    }
+
+    private static void requireExactSpelling(Path path, WindowsExfatNativeAccess.Observation observation) throws IOException {
+        if (!observation.finalPath().equals("\\\\?\\" + path)
+                || !path.toString().equals(path.toRealPath(LinkOption.NOFOLLOW_LINKS).toString())) {
+            throw uncertain("Protected original route spelling changed");
+        }
     }
 
     public DirectoryChain openDirectoryChain(Path root) throws IOException {
@@ -162,7 +221,7 @@ public final class WindowsExfatHostFileSystem implements HostFileSystem {
 
         private WindowsExfatHostFileSystem owner() { return WindowsExfatHostFileSystem.this; }
 
-        @Override public io.github.topher6835.mediacompare.location.LocationPath resolvedRoot() {
+        @Override public LocationPath resolvedRoot() {
             return ExfatReceiptValues.finalRoute(observations.getLast().finalPath());
         }
         @Override public WindowsExfatVolumeEvidence volumeEvidence() {

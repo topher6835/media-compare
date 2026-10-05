@@ -1,5 +1,7 @@
 package io.github.topher6835.mediacompare.analysis;
 
+import io.github.topher6835.mediacompare.filesystem.ExfatAuthorityWindowRegistry;
+
 import java.time.Duration;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -14,28 +16,32 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class MediaMetadataExecutor implements DisposableBean {
+    public interface NeverStartedTask extends Runnable { void neverStarted(); }
+
 
     private static final Logger log = LoggerFactory.getLogger(MediaMetadataExecutor.class);
     private final CatalogOwnership ownership;
-    private io.github.topher6835.mediacompare.filesystem.ExfatAuthorityWindowRegistry exfat;
+    private ExfatAuthorityWindowRegistry exfat;
 
     @org.springframework.beans.factory.annotation.Autowired
-    void exfatLifecycle(io.github.topher6835.mediacompare.filesystem.ExfatAuthorityWindowRegistry exfat) { this.exfat = exfat; }
-    private final ThreadPoolExecutor executor = new ThreadPoolExecutor(
-            1,
-            1,
-            0,
-            TimeUnit.SECONDS,
-            new ArrayBlockingQueue<>(1),
-            task -> {
-                Thread thread = new Thread(task, "media-compare-metadata");
-                thread.setDaemon(false);
-                return thread;
-            },
-            new ThreadPoolExecutor.AbortPolicy());
+    void exfatLifecycle(ExfatAuthorityWindowRegistry exfat) { this.exfat = exfat; }
+    private final ThreadPoolExecutor executor;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public MediaMetadataExecutor(CatalogOwnership ownership, MediaMetadataStartup startup) {
+        this(ownership, startup, new ThreadPoolExecutor(
+                1, 1, 0, TimeUnit.SECONDS, new ArrayBlockingQueue<>(1),
+                task -> {
+                    Thread thread = new Thread(task, "media-compare-metadata");
+                    thread.setDaemon(false);
+                    return thread;
+                }, new ThreadPoolExecutor.AbortPolicy()));
+    }
+
+    // Package-local seam for deterministic abandoned-task shutdown tests.
+    MediaMetadataExecutor(CatalogOwnership ownership, MediaMetadataStartup startup, ThreadPoolExecutor executor) {
         this.ownership = ownership;
+        this.executor = executor;
     }
 
     public void execute(Runnable task) {
@@ -57,10 +63,25 @@ public class MediaMetadataExecutor implements DisposableBean {
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
         }
-        executor.shutdownNow();
-        if (!executor.isTerminated()) {
-            ownership.retainUntilProcessExit();
-            log.warn("Metadata analysis exceeded shutdown budget; catalog ownership retained until process exit");
+        boolean finalizationFailed = false;
+        try {
+            var abandoned = executor.shutdownNow();
+            for (Runnable task : abandoned) {
+                if (task instanceof NeverStartedTask accepted) {
+                    try { accepted.neverStarted(); }
+                    catch (RuntimeException | Error failure) {
+                        finalizationFailed = true;
+                        // Bounded diagnostic: no arbitrary exception text or paths.
+                        log.warn("Abandoned metadata task finalization failed");
+                    }
+                }
+            }
+        } finally {
+            boolean terminated = executor.isTerminated();
+            if (finalizationFailed || !terminated) {
+                ownership.retainUntilProcessExit();
+                log.warn("Metadata shutdown incomplete or finalization failed; catalog ownership retained until process exit");
+            }
         }
     }
 }

@@ -123,7 +123,7 @@ public class ExactDuplicateService {
                 occurrence.extensionKey(),
                 category,
                 filter.matches(occurrence.extensionKey()),
-                occurrence.absolutePath());
+                occurrence.absolutePath(), occurrence.physicalActionsAvailable(), occurrence.physicalActionsUnavailableReason());
     }
 
     private ExactDuplicateGroupSummary toSummary(

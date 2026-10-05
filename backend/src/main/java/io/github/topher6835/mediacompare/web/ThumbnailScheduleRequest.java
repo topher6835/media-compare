@@ -3,7 +3,8 @@ package io.github.topher6835.mediacompare.web;
 import java.util.HashSet;
 import java.util.List;
 
-public record ThumbnailScheduleRequest(List<Long> fileEntryIds) {
+public record ThumbnailScheduleRequest(List<Long> fileEntryIds, List<SourceAuthorityWindowRequest> authorityWindows) {
+    public ThumbnailScheduleRequest(List<Long> fileEntryIds) { this(fileEntryIds, null); }
     public ThumbnailScheduleRequest {
         if (fileEntryIds == null || fileEntryIds.isEmpty() || fileEntryIds.size() > 100) {
             throw new IllegalArgumentException("fileEntryIds must contain 1..100 IDs");
@@ -15,5 +16,6 @@ public record ThumbnailScheduleRequest(List<Long> fileEntryIds) {
             }
         }
         fileEntryIds = List.copyOf(fileEntryIds);
+        if (authorityWindows != null) authorityWindows = CreateMediaMetadataRunRequest.checkedWindows(authorityWindows);
     }
 }

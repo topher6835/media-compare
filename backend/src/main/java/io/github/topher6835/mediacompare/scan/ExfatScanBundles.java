@@ -1,5 +1,9 @@
 package io.github.topher6835.mediacompare.scan;
 
+import io.github.topher6835.mediacompare.contentread.ExfatContentReadAuthority;
+import io.github.topher6835.mediacompare.filesystem.WindowsDurableEvidenceFormat;
+import io.github.topher6835.mediacompare.job.Job;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -50,7 +54,74 @@ public class ExfatScanBundles {
         this.catalog = catalog; this.contexts = contexts; this.periods = periods;
         this.scans = scans; this.jobs = jobs; this.registry = registry;
         transactions = new TransactionTemplate(manager); this.testEnabled = testEnabled;
+        handoffExpiry.scheduleWithFixedDelay(() -> registry.transition(() -> { pruneHandoffs(); return null; }), 1, 1, java.util.concurrent.TimeUnit.SECONDS);
     }
+
+    public record Handoff(long scanRunId, long scanJobId, String runtimeId, String bundleId,
+            List<WindowsExfatScanAuthority> authorities, Long metadataJobId) {
+        public Handoff { authorities = List.copyOf(authorities); }
+    }
+    private final Map<Long, Handoff> handoffs = new ConcurrentHashMap<>();
+    private final java.util.concurrent.ScheduledExecutorService handoffExpiry =
+            java.util.concurrent.Executors.newSingleThreadScheduledExecutor(task -> {
+                Thread thread = new Thread(task, "media-compare-exfat-handoffs");
+                thread.setDaemon(true); return thread;
+            });
+
+    public Handoff requireHandoff(long scanRunId) {
+        Handoff descriptor = handoffs.get(scanRunId);
+        if (descriptor == null) throw stale();
+        for (var a : descriptor.authorities()) {
+            if (descriptor.metadataJobId() == null) {
+                if (!registry.liveHandoff(a.scope(), a.window(), descriptor.bundleId())) throw stale();
+            } else {
+                var owner = new ExfatContentReadAuthority(a.scope(), a.window(), descriptor.bundleId(), descriptor.metadataJobId(), null);
+                try (var ignored = registry.requireContent(owner)) { }
+            }
+        }
+        var scan = scans.findScanRunById(scanRunId).orElseThrow();
+        var job = jobs.findJobById(descriptor.scanJobId()).orElseThrow();
+        if (!"COMPLETED".equals(scan.status()) || !"COMPLETED".equals(job.status())
+                || !"SCAN".equals(job.jobType()) || job.executionVersion() != 3
+                || !Long.valueOf(scanRunId).equals(job.scanRunId())) throw stale();
+        for (var a : descriptor.authorities()) {
+            var row = scans.findScanRunSourceById(a.scanRunSourceId()).orElseThrow();
+            if (!scope(a.scope().source().id()).equals(a.scope()) || !"COMPLETED".equals(row.status())
+                    || row.scanRunId() != scanRunId || row.sourceId() != a.scope().source().id()
+                    || row.sourceLocationRevision() != a.scope().source().locationRevision()
+                    || row.traversalGeneration() != a.generation()
+                    || !Long.valueOf(a.generation()).equals(row.completedGeneration())) throw stale();
+        }
+        return descriptor;
+    }
+
+    public void bindHandoff(Handoff handoff, long metadataJobId) {
+        if (handoff.metadataJobId() != null || !handoffs.replace(handoff.scanRunId(), handoff,
+                new Handoff(handoff.scanRunId(), handoff.scanJobId(), handoff.runtimeId(), handoff.bundleId(),
+                        handoff.authorities(), metadataJobId))) throw stale();
+    }
+
+    public void forgetHandoff(long metadataJobId) {
+        handoffs.entrySet().removeIf(entry -> Long.valueOf(metadataJobId).equals(entry.getValue().metadataJobId()));
+    }
+
+    private void pruneHandoffs() {
+        handoffs.entrySet().removeIf(entry -> {
+            Handoff h = entry.getValue();
+            if (h.metadataJobId() == null) return h.authorities().stream().anyMatch(a ->
+                    !registry.liveHandoff(a.scope(), a.window(), a.bundleUuid()));
+            for (var a : h.authorities()) {
+                var content = new ExfatContentReadAuthority(
+                        a.scope(), a.window(), h.bundleId(), h.metadataJobId(), null);
+                try (var ignored = registry.retainContent(content)) { }
+                catch (IllegalStateException unavailable) { return true; }
+            }
+            return false;
+        });
+    }
+
+    @jakarta.annotation.PreDestroy
+    void closeHandoffMaintenance() { handoffExpiry.shutdownNow(); handoffs.clear(); }
 
     public record Prepared(ExfatAuthorityScope scope, WindowId window) { }
 
@@ -60,8 +131,8 @@ public class ExfatScanBundles {
         var captured = new ArrayList<Prepared>();
         for (long sourceId : sourceIds) {
             var source = catalog.findSourceById(sourceId).orElseThrow();
-            if ("win-drive".equals(source.rootPathDialect()) && io.github.topher6835.mediacompare.filesystem.WindowsDurableEvidenceFormat
-                    .identify(source.bindingEvidenceJson()) == io.github.topher6835.mediacompare.filesystem.WindowsDurableEvidenceFormat.EXFAT_SOURCE) {
+            if ("win-drive".equals(source.rootPathDialect()) && WindowsDurableEvidenceFormat
+                    .identify(source.bindingEvidenceJson()) == WindowsDurableEvidenceFormat.EXFAT_SOURCE) {
                 if (!testEnabled && !WindowsExfatSupport.PRODUCTION.available()) {
                     throw new Version2ExecutionConflictException("Production exFAT indexing is disabled");
                 }
@@ -115,8 +186,8 @@ public class ExfatScanBundles {
     public List<WindowsExfatScanAuthority> checkedAuthorities(long scanRunId) {
         for (var row : scans.findScanRunSourcesByScanRunId(scanRunId)) {
             var source = catalog.findSourceById(row.sourceId()).orElseThrow();
-            if ("win-drive".equals(source.rootPathDialect()) && io.github.topher6835.mediacompare.filesystem.WindowsDurableEvidenceFormat
-                    .identify(source.bindingEvidenceJson()) == io.github.topher6835.mediacompare.filesystem.WindowsDurableEvidenceFormat.EXFAT_SOURCE) {
+            if ("win-drive".equals(source.rootPathDialect()) && WindowsDurableEvidenceFormat
+                    .identify(source.bindingEvidenceJson()) == WindowsDurableEvidenceFormat.EXFAT_SOURCE) {
                 require(scanRunId, source.id());
             }
         }
@@ -209,7 +280,7 @@ public class ExfatScanBundles {
         admitted.entrySet().removeIf(entry -> entry.getValue().stream().anyMatch(a -> a.jobId() == jobId));
     }
 
-    public void requireStageCompletion(io.github.topher6835.mediacompare.job.Job job) {
+    public void requireStageCompletion(Job job) {
         for (var a : checkedAuthorities(job.scanRunId())) requireCatalog(a, job.currentStageType(), "COMPLETED");
     }
 
@@ -226,7 +297,13 @@ public class ExfatScanBundles {
     public void handoff(long scanRunId) {
         if (authorities(scanRunId).isEmpty()) return;
         registry.transition(() -> {
-            for (var a : authorities(scanRunId)) registry.handoff(a.scope(), a.window(), a.bundleUuid());
+            var captured = List.copyOf(authorities(scanRunId));
+            pruneHandoffs();
+            if (handoffs.size() >= 64) throw stale();
+            for (var a : captured) registry.handoff(a.scope(), a.window(), a.bundleUuid());
+            var first = captured.getFirst();
+            handoffs.put(scanRunId, new Handoff(scanRunId, first.jobId(), registry.runtimeId(),
+                    first.bundleUuid(), captured, null));
             admitted.remove(scanRunId);
             return null;
         });

@@ -32,6 +32,7 @@ public class RevealFileService {
 
     public Result reveal(long fileEntryId) {
         if (fileEntryId <= 0) return Result.NOT_FOUND;
+        if (catalog.isExfat(fileEntryId)) return Result.STALE_AUTHORITY;
         if (!macHost.getAsBoolean()) return Result.UNSUPPORTED_HOST;
         if (TransactionSynchronizationManager.isActualTransactionActive()) {
             throw new IllegalStateException("Finder reveal cannot run inside a database transaction");

@@ -1,5 +1,7 @@
 package io.github.topher6835.mediacompare.library;
 
+import io.github.topher6835.mediacompare.catalog.PersistedPhysicalActions;
+
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
@@ -40,6 +42,9 @@ public class MediaLibraryRepository {
     static final String PAGE_SQL = """
             SELECT entry.id AS file_entry_id, entry.current_content_id, entry.extension_key,
                    entry.size_bytes, entry.observation_revision,
+                   entry.location_identity_status, entry.location_context_id,
+                   entry.occurrence_token, entry.observation_evidence_json,
+                   context.continuity_evidence_json AS physical_context_evidence,
                    entry.modified_time_epoch_second, entry.modified_time_nano,
                    source.id AS source_id, source.name AS source_name, source.root_path,
                    source.root_path_key,
@@ -158,14 +163,16 @@ public class MediaLibraryRepository {
         }
         var support = image != null && (image.format().equals("jpeg") || image.format().equals("png"))
                 ? MediaLibraryItem.GenerationSupport.SUPPORTED : MediaLibraryItem.GenerationSupport.UNSUPPORTED;
+        boolean exfat = PersistedPhysicalActions.projectionIsExfat(row);
+        String absolutePath = HostPathProjection.from(row.getString("root_path"), row.getString("root_path_key"),
+                row.getString("root_path_dialect"), relativePath, row.getString("location_path"), row.getString("location_key"));
         return new MediaLibraryItem(row.getLong("file_entry_id"), row.getLong("current_content_id"),
                 row.getLong("source_id"), row.getString("source_name"), relativePath,
                 relativePath.substring(relativePath.lastIndexOf('/') + 1), row.getString("extension_key"),
                 row.getLong("size_bytes"), image == null ? null : image.format(),
                 image == null ? null : image.width(), image == null ? null : image.height(),
                 row.getLong("source_count"), support, reference,
-                HostPathProjection.from(row.getString("root_path"), row.getString("root_path_key"),
-                        row.getString("root_path_dialect"),
-                        relativePath, row.getString("location_path"), row.getString("location_key")), null);
+                absolutePath, null, absolutePath != null && !exfat,
+                absolutePath == null || exfat ? "AUTHORITY_UNAVAILABLE" : null);
     }
 }

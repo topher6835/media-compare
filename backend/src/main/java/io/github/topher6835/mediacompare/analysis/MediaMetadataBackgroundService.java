@@ -1,5 +1,8 @@
 package io.github.topher6835.mediacompare.analysis;
 
+import io.github.topher6835.mediacompare.contentread.ExfatContentReadAuthority;
+import io.github.topher6835.mediacompare.web.CreateMediaMetadataRunRequest;
+
 import java.util.concurrent.RejectedExecutionException;
 
 import org.slf4j.Logger;
@@ -30,17 +33,45 @@ public class MediaMetadataBackgroundService {
     public MediaMetadataExecutionDetails start() {
         MediaMetadataExecutionDetails accepted = jobs.create();
         try {
-            executor.execute(() -> run(accepted.job().id()));
+            executor.execute(new Task(accepted.job().id(), java.util.List.of()));
         } catch (RejectedExecutionException exception) {
-            recovery.failIfActive(accepted.job().id(), "Execution could not be scheduled");
+            try { recovery.failIfActive(accepted.job().id(), "Execution could not be scheduled"); }
+            finally { jobs.finishContent(accepted.job().id()); }
             throw new MediaMetadataSchedulingException(exception);
         }
         return accepted;
     }
 
-    private void run(long jobId) {
+    @Transactional(propagation = Propagation.NEVER)
+    public MediaMetadataExecutionDetails start(CreateMediaMetadataRunRequest request) {
+        var admission = jobs.create(request);
+        if (!admission.submit()) return admission.details();
+        var accepted = admission.details();
+        Task task = new Task(accepted.job().id(), jobs.contentOwners(accepted.job().id()));
+        try { executor.execute(task); }
+        catch (RejectedExecutionException failure) {
+            task.neverStarted(); throw new MediaMetadataSchedulingException(failure);
+        }
+        return accepted;
+    }
+
+    private final class Task implements MediaMetadataExecutor.NeverStartedTask {
+        private final long jobId;
+        private final java.util.List<ExfatContentReadAuthority> owners;
+        Task(long jobId, java.util.List<ExfatContentReadAuthority> owners) {
+            this.jobId = jobId; this.owners = java.util.List.copyOf(owners);
+        }
+        @Override public void run() { runCaptured(jobId, owners); }
+        @Override public void neverStarted() {
+            try { recovery.failIfActive(jobId, "Execution could not be scheduled"); }
+            finally { jobs.finishContent(jobId); }
+        }
+    }
+
+    private void runCaptured(long jobId,
+            java.util.List<ExfatContentReadAuthority> owners) {
         try {
-            jobs.run(jobId);
+            if (owners.isEmpty()) jobs.run(jobId); else jobs.run(jobId, owners);
         } catch (Exception exception) {
             log.warn("Media metadata execution stopped: Job {}", jobId, exception);
             boolean interrupted = Thread.interrupted();

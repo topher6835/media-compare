@@ -67,7 +67,8 @@ public class MediaLibraryController {
     /** Admission only: the worker evaluates then-current source evidence asynchronously. */
     @PostMapping("/thumbnails")
     public ResponseEntity<ThumbnailScheduleResponse> thumbnails(@RequestBody ThumbnailScheduleRequest request) {
-        var results = request.fileEntryIds().stream().map(scheduler::schedule).toList();
+        var results = request.authorityWindows() == null ? request.fileEntryIds().stream().map(scheduler::schedule).toList()
+                : scheduler.schedule(request.fileEntryIds(), request.authorityWindows());
         return ResponseEntity.accepted().cacheControl(CacheControl.noStore())
                 .body(new ThumbnailScheduleResponse(results));
     }

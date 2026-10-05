@@ -532,6 +532,15 @@ V5 implements LocationContext/Source binding storage, and V6/v3 use the pure sca
 
 ## Development
 
+### Windows exFAT Slice 5 — 2026-10-04 (Content Reads/Ownership; Production Disabled)
+
+- Use dedicated exact content-read authority/captures, independent of SCAN generations and receipt authorization. A later read proves expected immutable ContentRecord bytes only; it creates no physical history or missing claim.
+- Preserve bounded HANDOFF descriptors before discarding SCAN admissions. Transfer exact original windows/scopes to one metadata Job under gate → writer → commit, with still-live idempotent replay. Standalone metadata and finite previews consume explicitly supplied prepared UUIDs into fresh bundles; never borrow current windows or fabricate SCAN IDs.
+- Require completed canonical application SHA/configuration/artifact and receipt/content length/hash coherence. Hash → rewind → supplied-channel JPEG/PNG decode/dispose → close borrowed wrapper → rewind channel → second hash → exact guarded publication. Use only verified JDK Java 21 provider/reader identities, filtered before protected input inspection. Missing approved providers fail as infrastructure errors.
+- Keep reader/native IO and generated preview validation outside writers; retain original protection through commit and require an operation-local verified-read proof. Install/repair final Session previews only after the guard, preserving no-clobber and disposable orphan behavior. Occupied invalid immutable output fails closed.
+- Keep paged exFAT candidates separate with admitted Sources inside deterministic route selection, native null-token predicates/publishers unchanged, metadata version 1/null scan link, and cache-first reads without live Source authority. Sealed finite batches and actual task exits govern completion/rejection/shutdown draining.
+- Classify persisted exFAT before reveal/cleanup IO, deny physical actions, and add backend informational capabilities. Preserve native/input precedence, including native non-macOS reveal 501. No frontend, schema, public activation, native identity redesign, real mounted operation or production policy flip. Windows/deployed Java 21/native sharing/Session output and mounted acceptance remain separate pending gates.
+
 ### Windows exFAT Slice 4 - 2026-10-03 (Internal Observation/Receipts; Production Disabled)
 
 - Implement the approved exact runtime/window/bundle/ScanRun/SCAN Job/Source-generation association atomically with v3 admission; scheduling follows commit. Failed admission or scheduling revokes transient ownership; request-key replay never attaches a newer window.

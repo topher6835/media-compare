@@ -1,5 +1,7 @@
 package io.github.topher6835.mediacompare.analysis;
 
+import io.github.topher6835.mediacompare.filesystem.ExfatAuthorityWindowRegistry;
+
 import java.util.List;
 
 import io.github.topher6835.mediacompare.job.Job;
@@ -24,6 +26,10 @@ public class MediaMetadataInterruptionRecovery {
         this.analyses = analyses;
     }
 
+    private ExfatAuthorityWindowRegistry registry;
+    @org.springframework.beans.factory.annotation.Autowired
+    void contentLifecycle(ExfatAuthorityWindowRegistry registry) { this.registry = registry; }
+
     @Transactional
     public void recoverAtStartup() {
         long now = System.currentTimeMillis();
@@ -42,6 +48,7 @@ public class MediaMetadataInterruptionRecovery {
                 || List.of("COMPLETED", "FAILED").contains(job.status())) {
             return;
         }
+        if (registry != null) registry.revokeJob(jobId); // Nonblocking revocation; never takes the publication gate.
         failActive(job, System.currentTimeMillis(), message);
     }
 

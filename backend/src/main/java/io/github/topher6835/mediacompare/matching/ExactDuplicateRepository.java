@@ -1,5 +1,9 @@
 package io.github.topher6835.mediacompare.matching;
 
+import io.github.topher6835.mediacompare.catalog.FileCategory;
+import io.github.topher6835.mediacompare.catalog.HostPathProjection;
+import io.github.topher6835.mediacompare.catalog.PersistedPhysicalActions;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -268,18 +272,30 @@ public class ExactDuplicateRepository {
                        membership.relative_path,
                        source.root_path, source.root_path_key, source.root_path_dialect,
                        file_entry.location_path, file_entry.location_key,
-                       file_entry.extension_key,
+                       file_entry.extension_key, file_entry.current_content_id, file_entry.size_bytes,
+                       file_entry.location_identity_status, file_entry.location_context_id,
+                       file_entry.observation_revision, file_entry.modified_time_epoch_second, file_entry.modified_time_nano,
+                       file_entry.occurrence_token, file_entry.observation_evidence_json,
+                       physical_context.continuity_evidence_json AS physical_context_evidence,
                        membership.presence_status,
                        membership.applicability_status
                 FROM exact_members
                 JOIN file_entry ON file_entry.current_content_id = exact_members.content_record_id
                 JOIN source_membership AS membership ON membership.file_entry_id = file_entry.id
                 JOIN source ON source.id = membership.source_id
+                LEFT JOIN location_context AS physical_context ON physical_context.id = file_entry.location_context_id
                 WHERE exact_members.digest_hex = ?
                   AND membership.applicability_status = 'ACTIVE'
                 ORDER BY file_entry.current_content_id, membership.source_id,
                          membership.relative_path, file_entry.id, membership.id
-                """, (resultSet, rowNumber) -> new ExactDuplicateOccurrenceRow(
+                """, (resultSet, rowNumber) -> {
+                    String absolutePath = HostPathProjection.from(
+                            resultSet.getString("root_path"), resultSet.getString("root_path_key"),
+                            resultSet.getString("root_path_dialect"), resultSet.getString("relative_path"),
+                            resultSet.getString("location_path"), resultSet.getString("location_key"));
+                    boolean exfat = PersistedPhysicalActions.projectionIsExfat(resultSet);
+                    boolean physicalActionsAvailable = absolutePath != null && !exfat;
+                    return new ExactDuplicateOccurrenceRow(
                         resultSet.getLong("file_entry_id"),
                         resultSet.getLong("content_record_id"),
                         resultSet.getLong("membership_id"),
@@ -289,11 +305,9 @@ public class ExactDuplicateRepository {
                         resultSet.getString("extension_key"),
                         resultSet.getString("presence_status"),
                         resultSet.getString("applicability_status"),
-                        io.github.topher6835.mediacompare.catalog.HostPathProjection.from(
-                                resultSet.getString("root_path"), resultSet.getString("root_path_key"),
-                                resultSet.getString("root_path_dialect"),
-                                resultSet.getString("relative_path"), resultSet.getString("location_path"),
-                                resultSet.getString("location_key"))),
+                        absolutePath, physicalActionsAvailable,
+                        physicalActionsAvailable ? null : "AUTHORITY_UNAVAILABLE");
+                },
                 exactDefinitionParameters(digestHex));
     }
 
@@ -346,7 +360,7 @@ public class ExactDuplicateRepository {
                     String extensionKey = resultSet.getString("extension_key");
                     return new ExactDuplicateFilterOption(
                             extensionKey,
-                            io.github.topher6835.mediacompare.catalog.FileCategory
+                            FileCategory
                                     .fromExtensionKey(extensionKey).orElse(null),
                             resultSet.getLong("exact_duplicate_group_count"),
                             resultSet.getLong("retained_occurrence_count"));

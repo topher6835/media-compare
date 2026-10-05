@@ -1,5 +1,7 @@
 package io.github.topher6835.mediacompare.preview;
 
+import io.github.topher6835.mediacompare.catalog.PersistedPhysicalActions;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
@@ -31,7 +33,18 @@ public class SmallThumbnailService {
         this.publisher = publisher;
     }
 
+    private PersistedPhysicalActions physicalActions;
+    private ExfatThumbnailService exfatThumbnails;
+    @org.springframework.beans.factory.annotation.Autowired
+    void contentReads(PersistedPhysicalActions actions, ExfatThumbnailService thumbnails) {
+        physicalActions = actions; exfatThumbnails = thumbnails;
+    }
+
     public synchronized ThumbnailGenerationResult generate(long fileEntryId) {
+        if (physicalActions != null && physicalActions.isExfat(fileEntryId)) {
+            return exfatThumbnails.cached(fileEntryId).orElseThrow(() ->
+                    new ThumbnailGenerationException("Exact content-read authority required for regeneration"));
+        }
         var candidate = candidates.findCurrentOccurrence(fileEntryId).orElseThrow(
                 () -> new ThumbnailGenerationException("FileEntry has no current trusted occurrence"));
         publisher.requireCurrent(candidate);

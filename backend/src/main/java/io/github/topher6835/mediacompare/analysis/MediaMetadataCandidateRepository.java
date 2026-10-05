@@ -141,6 +141,53 @@ public class MediaMetadataCandidateRepository {
                 """, MediaMetadataCandidateRepository::mapFileCandidate, fileEntryId).stream().findFirst();
     }
 
+    private static String exfatSelect(List<Long> sourceIds) {
+        if (sourceIds.isEmpty() || sourceIds.size() > 64) throw new IllegalArgumentException("Invalid admitted Source set");
+        String placeholders = String.join(",", java.util.Collections.nCopies(sourceIds.size(), "?"));
+        return OCCURRENCE_SELECT.replace("WHERE eligible.file_entry_id = file_entry.id",
+                "WHERE eligible.source_id IN (" + placeholders + ") AND eligible.file_entry_id = file_entry.id");
+    }
+
+    /** Restriction is INSIDE MIN(eligible.id), so an unaccepted overlapping Source cannot win. */
+    public List<MediaMetadataContentCandidate> findExfatCandidates(List<Long> sourceIds, long afterContentId, int limit) {
+        requirePositiveLimit(limit);
+        String select = exfatSelect(sourceIds);
+        var args = new java.util.ArrayList<Object>(sourceIds);
+        args.add(afterContentId); args.add(limit);
+        return jdbcTemplate.query("SELECT DISTINCT current_content_id, content_size_bytes FROM (" + select + """
+                WHERE file_entry.occurrence_token IS NOT NULL
+                  AND file_entry.location_identity_status = 'RESOLVED'
+                  AND file_entry.size_bytes = content_record.size_bytes
+                  AND content_record.id > ?
+                ) ORDER BY current_content_id LIMIT ?
+                """, (rs, row) -> new MediaMetadataContentCandidate(rs.getLong("current_content_id"),
+                        rs.getLong("content_size_bytes")), args.toArray());
+    }
+
+    public List<MediaMetadataFileCandidate> findExfatOccurrences(MediaMetadataContentCandidate content,
+            List<Long> sourceIds, long afterFileId, int limit) {
+        requirePositiveLimit(limit);
+        var args = new java.util.ArrayList<Object>(sourceIds);
+        args.add(content.contentRecordId()); args.add(content.expectedContentSizeBytes());
+        args.add(afterFileId); args.add(limit);
+        return jdbcTemplate.query(exfatSelect(sourceIds) + """
+                WHERE file_entry.occurrence_token IS NOT NULL
+                  AND file_entry.location_identity_status = 'RESOLVED'
+                  AND file_entry.current_content_id = ? AND content_record.size_bytes = ?
+                  AND file_entry.size_bytes = content_record.size_bytes
+                  AND file_entry.id > ? ORDER BY file_entry.id LIMIT ?
+                """, MediaMetadataCandidateRepository::mapFileCandidate, args.toArray());
+    }
+
+    public Optional<MediaMetadataFileCandidate> findExfatOccurrence(long fileId, List<Long> sourceIds) {
+        var args = new java.util.ArrayList<Object>(sourceIds); args.add(fileId);
+        return jdbcTemplate.query(exfatSelect(sourceIds) + """
+                WHERE file_entry.id = ? AND file_entry.occurrence_token IS NOT NULL
+                  AND file_entry.location_identity_status = 'RESOLVED'
+                  AND file_entry.size_bytes = content_record.size_bytes
+                """, MediaMetadataCandidateRepository::mapFileCandidate, args.toArray()).stream().findFirst();
+    }
+
     public int verifyCandidate(MediaMetadataFileCandidate candidate) {
         Objects.requireNonNull(candidate, "candidate");
         return jdbcTemplate.update("""

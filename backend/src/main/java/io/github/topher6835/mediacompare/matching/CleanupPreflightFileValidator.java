@@ -1,5 +1,8 @@
 package io.github.topher6835.mediacompare.matching;
 
+import io.github.topher6835.mediacompare.catalog.PersistedPhysicalActions;
+import io.github.topher6835.mediacompare.filesystem.FileSystemProfile;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -51,6 +54,10 @@ public class CleanupPreflightFileValidator {
         this.mounts = mounts;
     }
 
+    private PersistedPhysicalActions physicalActions;
+    @Autowired
+    void physicalActions(PersistedPhysicalActions actions) { physicalActions = actions; }
+
     public CleanupPreflightReason validate(CleanupPreflightCatalog.PhysicalFile file, String digest) {
         return validatePhysicalFile(file, digest).reason();
     }
@@ -62,6 +69,11 @@ public class CleanupPreflightFileValidator {
 
     private ValidatedFile validatePhysicalFile(CleanupPreflightCatalog.PhysicalFile file, String digest) {
         FileEntry entry = file.entry();
+        if (physicalActions != null ? physicalActions.isExfat(entry) : file.routes().stream().anyMatch(route ->
+                PersistedPhysicalActions.isExfat(entry,
+                        route.context() == null ? null : route.context().continuityEvidenceJson()))) {
+            return failed(AUTHORITY_UNAVAILABLE);
+        }
         if (!"RESOLVED".equals(entry.locationIdentityStatus())) return failed(UNSAFE_PATH);
         final LocationPath location;
         try {
@@ -161,7 +173,7 @@ public class CleanupPreflightFileValidator {
             if (observed.status() != HostFileStatus.ESTABLISHED) return AUTHORITY_UNAVAILABLE;
             return authority.volumeId().equals(observed.identity().volumeSerial()) ? null : AUTHORITY_CHANGED;
         }
-        if (authority.profile() != io.github.topher6835.mediacompare.filesystem.FileSystemProfile.APFS) {
+        if (authority.profile() != FileSystemProfile.APFS) {
             return AUTHORITY_UNAVAILABLE;
         }
         Path anchor = hostPath(authority.contextAnchor());

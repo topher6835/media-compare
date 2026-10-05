@@ -1,5 +1,8 @@
 package io.github.topher6835.mediacompare.matching;
 
+import io.github.topher6835.mediacompare.catalog.LocationContext;
+import io.github.topher6835.mediacompare.catalog.PersistedPhysicalActions;
+
 import java.util.List;
 
 import io.github.topher6835.mediacompare.catalog.CatalogRepository;
@@ -20,6 +23,15 @@ public class RevealCatalog {
         this.memberships = memberships;
         this.sources = sources;
         this.contexts = contexts;
+    }
+
+    @Transactional(readOnly = true)
+    public boolean isExfat(long fileEntryId) {
+        var entry = memberships.findById(fileEntryId).orElse(null);
+        if (entry == null) return false;
+        return PersistedPhysicalActions.isExfat(entry,
+                entry.locationContextId() == null ? null : contexts.findById(entry.locationContextId())
+                    .map(LocationContext::continuityEvidenceJson).orElse(null));
     }
 
     @Transactional(readOnly = true)

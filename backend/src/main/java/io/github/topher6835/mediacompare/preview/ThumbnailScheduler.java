@@ -1,5 +1,15 @@
 package io.github.topher6835.mediacompare.preview;
 
+import io.github.topher6835.mediacompare.analysis.MediaMetadataCandidateRepository;
+import io.github.topher6835.mediacompare.analysis.MediaMetadataJobConflictException;
+import io.github.topher6835.mediacompare.catalog.PersistedPhysicalActions;
+import io.github.topher6835.mediacompare.contentread.ExfatContentReadBundles;
+import io.github.topher6835.mediacompare.contentread.ExfatContentReadCapture;
+import io.github.topher6835.mediacompare.contentread.ExfatContentReadCatalog;
+import io.github.topher6835.mediacompare.filesystem.ExfatAuthorityWindowRegistry;
+import io.github.topher6835.mediacompare.web.SourceAuthorityWindowRequest;
+import io.github.topher6835.mediacompare.web.ThumbnailScheduleRequest;
+
 import java.time.Duration;
 import java.util.HashSet;
 import java.util.Set;
@@ -18,16 +28,16 @@ import org.springframework.stereotype.Component;
 /** Transient scheduling only: at most one running and 64 queued FileEntries, with no durable Job. */
 @Component
 public class ThumbnailScheduler implements DisposableBean {
-    public enum Status { QUEUED, ALREADY_QUEUED, QUEUE_FULL }
+    public enum Status { QUEUED, ALREADY_QUEUED, QUEUE_FULL, CACHED, AUTHORITY_UNAVAILABLE }
     public record Result(long fileEntryId, Status status) {
     }
 
     private static final Logger log = LoggerFactory.getLogger(ThumbnailScheduler.class);
     private final CatalogOwnership ownership;
-    private io.github.topher6835.mediacompare.filesystem.ExfatAuthorityWindowRegistry exfat;
+    private ExfatAuthorityWindowRegistry exfat;
 
     @Autowired
-    void exfatLifecycle(io.github.topher6835.mediacompare.filesystem.ExfatAuthorityWindowRegistry exfat) { this.exfat = exfat; }
+    void exfatLifecycle(ExfatAuthorityWindowRegistry exfat) { this.exfat = exfat; }
     private final LongFunction<ThumbnailGenerationResult> generate;
     private final Set<Long> queuedOrRunning = new HashSet<>();
     private final ThreadPoolExecutor executor = new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS,
@@ -48,9 +58,76 @@ public class ThumbnailScheduler implements DisposableBean {
         this.generate = generate;
     }
 
+    private PersistedPhysicalActions physicalActions;
+    private ExfatContentReadBundles contentBundles;
+    private ExfatContentReadCatalog contentCatalog;
+    private MediaMetadataCandidateRepository candidates;
+    private ExfatThumbnailService exfatThumbnails;
+    @Autowired
+    void contentReads(PersistedPhysicalActions actions,
+            ExfatContentReadBundles bundles,
+            ExfatContentReadCatalog catalog,
+            MediaMetadataCandidateRepository candidates,
+            ExfatThumbnailService thumbnails) {
+        physicalActions = actions; contentBundles = bundles; contentCatalog = catalog;
+        this.candidates = candidates; exfatThumbnails = thumbnails;
+    }
+
+    public java.util.List<Result> schedule(java.util.List<Long> ids,
+            java.util.List<SourceAuthorityWindowRequest> windows) {
+        // Reuse existing request validation even for internal callers.
+        var request = new ThumbnailScheduleRequest(ids, windows);
+        ids = request.fileEntryIds();
+        windows = request.authorityWindows();
+        var results = new java.util.LinkedHashMap<Long, Result>();
+        var pending = new java.util.ArrayList<Long>();
+        for (long id : ids) {
+            if (!physicalActions.isExfat(id)) results.put(id, schedule(id));
+            else if (exfatThumbnails.cached(id).isPresent()) results.put(id, new Result(id, Status.CACHED));
+            else pending.add(id);
+        }
+        if (pending.isEmpty()) return ids.stream().map(results::get).toList();
+        ExfatContentReadBundles.Batch batch;
+        try { batch = contentBundles.admitBatch(windows); }
+        catch (MediaMetadataJobConflictException | IllegalStateException unavailable) {
+            for (long id : pending) results.put(id, new Result(id, Status.AUTHORITY_UNAVAILABLE));
+            return ids.stream().map(results::get).toList();
+        }
+        try {
+            var captured = new java.util.ArrayList<ThumbnailTask>();
+            // Every capture precedes task submission; no native handle crosses this boundary.
+            for (long id : pending) {
+                var item = batch.admitItem();
+                try {
+                    var route = candidates.findExfatOccurrence(id,
+                            batch.owners().stream().map(a -> a.window().sourceId()).toList()).orElseThrow();
+                    var owner = batch.owners().stream().filter(a -> a.window().sourceId() == route.sourceId()).findFirst().orElseThrow();
+                    captured.add(new ThumbnailTask(id, contentCatalog.capture(owner, id, route.membershipId()), item));
+                } catch (RuntimeException unavailable) {
+                    item.close(); results.put(id, new Result(id, Status.AUTHORITY_UNAVAILABLE));
+                }
+            }
+            for (var task : captured) results.put(task.fileEntryId, submitCaptured(task));
+        } finally { batch.seal(); }
+        return ids.stream().map(results::get).toList();
+    }
+
+    private synchronized Result submitCaptured(ThumbnailTask task) {
+        if (!queuedOrRunning.add(task.fileEntryId)) {
+            task.neverStarted(); return new Result(task.fileEntryId, Status.AUTHORITY_UNAVAILABLE);
+        }
+        try { executor.execute(task); return new Result(task.fileEntryId, Status.QUEUED); }
+        catch (RejectedExecutionException rejected) {
+            queuedOrRunning.remove(task.fileEntryId); task.neverStarted(); return new Result(task.fileEntryId, Status.QUEUE_FULL);
+        }
+    }
+
     public synchronized Result schedule(long fileEntryId) {
         if (fileEntryId <= 0) {
             throw new IllegalArgumentException("FileEntry ID must be positive");
+        }
+        if (physicalActions != null && physicalActions.isExfat(fileEntryId)) {
+            return new Result(fileEntryId, exfatThumbnails.cached(fileEntryId).isPresent() ? Status.CACHED : Status.AUTHORITY_UNAVAILABLE);
         }
         if (!queuedOrRunning.add(fileEntryId)) {
             return new Result(fileEntryId, Status.ALREADY_QUEUED);
@@ -66,16 +143,21 @@ public class ThumbnailScheduler implements DisposableBean {
 
     private final class ThumbnailTask implements Runnable {
         private final long fileEntryId;
+        private final ExfatContentReadCapture capture;
+        private final ExfatContentReadBundles.Item item;
 
-        ThumbnailTask(long fileEntryId) {
-            this.fileEntryId = fileEntryId;
+        ThumbnailTask(long fileEntryId) { this(fileEntryId, null, null); }
+        ThumbnailTask(long fileEntryId, ExfatContentReadCapture capture,
+                ExfatContentReadBundles.Item item) {
+            this.fileEntryId = fileEntryId; this.capture = capture; this.item = item;
         }
+        void neverStarted() { if (item != null) item.close(); }
 
         @Override
         public void run() {
             try {
                 // Resolve current catalog/filesystem evidence when execution begins, never at admission.
-                generate.apply(fileEntryId);
+                if (capture == null) generate.apply(fileEntryId); else exfatThumbnails.generate(capture);
             } catch (RuntimeException failure) {
                 // No arbitrary messages/paths/stack traces, retry loop, or persisted failure state.
                 log.warn("Thumbnail generation failed for FileEntry {} ({})",
@@ -84,6 +166,7 @@ public class ThumbnailScheduler implements DisposableBean {
                 synchronized (ThumbnailScheduler.this) {
                     queuedOrRunning.remove(fileEntryId);
                 }
+                if (item != null) item.close();
             }
         }
     }
@@ -106,7 +189,9 @@ public class ThumbnailScheduler implements DisposableBean {
         var abandoned = executor.shutdownNow();
         synchronized (this) {
             for (Runnable task : abandoned) {
-                queuedOrRunning.remove(((ThumbnailTask) task).fileEntryId);
+                ThumbnailTask neverStarted = (ThumbnailTask) task;
+                queuedOrRunning.remove(neverStarted.fileEntryId);
+                neverStarted.neverStarted();
             }
         }
         if (!executor.isTerminated()) {

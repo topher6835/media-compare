@@ -1,5 +1,10 @@
 package io.github.topher6835.mediacompare.preview;
 
+import io.github.topher6835.mediacompare.contentread.ExfatContentReadCapture;
+import io.github.topher6835.mediacompare.contentread.ExfatContentReadCatalog;
+import io.github.topher6835.mediacompare.contentread.ExfatProtectedOriginalAccess;
+import io.github.topher6835.mediacompare.filesystem.ExfatAuthorityWindowRegistry;
+
 import java.io.IOException;
 import io.github.topher6835.mediacompare.analysis.MediaMetadataCandidateRepository;
 import io.github.topher6835.mediacompare.analysis.MediaMetadataFileCandidate;
@@ -45,6 +50,29 @@ public class ThumbnailPublisher {
         }
         // The authority guard reserves the SQLite writer before lookup/insert, serializing DB races.
         return assets.insert(generated);
+    }
+
+    private ExfatContentReadCatalog contentCatalog;
+    private ExfatAuthorityWindowRegistry contentRegistry;
+    @org.springframework.beans.factory.annotation.Autowired
+    void contentGuard(ExfatContentReadCatalog catalog,
+            ExfatAuthorityWindowRegistry registry) {
+        contentCatalog = catalog; contentRegistry = registry;
+    }
+
+    public PreviewAsset publishProtected(ExfatContentReadCapture capture,
+            ExfatProtectedOriginalAccess.VerifiedRead proof,
+            PreviewAsset generated, PreviewCacheWriter.PreparedPublication prepared) throws IOException {
+        proof.require(capture);
+        try (var held = contentRegistry.requireContent(capture.authority())) { contentCatalog.require(capture, true); }
+        var file = capture.file();
+        var expected = new PreviewSourceEvidence(file.id(), capture.content().id(), file.observationRevision(),
+                file.sizeBytes(), file.modifiedTimeEpochSecond(), file.modifiedTimeNano());
+        if (!expected.equals(generated.evidence())) throw new IllegalArgumentException("Protected preview evidence disagrees");
+        var existing = assets.findByAssetKey(generated.assetKey());
+        if (existing.isPresent()) requireEquivalent(existing.get(), generated);
+        prepared.install();
+        return existing.orElseGet(() -> assets.insert(generated));
     }
 
     private void guard(MediaMetadataFileCandidate candidate) {

@@ -38,9 +38,12 @@ public class MediaMetadataRunController {
         this.resultCodec = resultCodec;
     }
 
+    public ResponseEntity<MediaMetadataRunResponse> start() { return start(null); }
+
     @PostMapping
-    public ResponseEntity<MediaMetadataRunResponse> start() {
-        var details = background.start();
+    public ResponseEntity<MediaMetadataRunResponse> start(
+            @org.springframework.web.bind.annotation.RequestBody(required = false) CreateMediaMetadataRunRequest request) {
+        var details = request == null ? background.start() : background.start(request);
         return ResponseEntity.status(202)
                 .location(URI.create("/api/media-metadata-runs/" + details.job().id()))
                 .cacheControl(CacheControl.noStore())

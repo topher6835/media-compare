@@ -1,5 +1,7 @@
 package io.github.topher6835.mediacompare.preview;
 
+import io.github.topher6835.mediacompare.contentread.JdkOriginalImageReaders;
+
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
@@ -26,61 +28,71 @@ public class SmallThumbnailRenderer {
             if (!readers.hasNext()) {
                 return Optional.empty();
             }
-            ImageReader reader = readers.next();
-            try {
-                String format = reader.getFormatName().toUpperCase(Locale.ROOT);
-                boolean jpeg = format.equals("JPEG") || format.equals("JPG");
-                if (!jpeg && !format.equals("PNG")) {
-                    return Optional.empty();
-                }
-                int orientation = jpeg ? JpegExifOrientation.read(input) : 1;
-                reader.setInput(input, false, true);
-                int width = reader.getWidth(0);
-                int height = reader.getHeight(0);
-                if (Math.max(width, height) > SmallThumbnailDefinition.MAX_ENCODED_EDGE) {
-                    // PNG decoding retains full-width scanline buffers even when subsampling.
-                    throw new IOException("Encoded image exceeds safe decoder edge limit");
-                }
-                int sample = subsampling(width, height);
-                long decodedWidth = ((long) width + sample - 1) / sample;
-                long decodedHeight = ((long) height + sample - 1) / sample;
-                if (decodedWidth * decodedHeight > (long) SmallThumbnailDefinition.DECODE_EDGE
-                        * SmallThumbnailDefinition.DECODE_EDGE) {
-                    throw new IOException("Thumbnail intermediate exceeds pixel limit");
-                }
-                var parameters = reader.getDefaultReadParam();
-                parameters.setSourceSubsampling(sample, sample, 0, 0);
-                BufferedImage decoded = reader.read(0, parameters);
-                if (decoded == null || decoded.getWidth() != decodedWidth || decoded.getHeight() != decodedHeight) {
-                    throw new IOException("Image reader did not honor bounded subsampling");
-                }
-                BufferedImage oriented = orient(decoded, orientation);
-                Dimensions dimensions = dimensions(width, height, orientation);
-                BufferedImage output = new BufferedImage(dimensions.width(), dimensions.height(),
-                        decoded.getColorModel().hasAlpha() ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB);
-                Graphics2D graphics = output.createGraphics();
-                try {
-                    graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-                    graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-                    graphics.setRenderingHint(RenderingHints.KEY_ALPHA_INTERPOLATION, RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY);
-                    graphics.drawImage(oriented, 0, 0, dimensions.width(), dimensions.height(), null);
-                } finally {
-                    graphics.dispose();
-                }
-                try (var stream = Files.newOutputStream(temporaryOutput, StandardOpenOption.WRITE,
-                        StandardOpenOption.TRUNCATE_EXISTING, LinkOption.NOFOLLOW_LINKS);
-                        var imageOutput = new MemoryCacheImageOutputStream(stream)) {
-                    // The bounded output stream avoids ImageIO's default OS temporary-file spool.
-                    if (!ImageIO.write(output, SmallThumbnailDefinition.EXTENSION, imageOutput)) {
-                        throw new IOException("JDK PNG writer unavailable");
-                    }
-                }
-                return Optional.of(dimensions);
-            } finally {
-                reader.dispose();
-            }
+            return render(input, readers.next(), temporaryOutput);
         } catch (IllegalArgumentException | IndexOutOfBoundsException invalidImage) {
             throw new IOException("Invalid image data/dimensions", invalidImage);
+        }
+    }
+
+    public Optional<Dimensions> render(javax.imageio.stream.ImageInputStream input, Path temporaryOutput) throws IOException {
+        var selected = JdkOriginalImageReaders.select(input);
+        if (selected.isEmpty()) return Optional.empty();
+        return render(input, selected.get(), temporaryOutput);
+    }
+
+    private Optional<Dimensions> render(javax.imageio.stream.ImageInputStream input, ImageReader reader,
+            Path temporaryOutput) throws IOException {
+        try {
+            String format = reader.getFormatName().toUpperCase(Locale.ROOT);
+            boolean jpeg = format.equals("JPEG") || format.equals("JPG");
+            if (!jpeg && !format.equals("PNG")) {
+                return Optional.empty();
+            }
+            int orientation = jpeg ? JpegExifOrientation.read(input) : 1;
+            reader.setInput(input, false, true);
+            int width = reader.getWidth(0);
+            int height = reader.getHeight(0);
+            if (Math.max(width, height) > SmallThumbnailDefinition.MAX_ENCODED_EDGE) {
+                // PNG decoding retains full-width scanline buffers even when subsampling.
+                throw new IOException("Encoded image exceeds safe decoder edge limit");
+            }
+            int sample = subsampling(width, height);
+            long decodedWidth = ((long) width + sample - 1) / sample;
+            long decodedHeight = ((long) height + sample - 1) / sample;
+            if (decodedWidth * decodedHeight > (long) SmallThumbnailDefinition.DECODE_EDGE
+                    * SmallThumbnailDefinition.DECODE_EDGE) {
+                throw new IOException("Thumbnail intermediate exceeds pixel limit");
+            }
+            var parameters = reader.getDefaultReadParam();
+            parameters.setSourceSubsampling(sample, sample, 0, 0);
+            BufferedImage decoded = reader.read(0, parameters);
+            if (decoded == null || decoded.getWidth() != decodedWidth || decoded.getHeight() != decodedHeight) {
+                throw new IOException("Image reader did not honor bounded subsampling");
+            }
+            BufferedImage oriented = orient(decoded, orientation);
+            Dimensions dimensions = dimensions(width, height, orientation);
+            BufferedImage output = new BufferedImage(dimensions.width(), dimensions.height(),
+                    decoded.getColorModel().hasAlpha() ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB);
+            Graphics2D graphics = output.createGraphics();
+            try {
+                graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+                graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+                graphics.setRenderingHint(RenderingHints.KEY_ALPHA_INTERPOLATION, RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY);
+                graphics.drawImage(oriented, 0, 0, dimensions.width(), dimensions.height(), null);
+            } finally {
+                graphics.dispose();
+            }
+            try (var stream = Files.newOutputStream(temporaryOutput, StandardOpenOption.WRITE,
+                    StandardOpenOption.TRUNCATE_EXISTING, LinkOption.NOFOLLOW_LINKS);
+                    var imageOutput = new MemoryCacheImageOutputStream(stream)) {
+                // The bounded output stream avoids ImageIO's default OS temporary-file spool.
+                if (!ImageIO.write(output, SmallThumbnailDefinition.EXTENSION, imageOutput)) {
+                    throw new IOException("JDK PNG writer unavailable");
+                }
+            }
+            return Optional.of(dimensions);
+        } finally {
+            reader.dispose();
         }
     }
 

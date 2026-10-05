@@ -16,7 +16,23 @@ public record ExactDuplicateOccurrenceResponse(
         String extension,
         FileCategory fileCategory,
         boolean matchesFilter,
+        String absolutePath, boolean physicalActionsAvailable, String physicalActionsUnavailableReason) {
+    public ExactDuplicateOccurrenceResponse(
+        long fileEntryId,
+        long contentRecordId,
+        long membershipId,
+        long sourceId,
+        String sourceName,
+        String relativePath,
+        String presenceStatus,
+        String applicabilityStatus,
+        String extension,
+        FileCategory fileCategory,
+        boolean matchesFilter,
         String absolutePath) {
+        this(fileEntryId, contentRecordId, membershipId, sourceId, sourceName, relativePath, presenceStatus, applicabilityStatus, extension, fileCategory, matchesFilter, absolutePath, absolutePath != null, absolutePath == null ? "AUTHORITY_UNAVAILABLE" : null);
+    }
+
 
     public static ExactDuplicateOccurrenceResponse from(ExactDuplicateOccurrence occurrence) {
         return new ExactDuplicateOccurrenceResponse(
@@ -33,6 +49,6 @@ public record ExactDuplicateOccurrenceResponse(
                         : FileExtensionNormalizer.toApiValue(occurrence.extensionKey()),
                 occurrence.fileCategory(),
                 occurrence.matchesFilter(),
-                occurrence.absolutePath());
+                occurrence.absolutePath(), occurrence.physicalActionsAvailable(), occurrence.physicalActionsUnavailableReason());
     }
 }

@@ -1,5 +1,7 @@
 package io.github.topher6835.mediacompare.filesystem;
 
+import io.github.topher6835.mediacompare.contentread.ExfatContentReadCapture;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -12,6 +14,18 @@ import io.github.topher6835.mediacompare.location.LocationPath;
 
 /** Narrow host boundary for original-file paths and operation-local identity checks. */
 public interface HostFileSystem {
+    interface ProtectedOriginal extends AutoCloseable {
+        java.nio.channels.SeekableByteChannel channel();
+        void revalidate() throws IOException;
+        @Override void close() throws IOException;
+    }
+
+    default ProtectedOriginal openExfatOriginal(
+            ExfatContentReadCapture capture,
+            WindowsExfatNativeAccess.Checkpoint checkpoint) throws IOException {
+        throw new IOException("Protected exFAT original access unavailable on this host");
+    }
+
     default boolean isWindows() { return false; }
 
     /** Host capability, without filesystem IO or decoding stored evidence. */

@@ -1,5 +1,7 @@
 package io.github.topher6835.mediacompare.filesystem;
 
+import io.github.topher6835.mediacompare.contentread.ExfatContentReadCapture;
+
 import java.io.IOException;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -21,6 +23,12 @@ public final class WindowsHostFileSystem implements HostFileSystem {
         this.volumes = volumes;
         this.ntfs = ntfs;
         this.exfat = exfat;
+    }
+
+    @Override public ProtectedOriginal openExfatOriginal(
+            ExfatContentReadCapture capture,
+            WindowsExfatNativeAccess.Checkpoint checkpoint) throws IOException {
+        return exfat.openExfatOriginal(capture, checkpoint);
     }
 
     @Override public boolean isWindows() { return true; }

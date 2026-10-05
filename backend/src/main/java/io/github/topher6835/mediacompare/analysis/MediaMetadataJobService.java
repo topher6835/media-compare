@@ -1,5 +1,10 @@
 package io.github.topher6835.mediacompare.analysis;
 
+import io.github.topher6835.mediacompare.contentread.ExfatContentReadAuthority;
+import io.github.topher6835.mediacompare.contentread.ExfatContentReadBundles;
+import io.github.topher6835.mediacompare.contentread.ExfatImageMetadataAnalyzer;
+import io.github.topher6835.mediacompare.web.CreateMediaMetadataRunRequest;
+
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
@@ -45,11 +50,35 @@ public class MediaMetadataJobService {
         this.executionState = executionState;
     }
 
+    private ExfatContentReadBundles contentBundles;
+    private ExfatImageMetadataAnalyzer exfatAnalyzer;
+    @org.springframework.beans.factory.annotation.Autowired
+    void contentReads(ExfatContentReadBundles bundles,
+            ExfatImageMetadataAnalyzer analyzer) {
+        contentBundles = bundles; exfatAnalyzer = analyzer;
+    }
+    public ExfatContentReadBundles.MetadataAdmission create(
+            CreateMediaMetadataRunRequest request) { return acceptance.create(request); }
+
+    public List<ExfatContentReadAuthority> contentOwners(long jobId) {
+        return contentBundles == null ? List.of() : contentBundles.metadataOwners(jobId);
+    }
+    public void finishContent(long jobId) { if (contentBundles != null) contentBundles.finishMetadata(jobId); }
+
     public MediaMetadataExecutionDetails create() {
         return acceptance.create();
     }
 
-    public MediaMetadataExecutionDetails run(long jobId) {
+    public MediaMetadataExecutionDetails run(long jobId) { return run(jobId, contentOwners(jobId)); }
+
+    public MediaMetadataExecutionDetails run(long jobId,
+            List<ExfatContentReadAuthority> owners) {
+        try { return runCaptured(jobId, List.copyOf(owners)); }
+        finally { finishContent(jobId); }
+    }
+
+    private MediaMetadataExecutionDetails runCaptured(long jobId,
+            List<ExfatContentReadAuthority> owners) {
         Job job = jobs.findJobById(jobId)
                 .orElseThrow(() -> new MediaMetadataJobConflictException(
                         "Media metadata Job " + jobId + " does not exist"));
@@ -58,12 +87,14 @@ public class MediaMetadataJobService {
                 .orElseThrow(() -> new MediaMetadataJobConflictException(
                         "IMAGE_METADATA stage does not exist"));
         requirePending(job, stage);
-        executionState.start(job, stage, System.currentTimeMillis());
+        if (owners.isEmpty()) executionState.start(job, stage, System.currentTimeMillis());
+        else contentBundles.publishing(owners, () -> executionState.start(job, stage, System.currentTimeMillis()));
 
         try {
-            ImageMetadataStageResult result = processCandidates(job, stage);
-            executionState.complete(job, stage, resultCodec.write(result),
+            ImageMetadataStageResult result = owners.isEmpty() ? processCandidates(job, stage) : processExfatCandidates(job, stage, owners);
+            Runnable complete = () -> executionState.complete(job, stage, resultCodec.write(result),
                     result.candidatesAttempted(), System.currentTimeMillis());
+            if (owners.isEmpty()) complete.run(); else contentBundles.publishing(owners, complete);
             return find(jobId);
         } catch (RuntimeException exception) {
             IndexingInterruptedException.propagateIfInterrupted(exception);
@@ -163,6 +194,26 @@ public class MediaMetadataJobService {
                 processCandidate(candidate, definition, counts);
             }
             executionState.updateProgress(job, stage, counts.candidatesAttempted);
+        }
+    }
+
+    private ImageMetadataStageResult processExfatCandidates(Job job, JobStage stage,
+            List<ExfatContentReadAuthority> owners) {
+        long after = 0;
+        MutableCounts counts = new MutableCounts();
+        var sourceIds = owners.stream().map(a -> a.window().sourceId()).toList();
+        while (true) {
+            IndexingInterruptedException.check();
+            var page = candidates.findExfatCandidates(sourceIds, after, MediaMetadataJobDefinition.CANDIDATE_BATCH_SIZE);
+            if (page.isEmpty()) return counts.toResult();
+            for (var candidate : page) {
+                IndexingInterruptedException.check(); after = candidate.contentRecordId(); counts.candidatesAttempted++;
+                var result = exfatAnalyzer.analyze(candidate, owners);
+                if (result.failed()) counts.failed++;
+                else if (result.metadata() == null) counts.staleOrUnavailable++;
+                else counts.recordCompleted(result.metadata());
+            }
+            contentBundles.publishing(owners, () -> executionState.updateProgress(job, stage, counts.candidatesAttempted));
         }
     }
 
