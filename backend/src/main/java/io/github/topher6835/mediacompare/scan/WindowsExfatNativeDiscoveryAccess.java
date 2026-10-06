@@ -14,7 +14,12 @@ import io.github.topher6835.mediacompare.location.LocationPath;
 
 /** Uses the qualified protected opens; production policy in this boundary is still disabled. */
 final class WindowsExfatNativeDiscoveryAccess implements WindowsExfatDiscoveryAccess {
-    private final WindowsExfatHostFileSystem host = new WindowsExfatHostFileSystem();
+    private final WindowsExfatHostFileSystem host;
+
+    WindowsExfatNativeDiscoveryAccess() { this(new WindowsExfatHostFileSystem()); }
+
+    // Explicit mounted-acceptance construction; production continues using its disabled host.
+    WindowsExfatNativeDiscoveryAccess(WindowsExfatHostFileSystem host) { this.host = host; }
 
     @Override public Directory retainDirectory(LocationPath route) throws IOException {
         Path path = Path.of(host.pathText(route));

@@ -1,6 +1,115 @@
 # Windows exFAT Slice 5 report
 
-Initial implementation date: 2026-10-04. Slice 5 is externally reviewed and committed at `fa4a91d51418d40209aae2c29301e2cb7a4ab858`. Production exFAT remains disabled. The following Windows correction is uncommitted; the older sections retain historical implementation/review evidence.
+Initial implementation date: 2026-10-04. Slice 5 is externally reviewed and committed at `fa4a91d51418d40209aae2c29301e2cb7a4ab858`; its approved Windows preview correction is committed at `a5c7b2adb702961c0ea778f2a036baf5d66afe0f`. Production exFAT remains disabled. Earlier sections retain historical implementation/review evidence.
+
+## Real mounted Slice 5 acceptance - 2026-10-05
+
+Started on clean `main` at required HEAD `a5c7b2adb702961c0ea778f2a036baf5d66afe0f`; initial `git status --short` produced no output. Windows/Temurin Java 21.0.12.1, installed offline Maven 3.9.15 and the existing user dependency cache were used. No software/dependency/build configuration, schema, frontend or Slice 6 changes were made. No commit/push is authorized or performed.
+
+The production `WindowsVolumeProbe` verified accessible `Z:\`, native and NIO `exFAT`, drive type 3, volume root and sole mount path `Z:\`, `ordinaryExfatRoute=true`, `redirectedAlias=false`, DOS mapping `\Device\VeraCryptVolumeZ`, serial `98d16f05`, GUID `\\?\Volume{5b22bd93-5d21-11ec-bf63-7085c24c9111}\`. CIM was denied by the environment; the production native/NIO probe succeeded. Serial/GUID/mapping/index/timestamps are supporting or contradiction evidence, never durable physical identity.
+
+Every attempt refused an existing `Z:\media-compare-slice5-acceptance` root. All original fixtures and mutation controls were generated beneath that newly owned exact root. No unrelated `Z:` user file was enumerated, read, hashed or changed. Disposable SQLite catalog/Session cache storage stayed on NTFS under workspace-local JUnit temporary storage.
+
+| Original fixture relative to the acceptance root | Bytes | Full SHA-256 |
+| --- | ---: | --- |
+| `fixture.png` | 2954 | `f2a380ea381119cdf1fbb35d58dd4242cef9fdeb33bb45651387e89eb4e3f7f0` |
+| `fixture.jpeg` | 839 | `705755fc87db1dd6a3a5560f1caa07192fd4d2bec458d5dcd673aab695b16de7` |
+| `nested\child.png` | 2954 | `f2a380ea381119cdf1fbb35d58dd4242cef9fdeb33bb45651387e89eb4e3f7f0` |
+| `unsupported.txt` | 32 | `e3da22043d02174772cdc51b42169b0d156df0c4e4081e8216ba0acbdc1f23b2` |
+
+PNG and JPEG have deterministic 43 x 27 encoded pixels. JPEG has a generated EXIF Orientation=6 tag. Mutation-only controls (`replacement.bin`, renamed/moved paths and an empty directory) were created/restored/removed within the same root.
+
+| Mounted automated acceptance | Observed result |
+| --- | --- |
+| Native protected acquisition | Production JNA calls, READ-only file sharing; directory READ+WRITE sharing without DELETE, no-follow/backup and noninheritability checks. All four fixtures opened successfully. |
+| Retained parent/root chain | Actual drive-to-parent chain retained and revalidated; directory count equals parent depth + 1. Production checks reconciled direct requested/no-follow/native final paths, native/NIO regular/directory classification, file size/exact mtime and current volume facts. No links/reparse traversal was introduced. |
+| Native reads/seeks/EOF | Full byte equality; seeks to zero/interior/EOF/5,000,000,000; EOF returns -1; rewind/full SHA; closed channels reject reads. Successful native closes reached zero between stages. |
+| File overwrite/truncate/delete/rename/move | Independently opened Win32 conflicting operations denied, each error **32**. Corresponding controls succeeded after protected closure; bytes/routes restored. |
+| Replacement | `MoveFileEx(REPLACE_EXISTING)` denied with error **5**; post-close control succeeded. |
+| Retained empty-directory delete/rename/move | Denied with error **32**; post-close controls succeeded. Empty-directory deletion isolates sharing from nonempty-directory restrictions. |
+| Acceptance-root DELETE access/intermediate-parent rename | Independently opened DELETE access to the retained acceptance root and rename of the retained nested parent both denied with error **32**. Post-close root DELETE-access open/close and parent rename/restore controls succeeded; the root was never renamed outside its boundary. |
+| Existing writer/writable mapping | Protected acquisition denied with error **32** for an existing writer, writer + writable mapping, and retained writable mapping after writer closure. Unmap/mapping close succeeded; fresh protected acquisition succeeded. |
+| Real scan preparation | Explicit test construction installs actual retained chains and real configuration facts; existing native discovery/observation/receipt/content-assignment/hash services publish four real occurrences/content records. No public Prepare/Accept/indexing activation. |
+| Supplied-channel JPEG/PNG metadata | Existing approved JDK reader selection and metadata extractor report encoded **43 x 27** for both formats and the nested PNG. Nonimage takes the existing unsupported path. |
+| Thumbnails/EXIF | PNG thumbnail **43 x 27**; JPEG thumbnail **27 x 43**, exercising Orientation=6. Successful catalog rows and derived PNGs on NTFS. |
+| First/second hashes and no reopen | Channel-only forwarding observer records complete SHA digests at EOF for first and second hashes, equal to canonical content evidence. Production also validates each byte count against expected length. Exactly one native file acquisition per content read; decoder/renderer pathname overloads throw if called. Same supplied protected channel survives reader/wrapper disposal and rewinds for the second hash. |
+| Protected publication lifetime | Observed manager records publication, successful delegate commit, then original close; original channel is open at publication/commit. Existing exact guarded authority and SQLite writer are used. Rollback has close without commit. |
+| Cache reuse/repair | Subsequent cache hit without a live exFAT window increments no original native open count. Missing derived file repaired under fresh valid content authority, preserving the preview catalog row. |
+| Rollback/no-clobber | Injected failure after guarded file/row install rolls back the row, leaving a disposable derived orphan. A corrupt occupied immutable target remains byte-identical and unregistered when regeneration fails. |
+| Finite ownership | Sealed batches drain after success and failures. Explicit release during a paused in-flight decode returns DRAINING while handles remain; after actual item exit, release returns RELEASED with zero native handles. |
+| Released/stale capture | Released old capture is rejected before any native file open while a newly installed window exists. Cached preview remains available. Physical reveal returns STALE_AUTHORITY and cleanup preflight AUTHORITY_UNAVAILABLE for persisted exFAT entries. |
+| Durable state | Full Source/context/open-binding-period rows compare unchanged across mounted metadata/preview, routine reacquisition and release. No routine revision/binding churn. |
+| Cleanup | Application shutdown and explicit release close counted native resources to zero. Exact-root/known-occupant checks precede individually named deletes. Root absence independently confirmed with PowerShell. |
+
+The automated mounted run and final rerun each passed **1 test, zero failures/errors/skips** (`backend/target/slice5-mounted-automated.log` and `slice5-mounted-final.log`). The final rerun additionally checks retained-root DELETE access, intermediate-parent rename, explicit unsupported metadata outcome, and logs hash byte counts/rewinds. The count represents one sequential acceptance scenario with the assertions above, not one test per acceptance row. Initial compile and diagnostic setup failures are retained in `slice5-mounted-initial.log`, `slice5-mounted-retry.log` and `slice5-mounted-mapping-retry.log`. The mapping harness originally used GENERIC_WRITE alone; PAGE_READWRITE required GENERIC_READ+GENERIC_WRITE. The release barrier originally honored the registry's cancellation interrupt, allowing legitimate immediate RELEASED rather than the intended held-in-flight DRAINING observation; it now waits for explicit barrier exit while preserving interruption. These were harness corrections, not production defects. Every attempt that created a fixture closed its handles and removed the exact root safely.
+
+### Completed normal manual VeraCrypt dismount/remount gate
+
+The previously pending manual gate has now passed. The user supplied the observed VeraCrypt actions and post-remount test results below. Manual UI outcomes are recorded as user observations, not native dismount traces; no event timestamps are inferred. Together with the preserved automated evidence above, **the approved Windows/VeraCrypt/exFAT Slice 5 mounted acceptance is complete for the defined V1 scope**. Slice 6 and production activation remain incomplete.
+
+| Manual gate / post-remount check | Observed result |
+| --- | --- |
+| Normal dismount while HELD | While the acceptance test reported `HELD`, normal VeraCrypt dismount of `Z:` was attempted. VeraCrypt refused because files/folders were in use and offered a force dismount. |
+| Force prompt | Force dismount was explicitly declined. No forced removal/eject occurred. |
+| Authority release / normal dismount | The test was signaled to release authority. After it reported `RELEASED`, normal VeraCrypt dismount succeeded. |
+| Remount / continuation | The same VeraCrypt volume was remounted as `Z:`; the test was then signaled with `remounted.txt`. |
+| Production preflight after remount | Profile `EXFAT`; NIO type `exFAT`; serial `98d16f05`; GUID `\\?\Volume{5b22bd93-5d21-11ec-bf63-7085c24c9111}\`; DOS mapping `\Device\VeraCryptVolumeZ`; mount path `Z:\`; `ordinaryExfatRoute=true`. |
+| Old authority | Old pre-remount captures were rejected. Matching volume/path/hash evidence did not restore old-window authority. |
+| Fresh protected JPEG | Explicit fresh post-remount protected JPEG acquisition succeeded. Both expected full hashes were `705755fc87db1dd6a3a5560f1caa07192fd4d2bec458d5dcd673aab695b16de7`. |
+| Publication lifetime | Ordering remained `publication → commit → close`. |
+| Closure / cleanup | Native handles returned to zero. `Z:\media-compare-slice5-acceptance` was removed successfully. |
+| Final manual mounted test | **1 test, zero failures/errors/skips; Maven BUILD SUCCESS.** |
+| Production policy | Production exFAT remained disabled throughout. |
+
+Serial/GUID/DOS mapping/mount path/index and content equality remain supporting or contradiction evidence only; no durable physical identity is claimed. No forced/surprise-removal behavior was qualified. macOS was not rerun and privilege-dependent Windows symlink checks remain skipped; these are residual platform/privilege limitations, not failures of this completed mounted acceptance. This documentation step changes only STATUS/this report, preserving the earlier acceptance code/tests and automated evidence.
+
+The only production edit is a package-local injected-host constructor in `WindowsExfatNativeDiscoveryAccess`; the default constructor still creates the disabled production host. Three new test files provide the opt-in Windows mounted fixture, explicitly constructed scan services and acceptance scenario. `WindowsExfatSupport.PRODUCTION.available()` remained false throughout. Runtime windows remain process-local. No broader decoder, video/ffprobe, historical physical authority or public activation was added.
+
+Commands run from `backend/`:
+
+```powershell
+mvn -o '-Dmaven.repo.local=C:/Users/sears/.m2/repository' '-Djava.io.tmpdir=D:/Dev/projects/ai-projects/media-compare/backend/target/tmp' '-DargLine=-Djava.io.tmpdir=D:/Dev/projects/ai-projects/media-compare/backend/target/tmp' '-Dmedia-compare.slice5.mounted=true' '-Dtest=MountedExfatSlice5AcceptanceTests' test *> target/slice5-mounted-automated.log
+mvn -o '-Dmaven.repo.local=C:/Users/sears/.m2/repository' '-Djava.io.tmpdir=D:/Dev/projects/ai-projects/media-compare/backend/target/tmp' '-DargLine=-Djava.io.tmpdir=D:/Dev/projects/ai-projects/media-compare/backend/target/tmp' '-Dtest=ExfatSlice5FlowTests,PreparedPreviewPublicationTests,ExfatSlice5ImageIoTests,ExfatSlice5SeparationTests,ExfatSlice5SchedulerTests,ExfatAuthorityWindowRegistryTests,WindowsProtectedAccessTests,WindowsNtfsNativeTests,WindowsNtfsExecutionTests,WindowsNtfsReparseTests,WindowsNtfsScanAuthorityTests' test *> target/slice5-mounted-focused.log
+```
+
+The mounted test skips without `media-compare.slice5.mounted=true`. Its manual checkpoint requires `media-compare.slice5.manual-remount=true` and a new NTFS `media-compare.slice5.control` directory. It signals HELD, accepts an operator release signal, confirms resource closure, signals RELEASED and waits for a remounted signal before stale/fresh checks. Those signals coordinate manual actions; they are not native dismount traces or a proof that a dismount happened. The completed VeraCrypt actions and successful post-remount test are recorded above.
+
+Focused regression validation passed **101 tests, zero failures/errors, four skips**; shell/Maven exit 0 and BUILD SUCCESS. XML totals for all eleven requested classes were independently collected into ignored `backend/target/slice5-mounted-focused-totals.json` before the full run could overwrite reports:
+
+| Focused suite | Tests | Skips |
+| --- | ---: | ---: |
+| `ExfatSlice5FlowTests` | 38 | 0 |
+| `PreparedPreviewPublicationTests` | 14 | 0 |
+| `ExfatSlice5ImageIoTests` | 9 | 0 |
+| `ExfatSlice5SeparationTests` | 2 | 2 |
+| `ExfatSlice5SchedulerTests` | 6 | 0 |
+| `ExfatAuthorityWindowRegistryTests` | 13 | 0 |
+| `WindowsProtectedAccessTests` | 5 | 0 |
+| `WindowsNtfsNativeTests` | 3 | 0 |
+| `WindowsNtfsExecutionTests` | 3 | 0 |
+| `WindowsNtfsReparseTests` | 4 | 2 |
+| `WindowsNtfsScanAuthorityTests` | 4 | 0 |
+
+The separation skips are macOS-only; two symlink tests skip for missing Windows creation privilege. Both junction tests and all live Windows native/NTFS/protected-access cases pass. Existing duplicate-temp-property, native-access and Mockito warnings were not suppressed through dependency/build changes.
+
+Full backend validation passed **1533 tests, zero failures/errors, 290 skips across 133 suites**; shell/Maven exit 0 and BUILD SUCCESS, elapsed 17:48. Independent XML aggregation restricted to the suites named in this run's log matches every suite's counts and the final total; stale reports are excluded. Results are in ignored `backend/target/slice5-mounted-backend.log`, `slice5-mounted-backend-totals.json` and `slice5-mounted-backend-suites.json`. The new mounted class contributes one opt-in skip in the normal full run; its real mounted invocation passed separately. Other skips are existing host/platform/privilege cases, including macOS/APFS-dependent suites; no live macOS acceptance is claimed.
+
+```powershell
+mvn -o '-Dmaven.repo.local=C:/Users/sears/.m2/repository' '-Djava.io.tmpdir=D:/Dev/projects/ai-projects/media-compare/backend/target/tmp' '-DargLine=-Djava.io.tmpdir=D:/Dev/projects/ai-projects/media-compare/backend/target/tmp' test *> target/slice5-mounted-backend.log
+```
+
+Final native/NIO preflight repeats the original expected volume/route evidence and confirms the acceptance root is absent. Final `git diff --check` passes. All six changed/new repository files pass explicit UTF-8/BOM/trailing-whitespace checks. Final branch is `main`; HEAD remains `a5c7b2adb702961c0ea778f2a036baf5d66afe0f`. Final status is three modified tracked files and three new untracked test files, all unstaged:
+
+```text
+ M backend/src/main/java/io/github/topher6835/mediacompare/scan/WindowsExfatNativeDiscoveryAccess.java
+ M docs/STATUS.md
+ M docs/WINDOWS_EXFAT_SLICE5_REPORT.md
+?? backend/src/test/java/io/github/topher6835/mediacompare/contentread/MountedExfatSlice5AcceptanceTests.java
+?? backend/src/test/java/io/github/topher6835/mediacompare/filesystem/MountedSlice5Fixture.java
+?? backend/src/test/java/io/github/topher6835/mediacompare/scan/MountedSlice5ScanConfiguration.java
+```
+
+`WindowsExfatSupport`, frontend, migrations and Maven configuration have no diff. Production exFAT remains disabled; no commit or push occurred. Recommended next step is external review of these uncommitted acceptance additions/results, followed by separately authorized Slice 6 integration and production acceptance. The approved Windows/VeraCrypt/exFAT Slice 5 mounted acceptance is complete for the defined V1 scope; durable physical identity, forced/surprise-removal behavior, universal exFAT/provider behavior and full production activation are not claimed.
 
 ## Windows validation portability correction - 2026-10-05
 
@@ -26,7 +135,7 @@ mvn -o -e "-Dmaven.repo.local=C:/Users/sears/.m2/repository" "-Djava.io.tmpdir=D
 mvn -o "-Dmaven.repo.local=C:/Users/sears/.m2/repository" "-Djava.io.tmpdir=D:/Dev/projects/ai-projects/media-compare/backend/target/tmp" "-DargLine=-Djava.io.tmpdir=D:/Dev/projects/ai-projects/media-compare/backend/target/tmp" test > target/windows-preview-backend.log 2>&1
 ```
 
-Final scope: one production file (`PreviewCacheWriter`), two modified test files (`ExfatSlice5Configuration`, `ExfatSlice5FlowTests`), one added test file (`PreparedPreviewPublicationTests`), and STATUS/this report. `git diff --check` passes; all six files are unstaged. Branch remains `main`, HEAD remains `fa4a91d51418d40209aae2c29301e2cb7a4ab858`. Production support remains false and its source is unchanged. No schema, frontend, Slice 6, public Prepare/Accept, dependency/build change, real VeraCrypt/exFAT operation, commit or push occurred. Review this correction next; remaining host-specific/mounted acceptance requires separate work and authorization.
+Final scope at this correction milestone: one production file (`PreviewCacheWriter`), two modified test files (`ExfatSlice5Configuration`, `ExfatSlice5FlowTests`), one added test file (`PreparedPreviewPublicationTests`), and STATUS/this report. `git diff --check` passes; all six files are unstaged. Branch remains `main`, HEAD remains `fa4a91d51418d40209aae2c29301e2cb7a4ab858`. Production support remains false and its source is unchanged. No schema, frontend, Slice 6, public Prepare/Accept, dependency/build change, real VeraCrypt/exFAT operation, commit or push occurred at that milestone. External review and remaining host-specific/mounted acceptance were the next steps then; the correction is now committed and the defined Slice 5 mounted acceptance has completed as recorded above.
 
 ## Focused external-review corrections — 2026-10-05
 
@@ -139,9 +248,9 @@ Correction scope is three production files, the three test files named above and
 
 44. **Mac-portable evidence.** Tests prove fake-host exact capture rejection, expected bytes/length, same-channel lifetime and reverse closure, writer-free hash/decode/output validation, real JDK JPEG/PNG supplied-input behavior, EXIF, PNG flush, hostile-SPI exclusion, missing-provider failure, guarded success/unsupported/malformed metadata, no attribution on SHA/authority loss, scan handoff/standalone routing, sealed batches/queue/shutdown, cache-first behavior, guarded repair/rollback/orphans, release/commit ordering, uncertain-close fail-closed handling and catalog-only restrictions. Existing suites provide portable lifecycle/restart/native-policy regression coverage. This is not evidence of real Windows handles or mounted exFAT behavior.
 
-45. **Windows validation pending.** Actual JNA/kernel32 protected open/read/seek/EOF/close; sharing flags; close/read serialization; exact drive-path case/spelling; final-path reconciliation; reparse/junction rejection; native/NIO agreement; complete live NTFS regressions; supplied JPEG/PNG on deployed Windows Java 21 (including JPEG native decoder); Windows Session no-clobber preview publication. None was executed on this Mac.
+45. **Windows validation at initial implementation.** Actual JNA/kernel32 protected open/read/seek/EOF/close; sharing flags; close/read serialization; exact drive-path case/spelling; final-path reconciliation; reparse/junction rejection; native/NIO agreement; complete live NTFS regressions; supplied JPEG/PNG on deployed Windows Java 21 (including JPEG native decoder); Windows Session no-clobber preview publication were pending at this Mac implementation milestone. Later Windows results and residual privilege limitations are recorded above.
 
-46. **Mounted acceptance pending.** No real VeraCrypt/exFAT IO occurred. Later acceptance must cover retained-chain/share protection, production-channel JPEG/PNG, Prepare → SCAN → metadata, finite previews, release, normal dismount/remount, stale old-window rejection and actual handle closure. An absent mounted volume was not an implementation blocker.
+46. **Mounted acceptance at initial implementation.** No real VeraCrypt/exFAT IO occurred at this milestone; retained-chain/share protection, production-channel JPEG/PNG, Prepare → SCAN → metadata, finite previews, release, normal dismount/remount, stale old-window rejection and actual handle closure remained later qualification work. The approved Slice 5 mounted acceptance has since completed for the defined V1 scope as recorded above. An absent mounted volume was not an implementation blocker.
 
 47. **Documentation.** README and ARCHITECTURE/DATA_MODEL/DECISIONS/STATUS/IMPLEMENTATION_PLAN now describe Slice 5 and remaining public/Windows gates. This report records implementation boundaries and validation. Historical Slice 3/4/retained-handle reports remain untouched.
 
@@ -151,7 +260,7 @@ Correction scope is three production files, the three test files named above and
 
 50. **Working tree/scope.** Final `git status --short --untracked-files=all` has 40 modified tracked files and 21 untracked added files, all unstaged; the inventory below is that complete set. Protected paths (frontend, migrations/resources, build configuration, CurrentMembershipAuthority, WindowsNtfsNative and WindowsExfatSupport) are unchanged. Diff review confirms dedicated exFAT branches rather than weakened native guards, no pathname byte fallback, no new occurrences from later reads and no persisted runtime authority.
 
-51. **No commit/push.** No commit or push was made. HEAD remains the starting baseline. External review and the pending Windows validation are the next steps; public Slice 6 work requires separate authorization.
+51. **No commit/push at initial implementation.** No commit or push was made at this milestone; HEAD remained its starting baseline. External review and Windows validation were the next steps then. Subsequent review/commits and completed Slice 5 mounted acceptance are recorded above; public Slice 6 work still requires separate authorization.
 
 ## Initial Slice 5 validation (before external-review corrections)
 
