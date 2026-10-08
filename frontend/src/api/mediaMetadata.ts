@@ -1,3 +1,4 @@
+import type { SourceAuthorityWindow } from './sources.ts'
 import { requestJson } from './http.ts'
 
 export interface MediaMetadataRun {
@@ -26,6 +27,13 @@ export function getMediaMetadataStatus(signal?: AbortSignal): Promise<MediaMetad
   return requestJson('/api/media-metadata-runs/status', { signal })
 }
 
-export function startMediaMetadataRun(): Promise<MediaMetadataRun> {
-  return requestJson('/api/media-metadata-runs', { method: 'POST' })
+export type MetadataOwnership = { indexingScanRunId: number } | { authorityWindows: SourceAuthorityWindow[] }
+
+export function getMediaMetadataRun(jobId: number, signal?: AbortSignal): Promise<MediaMetadataRun> {
+  return requestJson(`/api/media-metadata-runs/${jobId}`, { signal })
+}
+
+export function startMediaMetadataRun(ownership?: MetadataOwnership): Promise<MediaMetadataRun> {
+  return requestJson('/api/media-metadata-runs', { method: 'POST',
+    ...(ownership ? { body: JSON.stringify(ownership) } : {}) })
 }

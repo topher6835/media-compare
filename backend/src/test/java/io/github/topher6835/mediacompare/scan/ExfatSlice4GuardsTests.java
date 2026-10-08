@@ -43,7 +43,7 @@ class ExfatSlice4GuardsTests extends ExfatSlice4TestSupport {
     }
     @Test void associationFailureAfterJobCreationRollsBackAdmissionWithoutPartialAssociation() {
         long a = source(ROOT), b = source(ROOT.append("Nested"));
-        assertThrows(RuntimeException.class, () -> bundles.admit(List.of(a, b), prepared -> {
+        assertThrows(RuntimeException.class, () -> bundles.admit(List.of(a, b), authorityRequests(a, b), prepared -> {
             var request = app.getBean(ScanRunService.class).create(List.of(a, b));
             var accepted = execution.create(request.scanRun().id(), prepared);
             registry.release(windows.get(b)); return accepted;
@@ -54,7 +54,7 @@ class ExfatSlice4GuardsTests extends ExfatSlice4TestSupport {
     }
     @Test void failedCommitCancelsAllTransientAssociationsAndRollsBackJobAndRequest() {
         long a = source(ROOT), b = source(ROOT.append("Nested"));
-        assertThrows(RuntimeException.class, () -> bundles.admit(List.of(a, b), prepared -> {
+        assertThrows(RuntimeException.class, () -> bundles.admit(List.of(a, b), authorityRequests(a, b), prepared -> {
             var request = app.getBean(ScanRunService.class).create(List.of(a, b));
             var accepted = execution.create(request.scanRun().id(), prepared);
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
@@ -67,7 +67,7 @@ class ExfatSlice4GuardsTests extends ExfatSlice4TestSupport {
     }
     @Test void requestKeyReplayCannotAttachLaterPreparedWindow() {
         long id = source(ROOT); String key = UUID.randomUUID().toString();
-        var first = app.getBean(IndexingRunAcceptance.class).accept(key, List.of(id)); stop(first); var fresh = prepare(id);
+        var first = app.getBean(IndexingRunAcceptance.class).accept(key, List.of(id), authorityRequests(id)); stop(first); var fresh = prepare(id);
         var replay = app.getBean(IndexingRunService.class).start(key, List.of(id));
         assertFalse(replay.created()); assertEquals("FAILED", replay.run().job().status());
         assertEquals(fresh, registry.capturePrepared(scopes.get(id))); assertTrue(bundles.authorities(first.job().scanRunId()).isEmpty());

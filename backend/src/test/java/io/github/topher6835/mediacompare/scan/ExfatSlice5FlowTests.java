@@ -63,6 +63,43 @@ class ExfatSlice5FlowTests extends ExfatSlice4TestSupport {
         return app.getBean(ExfatContentReadCatalog.class).capture(batch.owners().getFirst(), route.fileEntryId(), route.membershipId());
     }
 
+    @Test void publicHandoffReturnsAssociatedJobAndExpiredAuthorityIsBoundedConflict() throws Exception {
+        var scan = imageScan("png");
+        var executor = app.getBean(MediaMetadataExecutor.class);
+        var entered = new CountDownLatch(1); var finish = new CountDownLatch(1);
+        executor.execute(() -> { entered.countDown(); awaitIgnoringInterrupt(finish); }); await(entered);
+        try {
+            var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders
+                    .standaloneSetup(app.getBean(MediaMetadataRunController.class)).build();
+            String body = "{\"indexingScanRunId\":" + scan.job().scanRunId() + "}";
+            var first = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                    .post("/api/media-metadata-runs").contentType(org.springframework.http.MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isAccepted()).andReturn();
+            long associated = bundles.requireHandoff(scan.job().scanRunId()).metadataJobId();
+            assertEquals(associated, app.getBean(tools.jackson.databind.json.JsonMapper.class)
+                    .readTree(first.getResponse().getContentAsString()).get("jobId").asLong());
+            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                    .post("/api/media-metadata-runs").contentType(org.springframework.http.MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isAccepted())
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.jobId").value(associated));
+            assertNull(app.getBean(MediaMetadataJobService.class).find(associated).job().scanRunId());
+            registry.release(windows.get(1L)); prepare(1);
+            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                    .post("/api/media-metadata-runs").contentType(org.springframework.http.MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isConflict());
+            assertEquals("COMPLETED", app.getBean(ScanRepository.class).findScanRunById(scan.job().scanRunId()).orElseThrow().status());
+        } finally { finish.countDown(); }
+    }
+
+    @Test void finitePreviewWithoutExplicitWindowsIsUnavailableAndDoesNotBorrowPreparedRoot() throws Exception {
+        imageScan("png"); prepare(1);
+        var before = registry.capturePrepared(scopes.get(1L));
+        var result = app.getBean(ThumbnailScheduler.class).schedule(List.of(onlyFile().id()), null);
+        assertEquals(ThumbnailScheduler.Status.AUTHORITY_UNAVAILABLE, result.getFirst().status());
+        assertEquals(before, registry.capturePrepared(scopes.get(1L)));
+        assertEquals(0, host.opens.get());
+    }
+
     @ParameterizedTest @ValueSource(strings = {"jpeg", "png"})
     void exactHandoffReplayMetadataCommitAndSourceFreeCache(String format) throws Exception {
         var scan = imageScan(format); FileEntry prior = onlyFile();

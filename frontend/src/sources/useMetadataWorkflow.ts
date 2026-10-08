@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { ApiError } from '../api/http.ts'
-import { getMediaMetadataStatus, startMediaMetadataRun, type MediaMetadataRun } from '../api/mediaMetadata.ts'
-import { metadataAction } from './metadataWorkflow.ts'
+import { getMediaMetadataRun, getMediaMetadataStatus, startMediaMetadataRun, type MediaMetadataRun } from '../api/mediaMetadata.ts'
+import { getSources, sourceAuthorityWindows } from '../api/sources.ts'
+import { metadataAction, associatedMetadataJob, rememberAssociatedMetadataJob } from './metadataWorkflow.ts'
 
 const pollIntervalMs = 1500
 
@@ -11,7 +12,7 @@ export interface MetadataPhase {
   run: MediaMetadataRun | null
 }
 
-export function useMetadataWorkflow(scanRunId: number | null, finishedAtMs: number | null) {
+export function useMetadataWorkflow(scanRunId: number | null, finishedAtMs: number | null, exfatSourceId: number | null = null) {
   const [phase, setPhase] = useState<MetadataPhase | null>(null)
   const [retry, setRetry] = useState<{ scanRunId: number; count: number } | null>(null)
 
@@ -20,6 +21,46 @@ export function useMetadataWorkflow(scanRunId: number | null, finishedAtMs: numb
     const controller = new AbortController()
     let timer: number | undefined
     let forceRetry = retry?.scanRunId === scanRunId
+
+    // This branch never uses global latest status as evidence of association.
+    async function followExact() {
+      try {
+        const knownJob = associatedMetadataJob(scanRunId!)
+        let associated: MediaMetadataRun
+        if (knownJob !== undefined && !forceRetry) {
+          associated = await getMediaMetadataRun(knownJob, controller.signal)
+        } else {
+          try {
+            associated = await startMediaMetadataRun({ indexingScanRunId: scanRunId! })
+          } catch (error) {
+            if (!forceRetry || !(error instanceof ApiError) || error.status !== 409) throw error
+            const source = (await getSources(controller.signal)).find((item) => item.id === exfatSourceId)
+            if (!source) throw error
+            associated = await startMediaMetadataRun({ authorityWindows: sourceAuthorityWindows(source) })
+          }
+          rememberAssociatedMetadataJob(scanRunId!, associated.jobId)
+        }
+        if (controller.signal.aborted) return
+        async function pollJob() {
+          try {
+            const exact = await getMediaMetadataRun(associated.jobId, controller.signal)
+            if (controller.signal.aborted) return
+            const state = exact.status === 'COMPLETED' ? 'complete'
+              : exact.status === 'FAILED' ? 'failed' : 'running'
+            setPhase({ scanRunId: scanRunId!, state, run: exact })
+            if (state === 'running') timer = window.setTimeout(pollJob, pollIntervalMs)
+          } catch {
+            if (!controller.signal.aborted) {
+              setPhase({ scanRunId: scanRunId!, state: 'unavailable', run: associated })
+              timer = window.setTimeout(pollJob, pollIntervalMs)
+            }
+          }
+        }
+        await pollJob()
+      } catch {
+        if (!controller.signal.aborted) setPhase({ scanRunId: scanRunId!, state: 'failed', run: null })
+      }
+    }
 
     async function check() {
       try {
@@ -56,12 +97,13 @@ export function useMetadataWorkflow(scanRunId: number | null, finishedAtMs: numb
       }
     }
 
-    void check()
+    if (exfatSourceId !== null) void followExact()
+    else void check()
     return () => {
       controller.abort()
       if (timer !== undefined) window.clearTimeout(timer)
     }
-  }, [scanRunId, finishedAtMs, retry])
+  }, [scanRunId, finishedAtMs, retry, exfatSourceId])
 
   return {
     phase: phase?.scanRunId === scanRunId ? phase : null,

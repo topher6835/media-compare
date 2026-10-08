@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
-import { scheduleMediaLibraryThumbnails, type MediaLibraryItem } from '../api/mediaLibrary.ts'
+import { getSources, sourceAuthorityWindows } from '../api/sources.ts'
+import { scheduleMediaLibraryThumbnails, type MediaLibraryItem, type ThumbnailScheduleStatus } from '../api/mediaLibrary.ts'
 import {
   applyScheduleStatus, newThumbnailWork, reconcileThumbnailWork,
   visibleAwaitingPages, visibleRepairCandidates, visibleSchedulingCandidates,
@@ -11,6 +12,21 @@ interface ThumbnailOptions {
   pages: ThumbnailPageSegment[]
   visible: ReadonlySet<number>
   refreshPage: (cursor: number | null, signal: AbortSignal) => Promise<void>
+}
+
+// Called only for an explicit retry of terminal scheduling authority loss.
+export async function scheduleExplicitThumbnailRetry(
+  item: Pick<MediaLibraryItem, 'fileEntryId' | 'sourceId'>,
+  signal: AbortSignal,
+): Promise<ThumbnailScheduleStatus> {
+  const source = (await getSources(signal)).find((candidate) => candidate.id === item.sourceId)
+  if (!source) throw new Error('Source unavailable')
+  const requiresAuthority = source.filesystemProfile === 'EXFAT'
+  const response = await scheduleMediaLibraryThumbnails([item.fileEntryId], signal,
+    requiresAuthority ? sourceAuthorityWindows(source) : undefined)
+  const status = response.results[0]?.status
+  // A rejected finite exFAT item needs new explicit acceptance, not an automatic queue retry.
+  return !status || requiresAuthority && status === 'QUEUE_FULL' ? 'AUTHORITY_UNAVAILABLE' : status
 }
 
 export function useVisibleThumbnails({ items, pages, visible, refreshPage }: ThumbnailOptions) {
@@ -133,8 +149,22 @@ export function useVisibleThumbnails({ items, pages, visible, refreshPage }: Thu
 
   const retry = useCallback((item: MediaLibraryItem, purpose: 'generation' | 'repair') => {
     if (item.generationSupport !== 'SUPPORTED') return
+    if (work[item.fileEntryId]?.phase === 'authority-unavailable') {
+      if (scheduleBusy.current) return
+      scheduleBusy.current = true
+      const entry = { ...newThumbnailWork(item, purpose, Date.now()), phase: 'scheduling' as const }
+      setWork((previous) => ({ ...previous, [item.fileEntryId]: entry }))
+      // Explicit finite request only. Source projection is re-fetched; this never prepares a root.
+      const signal = AbortSignal.timeout(10_000)
+      void scheduleExplicitThumbnailRetry(item, signal).then((status) => {
+        setWork((previous) => ({ ...previous, [item.fileEntryId]: applyScheduleStatus(entry, status, Date.now()) }))
+      }).catch(() => {
+        setWork((previous) => ({ ...previous, [item.fileEntryId]: { ...entry, phase: 'authority-unavailable' } }))
+      }).finally(() => { scheduleBusy.current = false })
+      return
+    }
     setWork((previous) => ({ ...previous, [item.fileEntryId]: newThumbnailWork(item, purpose, Date.now()) }))
-  }, [])
+  }, [work])
 
   const repairLoaded = useCallback((id: number) => {
     setWork((previous) => {

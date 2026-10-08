@@ -1,5 +1,8 @@
 package io.github.topher6835.mediacompare.scan;
 
+import io.github.topher6835.mediacompare.web.SourceAuthorityWindowRequest;
+import io.github.topher6835.mediacompare.web.CreateMediaMetadataRunRequest;
+import io.github.topher6835.mediacompare.filesystem.ExfatAuthorityUnavailableException;
 import io.github.topher6835.mediacompare.contentread.ExfatContentReadAuthority;
 import io.github.topher6835.mediacompare.filesystem.WindowsDurableEvidenceFormat;
 import io.github.topher6835.mediacompare.job.Job;
@@ -127,19 +130,38 @@ public class ExfatScanBundles {
 
     public ScanExecutionDetails admit(List<Long> sourceIds,
             Function<List<Prepared>, ScanExecutionDetails> create) {
+        return admit(sourceIds, List.of(), create);
+    }
+
+    public ScanExecutionDetails admit(List<Long> sourceIds,
+            List<SourceAuthorityWindowRequest> requested,
+            Function<List<Prepared>, ScanExecutionDetails> create) {
         outsideTransaction();
+        ScanRunService.validateSourceIds(sourceIds);
+        var windows = requested == null || requested.isEmpty() ? List.<SourceAuthorityWindowRequest>of()
+                : CreateMediaMetadataRunRequest.checkedWindows(requested);
+        var bySource = new java.util.HashMap<Long, String>();
+        for (var w : windows) bySource.put(w.sourceId(), w.windowId());
         var captured = new ArrayList<Prepared>();
         for (long sourceId : sourceIds) {
             var source = catalog.findSourceById(sourceId).orElseThrow();
             if ("win-drive".equals(source.rootPathDialect()) && WindowsDurableEvidenceFormat
                     .identify(source.bindingEvidenceJson()) == WindowsDurableEvidenceFormat.EXFAT_SOURCE) {
-                if (!testEnabled && !WindowsExfatSupport.PRODUCTION.available()) {
+                if (!testEnabled && !WindowsExfatSupport.PRODUCTION.available())
                     throw new Version2ExecutionConflictException("Production exFAT indexing is disabled");
+                String uuid = bySource.remove(sourceId);
+                if (uuid == null) throw new Version2ExecutionConflictException("exFAT requires an explicit authority window");
+                try {
+                    var scope = scope(sourceId);
+                    var window = new WindowId(registry.runtimeId(), sourceId, uuid);
+                    try (var ignored = registry.requireExact(scope, window)) { }
+                    captured.add(new Prepared(scope, window));
+                } catch (IllegalStateException unavailable) {
+                    throw new Version2ExecutionConflictException("Exact exFAT authority unavailable");
                 }
-                var scope = scope(sourceId);
-                captured.add(new Prepared(scope, registry.capturePrepared(scope)));
             }
         }
+        if (!bySource.isEmpty()) throw new IllegalArgumentException("Extra authority Source");
         if (captured.isEmpty()) return transactions.execute(status -> create.apply(List.of()));
         return admitCaptured(List.copyOf(captured), create);
     }
@@ -147,7 +169,7 @@ public class ExfatScanBundles {
     ScanExecutionDetails admitCaptured(List<Prepared> captured,
             Function<List<Prepared>, ScanExecutionDetails> create) {
         outsideTransaction();
-        if (!testEnabled) throw new Version2ExecutionConflictException("Production exFAT indexing is disabled");
+        if (!testEnabled && !WindowsExfatSupport.PRODUCTION.available()) throw new Version2ExecutionConflictException("Production exFAT indexing is disabled");
         final long[] jobId = {0};
         return registry.transition(() -> {
             try {
@@ -317,5 +339,5 @@ public class ExfatScanBundles {
     private static void outsideTransaction() {
         if (TransactionSynchronizationManager.isActualTransactionActive()) throw new IllegalStateException("Take exFAT gate before catalog transaction");
     }
-    private static IllegalStateException stale() { return new IllegalStateException("Exact exFAT scan authority changed or unavailable"); }
+    private static IllegalStateException stale() { return new ExfatAuthorityUnavailableException("Exact exFAT scan authority changed or unavailable"); }
 }

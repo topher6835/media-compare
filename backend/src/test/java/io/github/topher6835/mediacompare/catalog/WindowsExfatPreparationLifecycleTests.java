@@ -60,6 +60,47 @@ class WindowsExfatPreparationLifecycleTests {
                     roots.add(held); return held;
                 }, enabledForTests());
     }
+    @Test void publicPrepareAndCatalogProjectionRetainExactConfigurationAcrossReacquisition() throws Exception {
+        Source initial = register();
+        application.getBean(SourcePreparationService.class).exfatPreparation(preparation);
+        // Bound-source public dispatch runs before the native READY early return.
+        Source ready = preparation.prepare(initial.id());
+        var controller = application.getBean(io.github.topher6835.mediacompare.web.SourceController.class);
+        var before = durableRows();
+        var original = controller.findById(ready.id()).getBody();
+        assertEquals(FileSystemProfile.EXFAT, original.filesystemProfile());
+        assertTrue(original.liveAuthorityAvailable());
+        assertEquals(original, controller.prepare(ready.id()).getBody());
+        assertEquals(1, roots.size());
+        assertEquals(before, durableRows());
+        var released = controller.release(ready.id(), new io.github.topher6835.mediacompare.web.ReleaseSourceAuthorityRequest(original.liveAuthorityWindowId())).getBody();
+        assertEquals(ExfatAuthorityWindowRegistry.ReleaseState.RELEASED, released.releaseState());
+        assertEquals(SourcePreparationState.READY, released.source().preparationState());
+        assertFalse(released.source().liveAuthorityAvailable());
+        assertNull(released.source().liveAuthorityWindowId());
+        var fresh = controller.prepare(ready.id()).getBody();
+        assertTrue(fresh.liveAuthorityAvailable());
+        assertNotEquals(original.liveAuthorityWindowId(), fresh.liveAuthorityWindowId());
+        assertEquals(before, durableRows());
+        assertEquals(2, roots.size());
+        assertEquals(ready, sources.findSourceById(ready.id()).orElseThrow());
+    }
+
+    @Test void unavailableRetainedRootIsRevokedAndRequiresSeparateExplicitPrepare() {
+        Source ready = preparation.prepare(register().id());
+        var before = durableRows();
+        roots.getFirst().available = false;
+        assertFalse(application.getBean(SourceAuthorityProjection.class).project(ready).liveAuthorityAvailable());
+        assertEquals(SourcePreparationException.Code.EVIDENCE_UNCERTAIN,
+                assertThrows(SourcePreparationException.class, () -> preparation.prepare(ready.id())).code());
+        assertEquals(1, roots.size()); // No replacement acquisition in the invalidating request.
+        assertEquals(before, durableRows());
+        assertEquals(ready, preparation.prepare(ready.id()));
+        assertEquals(2, roots.size());
+        assertTrue(preparation.liveAuthority(ready.id()).liveAuthorityAvailable());
+        assertEquals(before, durableRows());
+    }
+
     private Source register() { return sources.insert(new Source(null, "Pictures", "C:\\Photos", "C:\\Photos", 0, 1, 1)); }
 
     @Test void firstBindCreatesEnvelopesPeriodAndWindowWhileProductionIndexingRemainsDisabled() {

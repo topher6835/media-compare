@@ -1,5 +1,6 @@
 package io.github.topher6835.mediacompare.web;
 
+import io.github.topher6835.mediacompare.filesystem.ExfatAuthorityUnavailableException;
 import java.net.URI;
 import java.util.NoSuchElementException;
 import io.github.topher6835.mediacompare.scan.IndexingRunReadService;
@@ -28,7 +29,7 @@ public class IndexingRunController {
 
     @PostMapping
     public ResponseEntity<IndexingRunResponse> start(@RequestBody CreateIndexingRunRequest request) {
-        var result = starts.start(request.requestKey(), request.sourceIds());
+        var result = starts.start(request.requestKey(), request.sourceIds(), request.authorityWindows());
         return ResponseEntity.status(result.created() ? 202 : 200)
                 .location(URI.create("/api/indexing-runs/" + result.run().scanRun().id()))
                 .cacheControl(CacheControl.noStore()).body(IndexingRunResponse.from(result.run()));
@@ -50,7 +51,8 @@ public class IndexingRunController {
     @ExceptionHandler(NoSuchElementException.class)
     public ResponseEntity<Void> missing() { return error(404); }
 
-    @ExceptionHandler(Version2ExecutionConflictException.class)
+    @ExceptionHandler({Version2ExecutionConflictException.class,
+            ExfatAuthorityUnavailableException.class})
     public ResponseEntity<Void> conflict() { return error(409); }
 
     @ExceptionHandler(Version2SchedulingException.class)

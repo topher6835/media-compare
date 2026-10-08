@@ -366,13 +366,14 @@ class IndexingRunApiTests {
         public void setBarrier(CyclicBarrier barrier) { this.barrier = barrier; attempts.set(0); }
         public int attemptCount() { return attempts.get(); }
         @Override @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NEVER)
-        public ScanExecutionDetails accept(String key, List<Long> sourceIds) {
+        public ScanExecutionDetails accept(String key, List<Long> sourceIds,
+                List<io.github.topher6835.mediacompare.web.SourceAuthorityWindowRequest> authorityWindows) {
             if (barrier != null) {
                 attempts.incrementAndGet();
                 try { barrier.await(10, TimeUnit.SECONDS); }
                 catch (Exception failure) { throw new IllegalStateException(failure); }
             }
-            return super.accept(key, sourceIds);
+            return super.accept(key, sourceIds, authorityWindows);
         }
     }
 }

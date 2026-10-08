@@ -2,6 +2,13 @@
 
 This file records decisions already made. It distinguishes the reviewed V1 implementation target from behavior and architecture that remain open.
 
+## Approved Slice 6 sequencing (2026-10-07)
+
+- Implement and validate public exFAT integration while production availability remains false; stop for external diff review without committing/pushing.
+- Treat the production availability flip as a distinct, separately authorized/reviewable final Slice 6 sub-step. Do not introduce a runtime activation switch.
+- Require real Windows/VeraCrypt/exFAT end-to-end production acceptance after that flip before declaring exFAT V1 complete. The later Mac → Windows validation/commit workflow is undecided.
+- Slice 6 reuses the existing shared Source/window DTO, SCAN HANDOFF/standalone metadata ownership, finite previews and physical-action capabilities. It adds no durable window, identity, occurrence, schema or Job-status decision. READY continues to mean configured, separately from transient live authority.
+
 ## Project
 
 - Media Compare is a fresh v2 project rather than a continuation of the old tutorial implementation.

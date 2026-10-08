@@ -1,8 +1,9 @@
+import type { SourceAuthorityWindow } from './sources.ts'
 import { ApiError, requestJson } from './http.ts'
 
 export type GenerationSupport = 'SUPPORTED' | 'UNSUPPORTED'
 export type ThumbnailState = 'MISSING' | 'PUBLISHED'
-export type ThumbnailScheduleStatus = 'QUEUED' | 'ALREADY_QUEUED' | 'QUEUE_FULL'
+export type ThumbnailScheduleStatus = 'QUEUED' | 'ALREADY_QUEUED' | 'QUEUE_FULL' | 'CACHED' | 'AUTHORITY_UNAVAILABLE'
 
 export type ThumbnailReference =
   | { state: 'MISSING'; assetKey: null; url: null; width: null; height: null }
@@ -24,6 +25,8 @@ export interface MediaLibraryItem {
   generationSupport: GenerationSupport
   thumbnail: ThumbnailReference
   absolutePath: string | null
+  physicalActionsAvailable: boolean
+  physicalActionsUnavailableReason: string | null
   exactSet: { digestHex: string; physicalCopyCount: number } | null
 }
 
@@ -96,12 +99,14 @@ export function chunkThumbnailIds(fileEntryIds: number[]): number[][] {
 export async function scheduleMediaLibraryThumbnails(
   fileEntryIds: number[],
   signal?: AbortSignal,
+  authorityWindows?: SourceAuthorityWindow[],
 ): Promise<ThumbnailScheduleResponse> {
+  if (authorityWindows?.length && fileEntryIds.length > 100) throw new Error('An authority batch is limited to 100 files.')
   const results: ThumbnailScheduleResult[] = []
   for (const ids of chunkThumbnailIds(fileEntryIds)) {
     const response = await requestJson<ThumbnailScheduleResponse>(
       '/api/media-library/thumbnails',
-      { method: 'POST', body: JSON.stringify({ fileEntryIds: ids }), signal },
+      { method: 'POST', body: JSON.stringify({ fileEntryIds: ids, ...(authorityWindows?.length ? { authorityWindows } : {}) }), signal },
     )
     results.push(...response.results)
   }

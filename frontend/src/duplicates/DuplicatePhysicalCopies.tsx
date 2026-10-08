@@ -26,7 +26,8 @@ export function DuplicatePhysicalCopies({ detail, filtersActive, filterSearch }:
   const copies = groupPhysicalCopies(detail.occurrences)
   const presentCopies = copies.filter((copy) => copy.presenceStatus === 'PRESENT')
   const keeper = presentCopies.find((copy) => copy.fileEntryId === keeperId)
-  const canPreview = presentCopies.length >= 2
+  const canPreview = presentCopies.length >= 2 && presentCopies.every((copy) =>
+    copy.occurrences.some((occurrence) => occurrence.physicalActionsAvailable === true))
   const candidateCount = keeper ? presentCopies.length - 1 : 0
 
   function savePlan() {
@@ -68,6 +69,8 @@ export function DuplicatePhysicalCopies({ detail, filtersActive, filterSearch }:
           {plannedEntry && <span className="status-badge planned">PLANNED</span>}
         </div>
         <p>Planning only — Media Compare will not change or delete any files.</p>
+        {detail.occurrences.some((occurrence) => occurrence.physicalActionsAvailable === false)
+          && <p>Physical cleanup is unavailable for these catalog occurrences. Live content authority does not enable historical exFAT physical actions.</p>}
         <p>Planning only — verify the group again before any future file operation.</p>
         <p className="planner-note">
           Save explicitly to collect this decision in a browser-session plan. Reloading clears the plan.
@@ -166,7 +169,7 @@ export function DuplicatePhysicalCopies({ detail, filtersActive, filterSearch }:
                       {!isMissing && occurrence.presenceStatus === 'PRESENT' && occurrence.absolutePath
                         && occurrence === copy.occurrences.find((route) =>
                           route.presenceStatus === 'PRESENT' && route.absolutePath)
-                        && <RevealFileButton fileEntryId={copy.fileEntryId} />}
+                        && <RevealFileButton fileEntryId={copy.fileEntryId} available={occurrence.physicalActionsAvailable} />}
                     </div>
                     <p className="planner-note">
                       {occurrence.extension ?? 'No extension'} ·{' '}

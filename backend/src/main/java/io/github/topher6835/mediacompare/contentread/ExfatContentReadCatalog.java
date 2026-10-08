@@ -1,5 +1,6 @@
 package io.github.topher6835.mediacompare.contentread;
 
+import io.github.topher6835.mediacompare.filesystem.ExfatAuthorityUnavailableException;
 import io.github.topher6835.mediacompare.analysis.*;
 import io.github.topher6835.mediacompare.catalog.*;
 import io.github.topher6835.mediacompare.filesystem.ExfatAuthorityScope;
@@ -95,6 +96,6 @@ public class ExfatContentReadCatalog {
     }
 
     public static IllegalStateException unavailable() {
-        return new IllegalStateException("Exact exFAT content-read authority/evidence unavailable");
+        return new ExfatAuthorityUnavailableException("Exact exFAT content-read authority/evidence unavailable");
     }
 }

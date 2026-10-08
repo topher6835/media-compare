@@ -1,5 +1,6 @@
 package io.github.topher6835.mediacompare.web;
 
+import io.github.topher6835.mediacompare.filesystem.ExfatAuthorityUnavailableException;
 import java.net.URI;
 import java.util.NoSuchElementException;
 
@@ -77,7 +78,8 @@ public class MediaMetadataRunController {
     @ExceptionHandler(NoSuchElementException.class)
     public ResponseEntity<Void> missing() { return error(404); }
 
-    @ExceptionHandler(MediaMetadataJobConflictException.class)
+    @ExceptionHandler({MediaMetadataJobConflictException.class,
+            ExfatAuthorityUnavailableException.class})
     public ResponseEntity<Void> conflict() { return error(409); }
 
     @ExceptionHandler(MediaMetadataSchedulingException.class)

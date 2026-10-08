@@ -1,5 +1,6 @@
 package io.github.topher6835.mediacompare.scan;
 
+import io.github.topher6835.mediacompare.web.SourceAuthorityWindowRequest;
 import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,7 +22,13 @@ public class IndexingRunAcceptance {
 
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NEVER)
     public ScanExecutionDetails accept(String key, List<Long> sourceIds) {
-        return bundles.admit(sourceIds, prepared -> {
+        return accept(key, sourceIds, List.of());
+    }
+
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NEVER)
+    public ScanExecutionDetails accept(String key, List<Long> sourceIds,
+            List<SourceAuthorityWindowRequest> authorityWindows) {
+        return bundles.admit(sourceIds, authorityWindows, prepared -> {
             scans.reserveExecutionWrite();
             ScanRunDetails request = requests.create(sourceIds, key);
             return executions.create(request.scanRun().id(), prepared);

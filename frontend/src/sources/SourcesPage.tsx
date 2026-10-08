@@ -8,6 +8,7 @@ import {
 import { Link } from 'react-router-dom'
 
 import { ApiError } from '../api/http.ts'
+import { SourceAuthorityControls, type AuthorityReleaseMessage } from './SourceAuthorityControls.tsx'
 import { metadataHasIssues } from './metadataWorkflow.ts'
 import { useMetadataWorkflow, type MetadataPhase } from './useMetadataWorkflow.ts'
 import {
@@ -26,6 +27,10 @@ import {
   type PendingIndexingStart,
 } from '../api/indexing.ts'
 import {
+  canAnalyzeSource,
+  sourceAuthorityWindows,
+  releaseSourceAuthority,
+  releaseAuthorityMessage,
   getSources,
   prepareSource,
   registerSource,
@@ -56,7 +61,7 @@ function preparationErrorMessage(error: unknown): string {
       return 'This folder is unavailable to the backend. Check the path and try again.'
     }
     if (error.code === 'PROFILE_UNSUPPORTED') {
-      return 'Preparation currently supports local macOS APFS folders only.'
+      return 'This storage profile is unavailable. Production exFAT support is awaiting review; local APFS and NTFS are supported.'
     }
     if (error.code === 'EVIDENCE_UNCERTAIN') {
       return 'The filesystem could not be verified consistently. Try again when the folder is stable.'
@@ -254,13 +259,13 @@ function IndexingPanel({
         )}
         {run.status === 'COMPLETED' && !metadataDone && !metadataFailed && (
           <p>{metadata?.state === 'unavailable'
-            ? 'Indexing is complete. Metadata status is temporarily unavailable; checking again shortly.'
+            ? 'Indexing is complete. Metadata status is unavailable. For exFAT, explicitly Prepare/Accept on Sources before a new metadata attempt.'
             : 'Indexing is complete. Image metadata is being checked or analyzed before Library is ready.'}</p>
         )}
         {run.status === 'COMPLETED' && metadataFailed && (
           <div>
             <strong>Metadata analysis failed</strong>
-            <p>Indexing is complete. Image metadata could not finish; cataloged images remain visible in Library.</p>
+            <p>Indexing is complete. Image metadata could not finish; cataloged images remain visible in Library. For exFAT, Prepare/Accept before retrying as a new standalone metadata attempt.</p>
             {metadata?.run?.errorMessage && <p>{metadata.run.errorMessage}</p>}
             <button type="button" onClick={onRetryMetadata}>Retry metadata analysis</button>
           </div>
@@ -448,7 +453,12 @@ export function SourcesPage() {
   const completedScanRunId = completedSummary?.scanRunId ?? null
   const completedFinishedAtMs = completedSummary?.finishedAtMs ?? null
   const { phase: metadataPhase, retryMetadata } = useMetadataWorkflow(
-    completedScanRunId, completedFinishedAtMs,
+    run?.scanRunId === completedScanRunId && sources !== null
+      && run.sourceIds.every((id) => sources.some((source) => source.id === id))
+      ? completedScanRunId : null, completedFinishedAtMs,
+    run?.scanRunId === completedScanRunId
+      ? sources?.find((source) => run.sourceIds.includes(source.id) && source.filesystemProfile === 'EXFAT')?.id ?? null
+      : null,
   )
 
   useEffect(() => {
@@ -477,6 +487,7 @@ export function SourcesPage() {
           setStartMessage(null)
         }
         setRun(current)
+        await refreshCollection(controller.signal)
         clearTransientRecoveryMessage()
         if (isActiveIndexingRun(current)) {
           timer = window.setTimeout(poll, pollIntervalMs)
@@ -553,14 +564,15 @@ export function SourcesPage() {
   }
 
   async function startAnalysis(source: Source, retryUncertain = false) {
-    if (startLock.current || source.preparationState !== 'READY') return
+    if (startLock.current || (!retryUncertain && !canAnalyzeSource(source))) return
 
     const retainedAttempt = getPendingIndexingStart()
     const requestKey =
       retryUncertain && retainedAttempt?.sourceId === source.id
         ? retainedAttempt.requestKey
         : crypto.randomUUID()
-    const attempt = { sourceId: source.id, requestKey }
+    const attempt: PendingIndexingStart = { sourceId: source.id, requestKey,
+      authorityWindows: retryUncertain ? retainedAttempt?.authorityWindows : undefined }
     rememberPendingIndexingStart(attempt)
     startLock.current = true
     setStartingSourceId(source.id)
@@ -569,7 +581,18 @@ export function SourcesPage() {
     setStartMessage(null)
 
     try {
-      const accepted = await startIndexingRun(requestKey, source.id)
+      if (!retryUncertain) {
+        const fresh = (await getSources()).find((item) => item.id === source.id)
+        if (!fresh || !canAnalyzeSource(fresh)) {
+          clearPendingIndexingStart(requestKey)
+          await refreshCollection()
+          showStartMessage('Prepare/Accept this Source before analysis.', true)
+          return
+        }
+        attempt.authorityWindows = sourceAuthorityWindows(fresh)
+        rememberPendingIndexingStart(attempt)
+      }
+      const accepted = await startIndexingRun(requestKey, source.id, attempt.authorityWindows)
       clearPendingIndexingStart(requestKey)
       if (!mounted.current) return
       setRun(accepted)
@@ -627,7 +650,7 @@ export function SourcesPage() {
   }
 
   async function prepare(source: Source) {
-    if (preparationLock.current || source.preparationState !== 'PREPARATION_REQUIRED') return
+    if (preparationLock.current || source.preparationState === 'REBIND_REQUIRED') return
     preparationLock.current = true
     setPreparingSourceId(source.id)
     setPreparationMessage(null)
@@ -647,6 +670,40 @@ export function SourcesPage() {
       if (mounted.current) setPreparingSourceId(null)
     }
   }
+
+  const [releasePending, setReleasePending] = useState<number | null>(null)
+  const [releaseMessages, setReleaseMessages] = useState<Record<number, AuthorityReleaseMessage>>({})
+
+  async function release(source: Source, windowId = source.liveAuthorityWindowId) {
+    if (!windowId || releasePending !== null) return
+    setReleasePending(source.id)
+    try {
+      const result = await releaseSourceAuthority(source.id, windowId)
+      setReleaseMessages((current) => ({ ...current, [source.id]: {
+        windowId, text: releaseAuthorityMessage(result), draining: result.releaseState === 'DRAINING',
+      } }))
+    } catch {
+      setReleaseMessages((current) => ({ ...current, [source.id]: {
+        windowId, text: 'Release status unavailable. Check this exact authority again.', draining: true,
+      } }))
+    } finally {
+      await refreshCollection().catch(() => setListError(true))
+      setReleasePending(null)
+    }
+  }
+
+  useEffect(() => {
+    const refresh = () => { void refreshCollection().catch(() => setListError(true)) }
+    window.addEventListener('focus', refresh)
+    return () => window.removeEventListener('focus', refresh)
+  }, [refreshCollection])
+
+  useEffect(() => {
+    if (metadataPhase?.state !== 'running' && metadataPhase?.state !== 'complete'
+      && metadataPhase?.state !== 'failed') return
+    const timer = window.setTimeout(() => { void refreshCollection().catch(() => setListError(true)) }, 0)
+    return () => window.clearTimeout(timer)
+  }, [metadataPhase, refreshCollection])
 
   const metadataById = new Map(sources?.map((source) => [source.id, source]))
   const displayedSources =
@@ -765,7 +822,7 @@ export function SourcesPage() {
         <IndexingPanel
           run={run}
           sourceName={panelSourceName}
-          canStartNew={!globallyBusy && panelSource?.preparationState === 'READY'}
+          canStartNew={!globallyBusy && !!panelSource && canAnalyzeSource(panelSource)}
           metadata={metadataPhase?.scanRunId === run.scanRunId ? metadataPhase : null}
           onRetryMetadata={retryMetadata}
           onStartNew={() => {
@@ -839,7 +896,7 @@ export function SourcesPage() {
               const disabledByOther =
                 blockedByActiveRun ||
                 blockedByLocalStart ||
-                blockedByUncertainStart || globallyBusy
+                blockedByUncertainStart || (globallyBusy && !isUncertain)
               return (
                 <article className="source-card" key={status.sourceId}>
                   <div className="source-card-main">
@@ -853,7 +910,8 @@ export function SourcesPage() {
                       </p>
                     )}
                     {source?.preparationState === 'READY' && (
-                      <p className="source-action-note">Ready</p>
+                      <p className="source-action-note">{source.filesystemProfile === 'EXFAT'
+                        ? `READY configuration · ${source.liveAuthorityAvailable ? 'Live authority available' : 'Prepare/Accept required'}` : 'Ready'}</p>
                     )}
                     {source?.preparationState === 'PREPARATION_REQUIRED' && (
                       <p className="source-action-note">Setup required</p>
@@ -902,13 +960,14 @@ export function SourcesPage() {
                         ? runDisplayStatus(activeSourceRun)
                         : 'Waiting to start'}
                     </span>
-                  ) : source?.preparationState === 'PREPARATION_REQUIRED' ? (
+                  ) : source && (source.preparationState === 'PREPARATION_REQUIRED'
+                    || source.preparationState === 'READY' && !canAnalyzeSource(source) && !isUncertain) ? (
                     <button
                       type="button"
                       disabled={preparingSourceId !== null || globallyBusy}
                       onClick={() => void prepare(source)}
                     >
-                      {isPreparing ? 'Preparing…' : 'Prepare Source'}
+                      {isPreparing ? 'Preparing…' : source.filesystemProfile === 'EXFAT' ? 'Prepare/Accept' : 'Prepare Source'}
                     </button>
                   ) : source?.preparationState === 'READY' ? (
                     <button
@@ -927,6 +986,8 @@ export function SourcesPage() {
                   ) : (
                     <span className="source-active-label">Analysis unavailable</span>
                   )}
+                  {source && <SourceAuthorityControls source={source} pending={releasePending !== null}
+                    message={releaseMessages[source.id]} onRelease={(windowId) => void release(source, windowId)} />}
                 </article>
               )
             })}

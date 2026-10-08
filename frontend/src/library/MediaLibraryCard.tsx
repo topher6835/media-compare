@@ -39,6 +39,7 @@ export const MediaLibraryCard = memo(function MediaLibraryCard({ item, mode, fro
   if (broken) label = 'Preview file missing'
   else if (item.generationSupport === 'UNSUPPORTED') label = 'Preview unavailable'
   else if (work?.phase === 'paused') label = 'Preview still pending'
+  else if (work?.phase === 'authority-unavailable') label = 'Prepare/Accept on Sources for a finite preview request'
   else if (work?.phase === 'failed') label = 'Preview request failed'
   if (active) {
     label = work.phase === 'deferred' ? 'Waiting for preview queue'
@@ -78,14 +79,14 @@ export const MediaLibraryCard = memo(function MediaLibraryCard({ item, mode, fro
               <span>{label}</span>
               {active && <span className="library-pulse" aria-hidden="true" />}
               {item.generationSupport === 'SUPPORTED' && !active
-                && (broken || work?.phase === 'paused' || work?.phase === 'failed') && (
+                && (broken || work?.phase === 'paused' || work?.phase === 'failed' || work?.phase === 'authority-unavailable') && (
                 <button
                   type="button"
                   className="library-retry-button"
                   aria-label={`${broken ? 'Repair preview' : 'Retry preview'} for ${item.displayName}`}
                   onClick={() => onRetry(item, broken ? 'repair' : 'generation')}
                 >
-                  {broken ? 'Repair preview' : 'Retry preview'}
+                  {broken ? 'Repair preview' : work?.phase === 'authority-unavailable' ? 'Request preview after Prepare' : 'Retry preview'}
                 </button>
               )}
             </div>
@@ -109,6 +110,7 @@ export const MediaLibraryCard = memo(function MediaLibraryCard({ item, mode, fro
           {item.encodedWidth !== null && item.encodedHeight !== null
             && ` · ${item.encodedWidth} × ${item.encodedHeight}`}
         </p>
+        {work?.phase === 'authority-unavailable' && <p><Link to="/sources">Prepare/Accept on Sources</Link>, then request this finite preview. Cached previews need no authority.</p>}
         <ExactBadge exactSet={item.exactSet} />
       </div>
     </article>

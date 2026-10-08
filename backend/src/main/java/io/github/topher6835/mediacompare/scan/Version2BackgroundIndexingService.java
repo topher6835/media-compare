@@ -38,7 +38,7 @@ public class Version2BackgroundIndexingService {
     public void submitAccepted(ScanExecutionDetails accepted) {
         try {
             if (bundles != null) {
-                try (var lease = bundles.lease(bundles.authorities(accepted.job().scanRunId()))) { lease.checkpoint(); }
+                try (var lease = bundles.lease(bundles.checkedAuthorities(accepted.job().scanRunId()))) { lease.checkpoint(); }
             }
             executor.execute(() -> run(accepted.job().scanRunId(), accepted.job().id()));
         } catch (RuntimeException exception) {

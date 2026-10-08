@@ -61,7 +61,7 @@ export function refreshLibraryPage(
 
 export interface ThumbnailWork {
   purpose: 'generation' | 'repair'
-  phase: 'scheduling' | 'awaiting' | 'deferred' | 'paused' | 'failed'
+  phase: 'scheduling' | 'awaiting' | 'deferred' | 'paused' | 'failed' | 'authority-unavailable'
   startedAt: number
   retryAt: number
   reload: number
@@ -117,7 +117,8 @@ export function applyScheduleStatus(
   status: ThumbnailScheduleStatus,
   now: number,
 ): ThumbnailWork {
-  return { ...work, phase: status === 'QUEUE_FULL' ? 'deferred' : 'awaiting',
+  return { ...work, phase: status === 'AUTHORITY_UNAVAILABLE' ? 'authority-unavailable'
+    : status === 'QUEUE_FULL' ? 'deferred' : 'awaiting',
     retryAt: now + THUMBNAIL_RETRY_MS }
 }
 
@@ -134,7 +135,7 @@ export function reconcileThumbnailWork(
     if (current.purpose === 'generation' && item.thumbnail.state === 'PUBLISHED') continue
     if (current.purpose === 'repair' && current.url !== item.thumbnail.url) continue
     next[item.fileEntryId] = now - current.startedAt >= THUMBNAIL_WAIT_MS
-      && current.phase !== 'failed' && current.phase !== 'paused'
+      && current.phase !== 'failed' && current.phase !== 'paused' && current.phase !== 'authority-unavailable'
       ? { ...current, phase: 'paused' } : current
   }
   return next

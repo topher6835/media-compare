@@ -79,6 +79,11 @@ public final class ExfatAuthorityWindowRegistry implements DisposableBean {
     /** An uncertain rejected-acquisition close must retain catalog ownership and deny further acquisition. */
     public void cleanupFailed() { shutdown(); ownership.retainUntilProcessExit(); }
 
+    /** Lifecycle presence only; never authorizes work or supplies a replacement UUID. */
+    public boolean hasRetainedWindow(long sourceId) {
+        synchronized (monitor) { return current.containsKey(sourceId); }
+    }
+
     public boolean ownsSource(long sourceId) {
         synchronized (monitor) { return current.containsKey(sourceId) || attempts.containsKey(sourceId)
                 || closing.keySet().stream().anyMatch(id -> id.sourceId() == sourceId); }
@@ -642,5 +647,5 @@ public final class ExfatAuthorityWindowRegistry implements DisposableBean {
         }
     }
 
-    private static IllegalStateException invalid() { return new IllegalStateException("Exact exFAT authority unavailable"); }
+    private static IllegalStateException invalid() { return new ExfatAuthorityUnavailableException("Exact exFAT authority unavailable"); }
 }

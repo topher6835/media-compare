@@ -105,7 +105,7 @@ export function MediaLibraryItemDetailContent({ item, brokenPreview, onPreviewEr
             <h2>Full path</h2>
             <div className="reveal-path-row">
               <p className="item-full-path">{item.absolutePath ?? 'Path unavailable from current trusted catalog route'}</p>
-              {item.absolutePath && <RevealFileButton fileEntryId={item.fileEntryId} />}
+              {item.absolutePath && <RevealFileButton fileEntryId={item.fileEntryId} available={item.physicalActionsAvailable} />}
             </div>
           </div>
         </div>
@@ -131,7 +131,7 @@ export function MediaLibraryItemDetailContent({ item, brokenPreview, onPreviewEr
                           {copy.presenceStatus === 'PRESENT' && occurrence.presenceStatus === 'PRESENT'
                             && occurrence.absolutePath && occurrence === copy.occurrences.find((route) =>
                               route.presenceStatus === 'PRESENT' && route.absolutePath)
-                            && <RevealFileButton fileEntryId={copy.fileEntryId} />}
+                            && <RevealFileButton fileEntryId={copy.fileEntryId} available={occurrence.physicalActionsAvailable} />}
                         </div>
                       </div>
                     ))}

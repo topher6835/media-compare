@@ -1,5 +1,7 @@
 # Windows exFAT production implementation scope
 
+Slice 6 pre-activation integration (2026-10-07, approved baseline `d547715`): public Source profile/live projection, Prepare/reacquire/release, exact-window indexing admission, metadata handoff/standalone UI ownership, finite explicit preview requests and physical-action UI restrictions are implemented/tested for external diff review. Production availability remains false and its source is unchanged. The availability flip is a distinct, separately authorized/reviewable final Slice 6 sub-step; real Windows/VeraCrypt/exFAT production acceptance must pass afterward before V1 is complete. The later Mac → Windows validation/commit workflow remains undecided. No commit/push. See [the Slice 6 report](WINDOWS_EXFAT_SLICE6_REPORT.md).
+
 Scoping date: 2026-10-02, America/New_York. Inspected clean baseline: `828a12e41b2b7ba10f2118cf21a8dad6c4a4cb56`.
 
 **Implementation scope/sequencing plan externally reviewed and approved; Slices 1-5 internal foundations implemented, production exFAT disabled.** Production still supports macOS/APFS and Windows/NTFS. The original scoping milestone changed no production code, migration, dependency or diagnostic. The user accepts the frozen restricted exFAT profile's occurrence churn and physical-action limits as implementation constraints. Scope approval does not declare production acceptance complete or authorize execution of all coding slices; remaining slices require separate authorization and execution/review.
@@ -20,7 +22,7 @@ The authority contract remains [the frozen architecture](ARCHITECTURE.md#recomme
 
 Every independent positive after a protected file handle closes creates a new occurrence, even with equal path, timestamps, legacy index and SHA-256. Every exFAT positive requires full fresh SHA-256 from its own protected handle. Exact means equal bytes and length; it never merges physical occurrences or ContentRecords. Ordinary root-window closure leaves durable configuration, revisions, open binding periods and last-known memberships unchanged. A closed window requires explicit Prepare/Accept; loss of authority is not absence. Persisted physical reveal and cleanup preflight remain unavailable. ExFAT Session storage is excluded. NTFS/APFS behavior stays intact.
 
-All Java paths below are relative to `backend/src/main/java/io/github/topher6835/mediacompare/`, unless explicitly stated otherwise. The seam table and **new** labels record the original scoping baseline/proposals; the Slice 1-5 progress annotations above identify the implemented disabled foundations. Slice 6 proposals remain unimplemented; original proposed names are superseded by the actual tree.
+All Java paths below are relative to `backend/src/main/java/io/github/topher6835/mediacompare/`, unless explicitly stated otherwise. The seam table and **new** labels record the original scoping baseline/proposals; the Slice 1-5 progress annotations above identify the implemented disabled foundations. Slice 6 public integration is implemented before activation; original proposed names are superseded by the actual tree.
 
 | Concern | Existing seam and actual behavior | Required adaptation |
 | --- | --- | --- |

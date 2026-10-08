@@ -1,3 +1,4 @@
+import type { SourceAuthorityWindow } from './sources.ts'
 import { requestJson } from './http.ts'
 
 export type IndexingRunStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED'
@@ -71,6 +72,7 @@ export interface IndexingSourceStatus {
 export interface PendingIndexingStart {
   sourceId: number
   requestKey: string
+  authorityWindows?: SourceAuthorityWindow[]
 }
 
 let pendingIndexingStart: PendingIndexingStart | null = null
@@ -92,10 +94,11 @@ export function clearPendingIndexingStart(requestKey: string): void {
 export function startIndexingRun(
   requestKey: string,
   sourceId: number,
+  authorityWindows: SourceAuthorityWindow[] = [],
 ): Promise<IndexingRun> {
   return requestJson<IndexingRun>('/api/indexing-runs', {
     method: 'POST',
-    body: JSON.stringify({ requestKey, sourceIds: [sourceId] }),
+    body: JSON.stringify({ requestKey, sourceIds: [sourceId], ...(authorityWindows.length ? { authorityWindows } : {}) }),
   })
 }
 

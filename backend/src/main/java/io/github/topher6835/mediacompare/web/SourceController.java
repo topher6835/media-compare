@@ -1,5 +1,8 @@
 package io.github.topher6835.mediacompare.web;
 
+import io.github.topher6835.mediacompare.catalog.SourceAuthorityProjection;
+import org.springframework.http.CacheControl;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import java.net.URI;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -28,37 +31,51 @@ public class SourceController {
 
     private final SourceService sourceService;
     private final SourcePreparationService preparation;
+    private final SourceAuthorityProjection authority;
 
-    public SourceController(SourceService sourceService, SourcePreparationService preparation) {
+    public SourceController(SourceService sourceService, SourcePreparationService preparation,
+            SourceAuthorityProjection authority) {
         this.sourceService = sourceService;
         this.preparation = preparation;
+        this.authority = authority;
     }
 
     @PostMapping
     public ResponseEntity<SourceResponse> register(@RequestBody RegisterSourceRequest request) {
         Source source = sourceService.register(request.name(), request.rootPath());
         URI location = URI.create("/api/sources/" + source.id());
-        return ResponseEntity.created(location).body(SourceResponse.from(source));
+        return ResponseEntity.created(location).cacheControl(CacheControl.noStore()).body(response(source));
     }
 
     @GetMapping
-    public List<SourceResponse> findAll() {
-        return sourceService.findAll().stream()
-                .map(SourceResponse::from)
-                .toList();
+    public ResponseEntity<List<SourceResponse>> findAll() {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(sourceService.findAll().stream()
+                .map(this::response)
+                .toList());
     }
 
     @GetMapping("/{id}")
     public ResponseEntity<SourceResponse> findById(@PathVariable long id) {
         return sourceService.findById(id)
-                .map(SourceResponse::from)
-                .map(ResponseEntity::ok)
+                .map(this::response)
+                .map(body -> ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(body))
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @PostMapping("/{id}/prepare")
     public ResponseEntity<SourceResponse> prepare(@PathVariable long id) {
-        return ResponseEntity.ok(SourceResponse.from(preparation.prepare(id)));
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(response(preparation.prepare(id)));
+    }
+
+    private SourceResponse response(Source source) { return SourceResponse.from(source, authority.project(source)); }
+
+    @PostMapping("/{id}/release-authority")
+    public ResponseEntity<ReleaseSourceAuthorityResponse> release(@PathVariable long id,
+            @RequestBody ReleaseSourceAuthorityRequest request) {
+        var result = authority.release(id, request.windowId());
+        var source = sourceService.findById(id).orElseThrow();
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(new ReleaseSourceAuthorityResponse(response(source), result.releaseState(), result.otherWindowsOnVolumeRemain()));
     }
 
     @ExceptionHandler(NoSuchElementException.class)
@@ -84,7 +101,7 @@ public class SourceController {
                 .body(new PreparationError(SourcePreparationException.Code.STATE_CHANGED));
     }
 
-    @ExceptionHandler(IllegalArgumentException.class)
+    @ExceptionHandler({IllegalArgumentException.class, HttpMessageNotReadableException.class})
     public ResponseEntity<Void> invalidRegistration() {
         return ResponseEntity.badRequest().build();
     }

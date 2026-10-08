@@ -98,7 +98,8 @@ public class ExfatContentReadBundles {
     }
 
     private List<Prepared> prepared(List<SourceAuthorityWindowRequest> requested) {
-        return requested.stream().map(r -> {
+        if (requested == null || requested.isEmpty()) throw ExfatContentReadCatalog.unavailable();
+        return CreateMediaMetadataRunRequest.checkedWindows(requested).stream().map(r -> {
             var scope = catalog.scope(r.sourceId());
             var id = new ExfatAuthorityWindowRegistry.WindowId(registry.runtimeId(), r.sourceId(), r.windowId());
             // This is an exact supplied UUID, never capturePrepared/current-window lookup.

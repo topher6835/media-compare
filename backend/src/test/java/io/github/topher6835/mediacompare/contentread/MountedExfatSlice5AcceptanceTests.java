@@ -60,7 +60,7 @@ class MountedExfatSlice5AcceptanceTests {
                             "--spring.main.banner-mode=off");
             jdbc = bean(JdbcTemplate.class); registry = bean(ExfatAuthorityWindowRegistry.class); trace = bean(TracingHost.class);
             seedSource();
-            var scan = bean(IndexingRunAcceptance.class).accept(UUID.randomUUID().toString(), List.of(1L));
+            var scan = bean(IndexingRunAcceptance.class).accept(UUID.randomUUID().toString(), List.of(1L), List.of(new SourceAuthorityWindowRequest(1L, registry.capturePrepared(scope).windowId())));
             bean(Version3ScanExecutionService.class).run(scan.job().scanRunId());
             assertEquals(4, count("file_entry")); assertEquals(4, count("content_record"));
             System.out.println("MOUNTED SCAN PASS four real protected observations/receipts/SHA artifacts");

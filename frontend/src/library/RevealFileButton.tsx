@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { revealMediaLibraryFile } from '../api/mediaLibrary.ts'
 import { revealFailureMessage } from './revealStatus.ts'
 
-export function RevealFileButton({ fileEntryId }: { fileEntryId: number }) {
+export function RevealFileButton({ fileEntryId, available }: { fileEntryId: number; available: boolean }) {
   const [pending, setPending] = useState(false)
   const [message, setMessage] = useState('')
   const request = useRef<AbortController | null>(null)
@@ -10,7 +10,7 @@ export function RevealFileButton({ fileEntryId }: { fileEntryId: number }) {
   useEffect(() => () => request.current?.abort(), [])
 
   async function reveal() {
-    if (request.current) return
+    if (request.current || !available) return
     const controller = new AbortController()
     request.current = controller
     setPending(true)
@@ -27,10 +27,11 @@ export function RevealFileButton({ fileEntryId }: { fileEntryId: number }) {
   }
 
   return <span className="reveal-control">
-    <button type="button" disabled={pending} onClick={() => void reveal()}
+    <button type="button" disabled={pending || !available} onClick={() => void reveal()}
       aria-label={`Reveal FileEntry ${fileEntryId} in Finder`}>
       {pending ? 'Revealing…' : 'Reveal in Finder'}
     </button>
+    {!available && <span>Physical actions are unavailable for this catalog occurrence. Live content authority does not enable historical exFAT physical actions.</span>}
     {message && <span className="reveal-message" role="alert">{message}</span>}
   </span>
 }

@@ -1,5 +1,6 @@
 package io.github.topher6835.mediacompare.scan;
 
+import io.github.topher6835.mediacompare.web.SourceAuthorityWindowRequest;
 import java.util.List;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -28,6 +29,12 @@ public class IndexingRunService {
 
     @Transactional(propagation = Propagation.NEVER)
     public StartResult start(String requestKey, List<Long> sourceIds) {
+        return start(requestKey, sourceIds, List.of());
+    }
+
+    @Transactional(propagation = Propagation.NEVER)
+    public StartResult start(String requestKey, List<Long> sourceIds,
+            List<SourceAuthorityWindowRequest> authorityWindows) {
         String key = canonicalKey(requestKey);
         if (sourceIds != null && sourceIds.size() > MAX_SOURCE_IDS) {
             throw new IllegalArgumentException("Too many Source IDs");
@@ -40,7 +47,7 @@ public class IndexingRunService {
         }
         ScanExecutionDetails accepted;
         try {
-            accepted = acceptance.accept(key, canonicalSources);
+            accepted = acceptance.accept(key, canonicalSources, authorityWindows);
         } catch (DataAccessException exception) {
             if (!IndexingConstraints.uniqueColumn(exception, "scan_run.request_key")) {
                 throw exception;

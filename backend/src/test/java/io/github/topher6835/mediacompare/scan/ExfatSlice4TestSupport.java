@@ -73,7 +73,10 @@ abstract class ExfatSlice4TestSupport {
         }
     }
     ScanExecutionDetails admit(long... ids) {
-        return app.getBean(IndexingRunAcceptance.class).accept(UUID.randomUUID().toString(), Arrays.stream(ids).boxed().toList());
+        return app.getBean(IndexingRunAcceptance.class).accept(UUID.randomUUID().toString(), Arrays.stream(ids).boxed().toList(), authorityRequests(ids));
+    }
+    List<io.github.topher6835.mediacompare.web.SourceAuthorityWindowRequest> authorityRequests(long... ids) {
+        return Arrays.stream(ids).mapToObj(id -> new io.github.topher6835.mediacompare.web.SourceAuthorityWindowRequest(id, windows.get(id).windowId())).toList();
     }
     Map<Long, MissingClaimAuthority> discover(ScanExecutionDetails accepted) {
         return app.getBean(Version3DiscoveryService.class).execute(accepted.job().scanRunId());

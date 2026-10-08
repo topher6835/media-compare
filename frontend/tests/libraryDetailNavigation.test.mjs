@@ -37,6 +37,7 @@ const heic = {
   sourceCount: 1, generationSupport: 'UNSUPPORTED',
   thumbnail: { state: 'MISSING', assetKey: null, url: null, width: null, height: null },
   absolutePath: '/media/trip/picture.heic', exactSet: null,
+  physicalActionsAvailable: true, physicalActionsUnavailableReason: null,
 }
 
 function render(element, initialEntry = '/') {
@@ -123,7 +124,7 @@ test('exact item detail lists current, missing, and unavailable paths', () => {
   const occurrence = (id, path, status, absolutePath) => ({
     fileEntryId: id, contentRecordId: id, membershipId: id, sourceId: 2,
     sourceName: 'Photos', relativePath: path, presenceStatus: status,
-    applicabilityStatus: 'ACTIVE', absolutePath,
+    applicabilityStatus: 'ACTIVE', absolutePath, physicalActionsAvailable: true, physicalActionsUnavailableReason: null,
   })
   const exactDetail = { digestHex: item.exactSet.digestHex, occurrences: [
     occurrence(7, 'trip/picture.heic', 'PRESENT', '/media/trip/picture.heic'),

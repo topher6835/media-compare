@@ -78,6 +78,10 @@ public class WindowsExfatSourcePreparationService {
                             registry.installing(attempt, () -> registry.retain(attempt, writer.reread(scope), id));
                             return scope.source();
                         }
+                        if (registry.hasRetainedWindow(sourceId)) {
+                            registry.invalidateSource(sourceId);
+                            throw uncertain(); // A separate explicit Prepare is required after invalidation.
+                        }
                     }
                     // A stale window is not replaced through the idempotent branch.
                     // Fresh acquisition keeps all root handles owned until installation or failure cleanup.
@@ -131,7 +135,7 @@ public class WindowsExfatSourcePreparationService {
         }
     }
 
-    /** Internal transient projection; future HTTP/frontend integration remains gated. */
+    /** Catalog/registry transient projection; production acquisition remains gated. */
     public ExfatAuthorityWindowRegistry.LiveAuthority liveAuthority(long sourceId) {
         try { return registry.project(writer.snapshot(sourceId)); }
         catch (IllegalArgumentException | IllegalStateException | NoSuchElementException failure) {

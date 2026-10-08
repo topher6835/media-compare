@@ -51,6 +51,8 @@ export interface ExactDuplicateOccurrence {
   fileCategory: TechnicalFileCategory | null
   matchesFilter: boolean
   absolutePath: string | null
+  physicalActionsAvailable: boolean
+  physicalActionsUnavailableReason: string | null
 }
 
 export interface ExactDuplicateGroupDetail
