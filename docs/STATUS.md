@@ -4,11 +4,15 @@
 
 ### Windows exFAT Slice 6 — Local Production Acceptance Checkpoint (2026-10-13)
 
-The checkout is `main` at `6b70028`, with Slice 6 integration committed. `WindowsExfatSupport.PRODUCTION = true` is a local, uncommitted and unpushed activation; it was the only working-tree change before this documentation update. **Slice 6 is not fully accepted or production-approved.** The [production acceptance checkpoint](WINDOWS_EXFAT_SLICE6_PRODUCTION_ACCEPTANCE.md) is the detailed evidence and remaining-gate record; the Slice 5 and pre-activation Slice 6 reports remain historical evidence.
+The checkout is `main` at `6657eec`, with Slice 6 integration committed at `6b70028`. `WindowsExfatSupport.PRODUCTION = true` and corrected gate-dependent tests remain local and uncommitted; activation is unpushed. **Slice 6 is not fully accepted or production-approved.** The [production acceptance checkpoint](WINDOWS_EXFAT_SLICE6_PRODUCTION_ACCEPTANCE.md) is the detailed evidence and remaining-gate record; the Slice 5 and pre-activation Slice 6 reports remain historical evidence.
 
 The user reports completed public Windows/VeraCrypt/exFAT preparation, release/reacquisition, restart with empty live authority, three successful fresh-hash scans, JPEG/PNG metadata and thumbnail publication/cache reuse, Scan 3 → Metadata Job 5 handoff, authority rejection and request-key replay. Direct SQLite verification passed 9/9 historical occurrences, with 3 ACTIVE/PRESENT and 6 RETIRED/PRESENT memberships, no MISSING and correct current duplicate counts. Last reported state: Source 1 READY/EXFAT/revision 1, no live authority or active Jobs, Scan 3 and Metadata Job 5 COMPLETED. Source: `Z:\MediaCompare-Slice6-Acceptance-20261009`; NTFS Session: `D:\Dev\media-compare-slice6-session-20261009`.
 
-Native closure was not independently observed in this enabled production session. Active-work public release/closure and enabled-workflow normal VeraCrypt dismount/remount remain mandatory, along with unresolved production checklist evidence and final validation/review. Earlier native mounted qualification and pre-activation automated results must be distinguished from new enabled-tree evidence. Tests still contain disabled-policy assumptions; no tests, builds, API calls or mounted operations ran during this documentation task. See the checkpoint for the minimum remaining sequence and unsupported scenarios. No architecture or schema decision changed.
+Enabled backend validation passed: Windows 1,546 total / 1,255 passed / 291 skipped; macOS 1,544 total / 1,528 passed / 16 skipped; both BUILD SUCCESS with zero failures/errors. The Windows skip audit explains all 291 exclusions (52 Windows OS exclusions, 226 macOS/APFS runtime assumptions, 12 symbolic-link limitations, 1 mounted opt-in), with no unexpected production-gate exclusions. All macOS skips are explained by Windows-only coverage, platform assumptions or opt-in acceptance. Frontend Node tests, ESLint and TypeScript/Vite production build passed.
+
+Normal VeraCrypt dismount succeeded without force while the backend was running without live authority; the same volume remounted as `Z:`. Source 1 stayed READY/EXFAT/revision 1/live=false. Explicit Prepare acquired UUID `c6ed6c91-2715-4de2-ac05-aff3f1e9473e`; exact-window release returned RELEASED, with live=false, no other windows and unchanged revision. This completes the normal idle remount check, not active-work native closure.
+
+Active-work public release/native handle closure remains mandatory, along with unresolved overlap/interrupted-work/separation/physical-action/browser evidence and final activation review/commit approval. Earlier native mounted qualification remains separate evidence. No production code/tests changed and no tests, builds, API calls or mounted operations ran during this documentation update. See the checkpoint for the remaining sequence and unsupported scenarios. No architecture or schema decision changed.
 
 ### Historical Windows exFAT Slice 6 — Public Integration Before Activation (2026-10-07)
 
@@ -382,7 +386,7 @@ Physical-copy preview validation: `npm run lint && npm run build` passed in `fro
 
 ## Known Limitations / Not Yet Implemented
 
-- Production exFAT is locally enabled by an uncommitted gate change. Public Slice 6 integration and the recorded production checks work, but active-work release/native closure, enabled-workflow dismount/remount, remaining checklist evidence, enabled regressions and final approval remain open. See [the checkpoint](WINDOWS_EXFAT_SLICE6_PRODUCTION_ACCEPTANCE.md). ExFAT physical reveal/cleanup remains unavailable regardless of any live window.
+- Production exFAT is locally enabled by an uncommitted gate change. Recorded production checks, normal idle dismount/remount and backend/frontend automated validation passed. Active-work release/native closure, remaining production/browser evidence and final approval remain open. See [the checkpoint](WINDOWS_EXFAT_SLICE6_PRODUCTION_ACCEPTANCE.md). ExFAT physical reveal/cleanup remains unavailable regardless of any live window.
 
 - SHA EXACT projection and safe combined grouping are implemented. No non-exact matcher publishes relationship rows; multi-producer compatibility per type, actual non-exact detection, and group detail/member endpoints remain unimplemented. Groups are deliberately not persisted.
 - The first grid retains progressively loaded cards with browser-native containment; it does not implement DOM windowing. Group detail/compare, selection/keyboard gallery navigation, search/sorting/source or relationship filters, and favorites/manual organization remain deferred.
@@ -398,7 +402,7 @@ Physical-copy preview validation: `npm run lint && npm run build` passed in `fro
 
 The remaining Windows V1 sequence is:
 
-1. Close Slice 6's remaining evidence/validation gates using [the production acceptance checkpoint](WINDOWS_EXFAT_SLICE6_PRODUCTION_ACCEPTANCE.md): correct obsolete disabled-policy tests, validate the enabled backend and native-profile/frontend gates, and complete the missing production checks. Preserve completed results and avoid redundant acceptance runs.
+1. Close Slice 6's remaining production/browser evidence gates using [the production acceptance checkpoint](WINDOWS_EXFAT_SLICE6_PRODUCTION_ACCEPTANCE.md), starting with active-work release/native closure. Preserve the completed backend/frontend validation and normal idle remount results; avoid redundant acceptance runs.
 2. Review the uncommitted activation and final evidence, update durable status, and obtain explicit commit approval. The integration is committed at `6b70028`; activation is not. Do not declare Slice 6/exFAT V1 complete before mandatory gates pass. Keep NTFS/APFS guarantees and historical physical-action restrictions intact.
 3. Windows Show in File Explorer.
 4. Windows packaging and V1 testing.
