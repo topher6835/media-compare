@@ -9,6 +9,8 @@ This file records decisions already made. It distinguishes the reviewed V1 imple
 - Require real Windows/VeraCrypt/exFAT end-to-end production acceptance after that flip before declaring exFAT V1 complete. The later Mac → Windows validation/commit workflow is undecided.
 - Slice 6 reuses the existing shared Source/window DTO, SCAN HANDOFF/standalone metadata ownership, finite previews and physical-action capabilities. It adds no durable window, identity, occurrence, schema or Job-status decision. READY continues to mean configured, separately from transient live authority.
 
+Current execution status is recorded separately in [the production acceptance checkpoint](WINDOWS_EXFAT_SLICE6_PRODUCTION_ACCEPTANCE.md): integration is committed at `6b70028`, activation is locally true and uncommitted/unpushed, and acceptance/validation remains incomplete. This status update does not change the approved sequence, waive a gate or declare production approval.
+
 ## Project
 
 - Media Compare is a fresh v2 project rather than a continuation of the old tutorial implementation.

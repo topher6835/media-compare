@@ -1,5 +1,7 @@
 # Windows exFAT production implementation scope
 
+Current checkpoint (recorded 2026-10-13): Slice 6 integration is committed on `main` at `6b70028`; `WindowsExfatSupport.PRODUCTION = true` is a local, uncommitted and unpushed activation. The user reports completed Windows/VeraCrypt/exFAT production checks, with mandatory acceptance/validation gates and final review still open. See [the production acceptance checkpoint](WINDOWS_EXFAT_SLICE6_PRODUCTION_ACCEPTANCE.md) for evidence and gaps. Slice 6/exFAT V1 is not fully accepted or production-approved. The dated progress paragraphs below describe earlier milestones; the approved scope, authority rules and acceptance requirements remain unchanged.
+
 Slice 6 pre-activation integration (2026-10-07, approved baseline `d547715`): public Source profile/live projection, Prepare/reacquire/release, exact-window indexing admission, metadata handoff/standalone UI ownership, finite explicit preview requests and physical-action UI restrictions are implemented/tested for external diff review. Production availability remains false and its source is unchanged. The availability flip is a distinct, separately authorized/reviewable final Slice 6 sub-step; real Windows/VeraCrypt/exFAT production acceptance must pass afterward before V1 is complete. The later Mac → Windows validation/commit workflow remains undecided. No commit/push. See [the Slice 6 report](WINDOWS_EXFAT_SLICE6_REPORT.md).
 
 Scoping date: 2026-10-02, America/New_York. Inspected clean baseline: `828a12e41b2b7ba10f2118cf21a8dad6c4a4cb56`.
