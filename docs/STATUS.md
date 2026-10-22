@@ -404,12 +404,22 @@ Physical-copy preview validation: `npm run lint && npm run build` passed in `fro
 
 ## Next Recommended Step
 
-Resume general product development in the new clone without including the unapproved activation patch. Revisit final exFAT approval separately, reconciling existing evidence before deciding which additional validation is necessary. The remaining Windows V1 sequence is:
+Resume general product development in the new clone without including the unapproved activation patch. The approved roadmap below is planned work, not implemented functionality:
+
+1. Optional Subfolder Scanning.
+2. Library search, sorting, and filtering.
+3. Group detail and side-by-side comparison.
+4. Improved previews and gallery navigation.
+5. Windows Explorer integration.
+6. Windows packaging and V1 testing.
+7. Variant Matching V1.1.
+8. Advanced semantic/AI matching.
+
+Optional Subfolder Scanning will provide a per-scan **Include subfolders** checkbox, enabled by default. When unchecked, the scan will process only files directly in the selected Source directory and will not create catalog records for skipped directories. Limited-scope scans must preserve previously indexed files and prevent false MISSING claims. Folder hierarchy tracking, exclusion patterns, and depth settings are outside this feature's scope.
+
+Revisit final exFAT approval separately, reconciling existing evidence before deciding which additional validation is necessary. The remaining acceptance sequence is:
 
 1. Close Slice 6's remaining production/browser evidence gates using [the production acceptance checkpoint](WINDOWS_EXFAT_SLICE6_PRODUCTION_ACCEPTANCE.md), starting with active-work release/native closure. Preserve the completed backend/frontend validation and normal idle remount results; avoid redundant acceptance runs.
 2. Review the uncommitted activation and final evidence, update durable status, and obtain explicit commit approval. The integration is committed at `6b70028`; activation is not. Do not declare Slice 6/exFAT V1 complete before mandatory gates pass. Keep NTFS/APFS guarantees and historical physical-action restrictions intact.
-3. Windows Show in File Explorer.
-4. Windows packaging and V1 testing.
-5. Variant V1.1 implementation.
 
-Real NTFS acceptance is complete with the residual limits recorded above. The manual frontend/backend smoke test also completed successfully; its polling and reveal observations are recorded above. The exFAT/VeraCrypt observation milestone and targeted retained-handle qualification, including normal manual dismount/remount, fresh acquisition and cleanup, are complete; the restricted authority design is frozen. Slice 6 integration is committed, with the uncommitted production activation retained in the original workspaces and the remaining acceptance/validation gates recorded in the checkpoint above. Variant V1.1 remains frozen until the Windows sequence is complete. Variant pairwise matching/grouping and Semantic/AI work remain later. Real macOS/APFS validation of Library return position and Finder reveal, including HEIC and stale-file feedback, remains recommended. Side-by-side compare, manual overrides, persisted group IDs/memberships, group caches/background recomputation, medium/original previews, video grouping UI, and cache cleanup remain deferred.
+Real NTFS acceptance is complete with the residual limits recorded above. The manual frontend/backend smoke test also completed successfully; its polling and reveal observations are recorded above. The exFAT/VeraCrypt observation milestone and targeted retained-handle qualification, including normal manual dismount/remount, fresh acquisition and cleanup, are complete; the restricted authority design is frozen. Slice 6 integration is committed, with the uncommitted production activation retained in the original workspaces and the remaining acceptance/validation gates recorded in the checkpoint above. The prior Variant V1.1 freeze remains subject to explicit reconsideration if the Windows sequence is still incomplete when that roadmap item is reached. Real macOS/APFS validation of Library return position and Finder reveal, including HEIC and stale-file feedback, remains recommended. Side-by-side compare, manual overrides, persisted group IDs/memberships, group caches/background recomputation, medium/original previews, video grouping UI, and cache cleanup remain deferred.
