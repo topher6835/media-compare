@@ -2,9 +2,13 @@
 
 ## Current State
 
-### Windows exFAT Slice 6 — Local Production Acceptance Checkpoint (2026-10-13)
+General product development resumes in the new Mac development clone at `/Users/chris/Code/Personal/Projects/media-compare-dev`, initially verified on `main` at `f4c40db` with production exFAT disabled. Final Slice 6 production approval is deferred; Slice 6 remains incomplete and all outstanding acceptance requirements remain binding, especially active-work release and native handle closure. The completed automated, functional and VeraCrypt evidence remains valid and should not be repeated without a specific reason. Revisit final approval separately, reconciling existing evidence before deciding whether additional validation is necessary.
 
-The checkout is `main` at `6657eec`, with Slice 6 integration committed at `6b70028`. `WindowsExfatSupport.PRODUCTION = true` and corrected gate-dependent tests remain local and uncommitted; activation is unpushed. **Slice 6 is not fully accepted or production-approved.** The [production acceptance checkpoint](WINDOWS_EXFAT_SLICE6_PRODUCTION_ACCEPTANCE.md) is the detailed evidence and remaining-gate record; the Slice 5 and pre-activation Slice 6 reports remain historical evidence.
+The original Mac and Windows workspaces retain the protected 11-file uncommitted activation/test patch; their previously reported Git checkpoints are historical until reverified. New feature development must not accidentally include or ship that unapproved patch.
+
+### Historical Windows exFAT Slice 6 — Local Production Acceptance Checkpoint (2026-10-13)
+
+At that checkpoint the checkout was reported on `main` at `6657eec`, with Slice 6 integration committed at `6b70028`. `WindowsExfatSupport.PRODUCTION = true` and corrected gate-dependent tests were local and uncommitted; activation was unpushed. **Slice 6 is not fully accepted or production-approved.** The [production acceptance checkpoint](WINDOWS_EXFAT_SLICE6_PRODUCTION_ACCEPTANCE.md) is the detailed evidence and remaining-gate record; the Slice 5 and pre-activation Slice 6 reports remain historical evidence.
 
 The user reports completed public Windows/VeraCrypt/exFAT preparation, release/reacquisition, restart with empty live authority, three successful fresh-hash scans, JPEG/PNG metadata and thumbnail publication/cache reuse, Scan 3 → Metadata Job 5 handoff, authority rejection and request-key replay. Direct SQLite verification passed 9/9 historical occurrences, with 3 ACTIVE/PRESENT and 6 RETIRED/PRESENT memberships, no MISSING and correct current duplicate counts. Last reported state: Source 1 READY/EXFAT/revision 1, no live authority or active Jobs, Scan 3 and Metadata Job 5 COMPLETED. Source: `Z:\MediaCompare-Slice6-Acceptance-20261009`; NTFS Session: `D:\Dev\media-compare-slice6-session-20261009`.
 
@@ -386,7 +390,7 @@ Physical-copy preview validation: `npm run lint && npm run build` passed in `fro
 
 ## Known Limitations / Not Yet Implemented
 
-- Production exFAT is locally enabled by an uncommitted gate change. Recorded production checks, normal idle dismount/remount and backend/frontend automated validation passed. Active-work release/native closure, remaining production/browser evidence and final approval remain open. See [the checkpoint](WINDOWS_EXFAT_SLICE6_PRODUCTION_ACCEPTANCE.md). ExFAT physical reveal/cleanup remains unavailable regardless of any live window.
+- Production exFAT is disabled in the new development clone; the original workspaces retain the uncommitted activation patch. Recorded production checks, normal idle dismount/remount and backend/frontend automated validation passed. Active-work release/native closure, remaining production/browser evidence and final approval remain open. See [the checkpoint](WINDOWS_EXFAT_SLICE6_PRODUCTION_ACCEPTANCE.md). ExFAT physical reveal/cleanup remains unavailable regardless of any live window.
 
 - SHA EXACT projection and safe combined grouping are implemented. No non-exact matcher publishes relationship rows; multi-producer compatibility per type, actual non-exact detection, and group detail/member endpoints remain unimplemented. Groups are deliberately not persisted.
 - The first grid retains progressively loaded cards with browser-native containment; it does not implement DOM windowing. Group detail/compare, selection/keyboard gallery navigation, search/sorting/source or relationship filters, and favorites/manual organization remain deferred.
@@ -400,7 +404,7 @@ Physical-copy preview validation: `npm run lint && npm run build` passed in `fro
 
 ## Next Recommended Step
 
-The remaining Windows V1 sequence is:
+Resume general product development in the new clone without including the unapproved activation patch. Revisit final exFAT approval separately, reconciling existing evidence before deciding which additional validation is necessary. The remaining Windows V1 sequence is:
 
 1. Close Slice 6's remaining production/browser evidence gates using [the production acceptance checkpoint](WINDOWS_EXFAT_SLICE6_PRODUCTION_ACCEPTANCE.md), starting with active-work release/native closure. Preserve the completed backend/frontend validation and normal idle remount results; avoid redundant acceptance runs.
 2. Review the uncommitted activation and final evidence, update durable status, and obtain explicit commit approval. The integration is committed at `6b70028`; activation is not. Do not declare Slice 6/exFAT V1 complete before mandatory gates pass. Keep NTFS/APFS guarantees and historical physical-action restrictions intact.
@@ -408,4 +412,4 @@ The remaining Windows V1 sequence is:
 4. Windows packaging and V1 testing.
 5. Variant V1.1 implementation.
 
-Real NTFS acceptance is complete with the residual limits recorded above. The manual frontend/backend smoke test also completed successfully; its polling and reveal observations are recorded above. The exFAT/VeraCrypt observation milestone and targeted retained-handle qualification, including normal manual dismount/remount, fresh acquisition and cleanup, are complete; the restricted authority design is frozen. Slice 6 integration is committed, with local uncommitted production activation and the remaining acceptance/validation gates recorded in the checkpoint above. Variant V1.1 remains frozen until the Windows sequence is complete. Variant pairwise matching/grouping and Semantic/AI work remain later. Real macOS/APFS validation of Library return position and Finder reveal, including HEIC and stale-file feedback, remains recommended. Side-by-side compare, manual overrides, persisted group IDs/memberships, group caches/background recomputation, medium/original previews, video grouping UI, and cache cleanup remain deferred.
+Real NTFS acceptance is complete with the residual limits recorded above. The manual frontend/backend smoke test also completed successfully; its polling and reveal observations are recorded above. The exFAT/VeraCrypt observation milestone and targeted retained-handle qualification, including normal manual dismount/remount, fresh acquisition and cleanup, are complete; the restricted authority design is frozen. Slice 6 integration is committed, with the uncommitted production activation retained in the original workspaces and the remaining acceptance/validation gates recorded in the checkpoint above. Variant V1.1 remains frozen until the Windows sequence is complete. Variant pairwise matching/grouping and Semantic/AI work remain later. Real macOS/APFS validation of Library return position and Finder reveal, including HEIC and stale-file feedback, remains recommended. Side-by-side compare, manual overrides, persisted group IDs/memberships, group caches/background recomputation, medium/original previews, video grouping UI, and cache cleanup remain deferred.

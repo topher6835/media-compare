@@ -2,6 +2,11 @@
 
 This file records decisions already made. It distinguishes the reviewed V1 implementation target from behavior and architecture that remain open.
 
+## Slice 6 approval deferred (2026-10-22)
+
+- Resume general product development in the new Mac clone at `/Users/chris/Code/Personal/Projects/media-compare-dev`, initially verified on `main` at `f4c40db` with production exFAT disabled. The original Mac and Windows workspaces retain the protected 11-file uncommitted activation/test patch; their previously reported Git checkpoints are historical until reverified. Do not accidentally include or ship the unapproved patch in new feature development.
+- Defer final Slice 6 production approval, not its requirements: Slice 6 remains incomplete, including mandatory active-work release and native handle closure. Completed automated, functional and VeraCrypt acceptance evidence remains valid and should not be repeated without a specific reason. Revisit approval separately and reconcile existing evidence before deciding whether additional validation is necessary.
+
 ## Approved Slice 6 sequencing (2026-10-07)
 
 - Implement and validate public exFAT integration while production availability remains false; stop for external diff review without committing/pushing.
@@ -9,7 +14,7 @@ This file records decisions already made. It distinguishes the reviewed V1 imple
 - Require real Windows/VeraCrypt/exFAT end-to-end production acceptance after that flip before declaring exFAT V1 complete. The later Mac → Windows validation/commit workflow is undecided.
 - Slice 6 reuses the existing shared Source/window DTO, SCAN HANDOFF/standalone metadata ownership, finite previews and physical-action capabilities. It adds no durable window, identity, occurrence, schema or Job-status decision. READY continues to mean configured, separately from transient live authority.
 
-Current execution status is recorded separately in [the production acceptance checkpoint](WINDOWS_EXFAT_SLICE6_PRODUCTION_ACCEPTANCE.md): integration is committed at `6b70028`, activation is locally true and uncommitted/unpushed, and acceptance/validation remains incomplete. This status update does not change the approved sequence, waive a gate or declare production approval.
+The historical execution status is recorded in [the production acceptance checkpoint](WINDOWS_EXFAT_SLICE6_PRODUCTION_ACCEPTANCE.md): integration was committed at `6b70028`, activation was locally true and uncommitted/unpushed, and acceptance/validation remained incomplete. The deferral above does not change the approved sequence, waive a gate or declare production approval.
 
 ## Project
 
