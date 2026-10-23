@@ -4,6 +4,8 @@
 
 General product development resumes in the new Mac development clone at `/Users/chris/Code/Personal/Projects/media-compare-dev`, initially verified on `main` at `f4c40db` with production exFAT disabled. Final Slice 6 production approval is deferred; Slice 6 remains incomplete and all outstanding acceptance requirements remain binding, especially active-work release and native handle closure. The completed automated, functional and VeraCrypt evidence remains valid and should not be repeated without a specific reason. Revisit final approval separately, reconciling existing evidence before deciding whether additional validation is necessary.
 
+Current checkpoint: `main` at `12a336d`; the user reports it pushed to GitHub. Optional Subfolder Scanning is implemented, validated and Mac-accepted; production exFAT remains disabled in this clone.
+
 The original Mac and Windows workspaces retain the protected 11-file uncommitted activation/test patch; their previously reported Git checkpoints are historical until reverified. New feature development must not accidentally include or ship that unapproved patch.
 
 ### Optional Subfolder Scanning — implemented and Mac-accepted
@@ -416,17 +418,16 @@ Physical-copy preview validation: `npm run lint && npm run build` passed in `fro
 
 Resume general product development in the new clone without including the unapproved activation patch. Optional Subfolder Scanning is implemented and Mac-accepted as recorded above. The remaining approved roadmap items are planned work:
 
-1. Optional Subfolder Scanning — implemented and Mac-accepted.
+1. Session Startup and Management.
 2. Library search, sorting, and filtering.
 3. Group detail and side-by-side comparison.
 4. Improved previews and gallery navigation.
 5. Windows Explorer integration.
-6. Session Startup and Management — planned GUI functionality: New Session, Open Session, Recent Sessions, and safe Session deletion.
-7. Windows packaging and V1 testing.
-8. Variant Matching V1.1.
-9. Advanced semantic/AI matching.
+6. Windows packaging and V1 testing.
+7. Variant Matching V1.1.
+8. Advanced semantic/AI matching.
 
-The next product-development step is Library search, sorting, and filtering. Folder hierarchy tracking, exclusion patterns, and depth settings remain outside Optional Subfolder Scanning's scope.
+The next product-development step is architectural inspection for Session Startup and Management. Its approved user-facing requirements are recorded in [DECISIONS.md](DECISIONS.md#session-startup-and-management-planned); GUI startup, folder selection, switching and lifecycle integration remain undecided and unimplemented. Folder hierarchy tracking, exclusion patterns, and depth settings remain outside Optional Subfolder Scanning's scope.
 
 Revisit final exFAT approval separately, reconciling existing evidence before deciding which additional validation is necessary. The remaining acceptance sequence is:
 

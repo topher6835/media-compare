@@ -2,6 +2,16 @@
 
 This file records decisions already made. It distinguishes the reviewed V1 implementation target from behavior and architecture that remain open.
 
+## Session Startup and Management (Planned)
+
+- Make this the first remaining product-development priority, ahead of Library search, sorting, and filtering. The requirements below are approved; the GUI functionality is not implemented.
+- At startup, offer a user-friendly New Session or Open Session choice and a Recent Sessions list. Normal Session selection must not require Terminal commands or environment-variable configuration.
+- New Session lets the user choose its saved location and preserves the existing Session structure, catalog ownership and separation from original Source files. Open Session allows browsing to an existing Session folder, preserves its catalog and analysis data, and validates compatibility and integrity using existing application contracts.
+- Recents provides convenient reopening, removal of individual entries and clearing the whole list. Removing or clearing history never deletes Session data or original media; moved or unavailable Sessions must be handled gracefully.
+- Support moving a stopped Session folder to another location or drive on the same computer and reopening it there. Session data remains separate from original Source files; moving it does not establish Source availability or change existing identity, authority and verification rules. Cross-computer portability is not an initial requirement.
+- Provide user-friendly Session deletion of application-managed data without deleting original media or Source directories. Distinguish deletion from removing a Recent entry and preserve existing ownership, active-catalog and allowlisted deletion protections, including preservation of unknown root entries.
+- The backend currently requires a selected Session before normal startup. Reuse the existing backend Session CLI and storage architecture where appropriate. GUI startup, folder selection, switching and lifecycle integration require further architectural inspection; no desktop framework, native picker, launcher or implementation architecture is selected.
+
 ## Optional Subfolder Scanning (2026-10-22)
 
 - Keep Include subfolders per ScanRun, defaulting to recursive. Persist limited requests in existing versioned options; historical version-1 `{}` remains recursive. No Source preference or schema migration is needed.
