@@ -42,7 +42,7 @@ public class Version3DiscoveryCompletionWriter {
             if (claim.exfat() != null) {
                 var a = claim.exfat();
                 if (a.scanRunSourceId() != source.scanRunSource().id() || a.generation() != source.traversalGeneration()
-                        || a.jobId() != job.id() || !a.missingClaim().equals(claim)) throw new IllegalStateException("Foreign exFAT completion claim");
+                        || a.jobId() != job.id() || !a.missingClaim().withSubfolders(claim.includeSubfolders()).equals(claim)) throw new IllegalStateException("Foreign exFAT completion claim");
                 bundles.requireCatalog(a, ScanExecutionDefinition.DISCOVERY, "DISCOVERING");
             } else memberships.requireCurrent(claim.sourceId(), claim.sourceLocationRevision(),
                     claim.locationContextId(), claim.locationContextRevision());

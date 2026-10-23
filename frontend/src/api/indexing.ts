@@ -53,6 +53,7 @@ export interface IndexingRunSummary {
 
 export interface IndexingRun extends IndexingRunSummary {
   requestKey: string
+  includeSubfolders: boolean
   sourceIds: number[]
   stages: IndexingStage[]
   assignmentResult: AssignmentResult | null
@@ -70,6 +71,7 @@ export interface IndexingSourceStatus {
 }
 
 export interface PendingIndexingStart {
+  includeSubfolders: boolean
   sourceId: number
   requestKey: string
   authorityWindows?: SourceAuthorityWindow[]
@@ -95,10 +97,11 @@ export function startIndexingRun(
   requestKey: string,
   sourceId: number,
   authorityWindows: SourceAuthorityWindow[] = [],
+  includeSubfolders = true,
 ): Promise<IndexingRun> {
   return requestJson<IndexingRun>('/api/indexing-runs', {
     method: 'POST',
-    body: JSON.stringify({ requestKey, sourceIds: [sourceId], ...(authorityWindows.length ? { authorityWindows } : {}) }),
+    body: JSON.stringify({ requestKey, includeSubfolders, sourceIds: [sourceId], ...(authorityWindows.length ? { authorityWindows } : {}) }),
   })
 }
 

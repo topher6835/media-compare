@@ -203,7 +203,7 @@ public final class ScanObservationAuthority {
         return switch (completion.issue()) {
             case COMPLETE -> ScanAuthorityResult.trusted(new MissingClaimAuthority(
                     first.sourceId(), first.sourceRevision(), first.contextId(),
-                    first.contextRevision(), completion.startScope()));
+                    first.contextRevision(), completion.startScope()).withSubfolders(completion.includeSubfolders()));
             case ERROR -> denied(ScanAuthorityOutcome.INCOMPLETE, ScanAuthorityReason.TRAVERSAL_ERROR);
             case CANCELLED -> denied(ScanAuthorityOutcome.INCOMPLETE, ScanAuthorityReason.TRAVERSAL_CANCELLED);
             case INACCESSIBLE_SUBTREE -> denied(

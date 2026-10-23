@@ -6,6 +6,16 @@ General product development resumes in the new Mac development clone at `/Users/
 
 The original Mac and Windows workspaces retain the protected 11-file uncommitted activation/test patch; their previously reported Git checkpoints are historical until reverified. New feature development must not accidentally include or ship that unapproved patch.
 
+### Optional Subfolder Scanning — implemented and Mac-accepted
+
+Sources offers a per-scan **Include subfolders** checkbox, checked by default. Omitted/checked requests retain recursive scanning; unchecked requests observe only regular files directly under each selected Source root. Skipped directories create no catalog records. Limited scans make no MISSING claims, including for unseen top-level files, and preserve their prior catalog evidence. Full scans retain normal reconciliation. ScanRun options persist the selection, and request-key replay compares it; uncertain frontend retries retain the captured value.
+
+Assignment/hashing remain restricted to the current positive generation. Metadata started by a limited scan uses its ScanRun ID and restricts both content and occurrence selection to that completed generation, without falling back to preserved subfolder files. Worker scope is captured in memory; interrupted metadata Jobs still fail on restart rather than resume. A full browser reload can lose the transient metadata Job association and require an explicit retry if a Job is already active. No migration, Source preference, folder hierarchy, exclusion/depth setting, or production exFAT activation was added.
+
+Focused validation: 116 backend tests passed with zero failures/errors/skips across indexing/scan APIs, v3 traversal/execution, metadata query/analyzer/Job/API behavior and portable exFAT flow/guards. Frontend request/retry and metadata workflow tests passed (4 tests); changed-file ESLint and production build passed. These checks ran on macOS; native Windows execution and browser-reload metadata recovery remain unverified for this change. No full regression suite or Slice 6 acceptance was rerun; no commit or push was made.
+
+macOS/APFS interactive acceptance (October 22, 2026): A temporary isolated Session and Source were used. With **Include subfolders** unchecked, the scan discovered two top-level files, `Top-Level.png` and macOS `.DS_Store`; Library displayed only `Top-Level.png`, and `Nested.png` was excluded. A subsequent recursive scan discovered three files, including the nested image, and the user confirmed the results looked correct. The backend and frontend were stopped and the disposable test environment was deleted.
+
 ### Historical Windows exFAT Slice 6 — Local Production Acceptance Checkpoint (2026-10-13)
 
 At that checkpoint the checkout was reported on `main` at `6657eec`, with Slice 6 integration committed at `6b70028`. `WindowsExfatSupport.PRODUCTION = true` and corrected gate-dependent tests were local and uncommitted; activation was unpushed. **Slice 6 is not fully accepted or production-approved.** The [production acceptance checkpoint](WINDOWS_EXFAT_SLICE6_PRODUCTION_ACCEPTANCE.md) is the detailed evidence and remaining-gate record; the Slice 5 and pre-activation Slice 6 reports remain historical evidence.
@@ -404,18 +414,19 @@ Physical-copy preview validation: `npm run lint && npm run build` passed in `fro
 
 ## Next Recommended Step
 
-Resume general product development in the new clone without including the unapproved activation patch. The approved roadmap below is planned work, not implemented functionality:
+Resume general product development in the new clone without including the unapproved activation patch. Optional Subfolder Scanning is implemented and Mac-accepted as recorded above. The remaining approved roadmap items are planned work:
 
-1. Optional Subfolder Scanning.
+1. Optional Subfolder Scanning — implemented and Mac-accepted.
 2. Library search, sorting, and filtering.
 3. Group detail and side-by-side comparison.
 4. Improved previews and gallery navigation.
 5. Windows Explorer integration.
-6. Windows packaging and V1 testing.
-7. Variant Matching V1.1.
-8. Advanced semantic/AI matching.
+6. Session Startup and Management — planned GUI functionality: New Session, Open Session, Recent Sessions, and safe Session deletion.
+7. Windows packaging and V1 testing.
+8. Variant Matching V1.1.
+9. Advanced semantic/AI matching.
 
-Optional Subfolder Scanning will provide a per-scan **Include subfolders** checkbox, enabled by default. When unchecked, the scan will process only files directly in the selected Source directory and will not create catalog records for skipped directories. Limited-scope scans must preserve previously indexed files and prevent false MISSING claims. Folder hierarchy tracking, exclusion patterns, and depth settings are outside this feature's scope.
+The next product-development step is Library search, sorting, and filtering. Folder hierarchy tracking, exclusion patterns, and depth settings remain outside Optional Subfolder Scanning's scope.
 
 Revisit final exFAT approval separately, reconciling existing evidence before deciding which additional validation is necessary. The remaining acceptance sequence is:
 

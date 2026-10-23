@@ -47,7 +47,12 @@ public class Version3DiscoveryWalker {
 
     public TraversalCompletion.Issue walk(Path root, ScanAuthoritySnapshot authority,
             Consumer<ResolvedFileCandidate> observer) throws IOException {
-        if (authority.windowsNtfs()) return walkWindows(root, authority, observer);
+        return walk(root, authority, observer, true);
+    }
+
+    public TraversalCompletion.Issue walk(Path root, ScanAuthoritySnapshot authority,
+            Consumer<ResolvedFileCandidate> observer, boolean includeSubfolders) throws IOException {
+        if (authority.windowsNtfs()) return walkWindows(root, authority, observer, includeSubfolders);
         if (authority.profile() != io.github.topher6835.mediacompare.filesystem.FileSystemProfile.APFS) {
             return TraversalCompletion.Issue.UNSUPPORTED_CHILD_STORAGE;
         }
@@ -66,7 +71,7 @@ public class Version3DiscoveryWalker {
         }
 
         TraversalCompletion.Issue[] issue = { TraversalCompletion.Issue.COMPLETE };
-        Files.walkFileTree(root, new SimpleFileVisitor<>() {
+        Files.walkFileTree(root, java.util.Set.of(), includeSubfolders ? Integer.MAX_VALUE : 1, new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) {
                 IndexingInterruptedException.check();
@@ -129,7 +134,7 @@ public class Version3DiscoveryWalker {
     }
 
     private TraversalCompletion.Issue walkWindows(Path root, ScanAuthoritySnapshot authority,
-            Consumer<ResolvedFileCandidate> observer) throws IOException {
+            Consumer<ResolvedFileCandidate> observer, boolean includeSubfolders) throws IOException {
         var anchor = WindowsNtfsPathInspector.inspect(authority.contextAnchor(), true);
         var source = WindowsNtfsPathInspector.inspect(authority.sourceRoot(), true);
         if (anchor.status() != HostFileStatus.ESTABLISHED
@@ -139,7 +144,7 @@ public class Version3DiscoveryWalker {
             return TraversalCompletion.Issue.UNCERTAIN_CHILD_STORAGE;
         }
         TraversalCompletion.Issue[] issue = { TraversalCompletion.Issue.COMPLETE };
-        Files.walkFileTree(root, new SimpleFileVisitor<>() {
+        Files.walkFileTree(root, java.util.Set.of(), includeSubfolders ? Integer.MAX_VALUE : 1, new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) {
                 IndexingInterruptedException.check();

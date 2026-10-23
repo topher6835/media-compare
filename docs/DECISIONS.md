@@ -2,6 +2,12 @@
 
 This file records decisions already made. It distinguishes the reviewed V1 implementation target from behavior and architecture that remain open.
 
+## Optional Subfolder Scanning (2026-10-22)
+
+- Keep Include subfolders per ScanRun, defaulting to recursive. Persist limited requests in existing versioned options; historical version-1 `{}` remains recursive. No Source preference or schema migration is needed.
+- Limited scans observe direct regular files only and make no MISSING claims, including for unseen top-level files. Full recursive reconciliation remains unchanged. No folder hierarchy, exclusions or configurable depth is introduced.
+- Compare effective scope during request-key replay and retain the original value for uncertain retries. Restrict limited-scan metadata content and occurrence selection to that scan's completed positive generation. Preserve existing interrupted-Job failure recovery and production exFAT deferral.
+
 ## Slice 6 approval deferred (2026-10-22)
 
 - Resume general product development in the new Mac clone at `/Users/chris/Code/Personal/Projects/media-compare-dev`, initially verified on `main` at `f4c40db` with production exFAT disabled. The original Mac and Windows workspaces retain the protected 11-file uncommitted activation/test patch; their previously reported Git checkpoints are historical until reverified. Do not accidentally include or ship the unapproved patch in new feature development.

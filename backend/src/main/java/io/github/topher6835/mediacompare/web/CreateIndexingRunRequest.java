@@ -3,7 +3,9 @@ package io.github.topher6835.mediacompare.web;
 import java.util.List;
 
 public record CreateIndexingRunRequest(String requestKey, List<Long> sourceIds,
-        List<SourceAuthorityWindowRequest> authorityWindows) {
+        List<SourceAuthorityWindowRequest> authorityWindows, Boolean includeSubfolders) {
+    public CreateIndexingRunRequest(String requestKey, List<Long> sourceIds,
+            List<SourceAuthorityWindowRequest> authorityWindows) { this(requestKey, sourceIds, authorityWindows, true); }
     public CreateIndexingRunRequest(String requestKey, List<Long> sourceIds) { this(requestKey, sourceIds, null); }
     public CreateIndexingRunRequest {
         if (sourceIds != null) sourceIds = List.copyOf(sourceIds);

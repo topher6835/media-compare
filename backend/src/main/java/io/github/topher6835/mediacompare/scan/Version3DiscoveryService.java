@@ -55,6 +55,7 @@ public class Version3DiscoveryService {
 
     public Map<Long, MissingClaimAuthority> execute(long scanRunId) {
         Plan plan = preflight(scanRunId);
+        boolean includeSubfolders = ScanOptions.from(scans.findScanRunById(scanRunId).orElseThrow()).includeSubfolders();
         if (bundles != null) {
             try (var lease = bundles.lease(bundles.authorities(scanRunId))) {
                 lease.checkpoint();
@@ -66,7 +67,7 @@ public class Version3DiscoveryService {
         DiscoverySource active = plan.sources().getFirst();
         try {
             if (exfatWalker != null) {
-                var result = exfatWalker.walk(scanRunId, discovered);
+                var result = exfatWalker.walk(scanRunId, discovered, includeSubfolders);
                 discovered = result.physicalCount(); claims.putAll(result.claims());
             }
             for (DiscoverySource source : plan.sources()) {
@@ -88,14 +89,14 @@ public class Version3DiscoveryService {
                     if (batch.size() == DiscoveryBatchWriter.MAX_BATCH_SIZE) {
                         count[0] = flush(plan, source, batch, count[0]);
                     }
-                });
+                }, includeSubfolders);
                 if (!batch.isEmpty()) {
                     count[0] = flush(plan, source, batch, count[0]);
                 }
                 discovered = count[0];
                 var end = capture.capture(source.source().id());
                 var result = ScanObservationAuthority.assessTraversal(start, end,
-                        new TraversalCompletion(snapshot.sourceRoot(), snapshot.sourceRoot(), issue));
+                        new TraversalCompletion(snapshot.sourceRoot(), snapshot.sourceRoot(), issue, includeSubfolders));
                 if (result.outcome() != ScanAuthorityOutcome.TRUSTED) {
                     throw new IllegalStateException("Traversal cannot authorize reconciliation for Source "
                             + source.source().id() + ": " + result.reason());

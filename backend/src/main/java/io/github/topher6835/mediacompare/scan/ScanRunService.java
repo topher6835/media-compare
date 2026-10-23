@@ -19,8 +19,6 @@ public class ScanRunService {
 
     private static final String INDEX_REQUEST_TYPE = "INDEX";
     private static final String PENDING_STATUS = "PENDING";
-    private static final long INITIAL_OPTIONS_VERSION = 1;
-    private static final String INITIAL_OPTIONS_JSON = "{}";
 
     private final ScanRepository scanRepository;
     private final CatalogRepository catalogRepository;
@@ -37,6 +35,11 @@ public class ScanRunService {
 
     @Transactional
     public ScanRunDetails create(List<Long> sourceIds, String requestKey) {
+        return create(sourceIds, requestKey, true);
+    }
+
+    @Transactional
+    public ScanRunDetails create(List<Long> sourceIds, String requestKey, boolean includeSubfolders) {
         validateSourceIds(sourceIds);
 
         List<Source> sources = sourceIds.stream()
@@ -51,8 +54,8 @@ public class ScanRunService {
                 INDEX_REQUEST_TYPE,
                 PENDING_STATUS,
                 null,
-                INITIAL_OPTIONS_VERSION,
-                INITIAL_OPTIONS_JSON,
+                includeSubfolders ? 1 : ScanOptions.VERSION,
+                includeSubfolders ? "{}" : new ScanOptions(false).json(),
                 createdAtMs,
                 null,
                 null,

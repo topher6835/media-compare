@@ -48,6 +48,21 @@ class Version3DiscoveryWalkerTests {
     }
 
     @Test
+    void limitedWalkDoesNotInspectOrEnumerateSkippedDirectories() throws Exception {
+        Path root = Files.createDirectory(directory.resolve("source"));
+        Files.writeString(root.resolve("top.jpg"), "top");
+        Path child = Files.createDirectory(root.resolve("skipped"));
+        Files.writeString(child.resolve("deep.jpg"), "deep");
+        var candidates = new ArrayList<ResolvedFileCandidate>();
+        var walker = new Version3DiscoveryWalker(path -> {
+            if (path.startsWith(child)) throw new AssertionError("Skipped directory inspected");
+            return ContinuityProbeResult.accepted(ACCEPTED);
+        });
+        assertEquals(TraversalCompletion.Issue.COMPLETE, walker.walk(root, snapshot(), candidates::add, false));
+        assertEquals(java.util.List.of("top.jpg"), candidates.stream().map(ResolvedFileCandidate::relativePath).toList());
+    }
+
+    @Test
     void sameUuidChildMountDoesNotAuthorizeMissingOrChildCandidate() throws Exception {
         Path root = Files.createDirectory(directory.resolve("source"));
         Files.writeString(root.resolve("top.jpg"), "top");

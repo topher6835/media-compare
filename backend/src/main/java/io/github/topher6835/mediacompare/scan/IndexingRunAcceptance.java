@@ -28,9 +28,15 @@ public class IndexingRunAcceptance {
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NEVER)
     public ScanExecutionDetails accept(String key, List<Long> sourceIds,
             List<SourceAuthorityWindowRequest> authorityWindows) {
+        return accept(key, sourceIds, authorityWindows, true);
+    }
+
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NEVER)
+    public ScanExecutionDetails accept(String key, List<Long> sourceIds,
+            List<SourceAuthorityWindowRequest> authorityWindows, boolean includeSubfolders) {
         return bundles.admit(sourceIds, authorityWindows, prepared -> {
             scans.reserveExecutionWrite();
-            ScanRunDetails request = requests.create(sourceIds, key);
+            ScanRunDetails request = requests.create(sourceIds, key, includeSubfolders);
             return executions.create(request.scanRun().id(), prepared);
         });
     }

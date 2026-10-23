@@ -12,7 +12,7 @@ export interface MetadataPhase {
   run: MediaMetadataRun | null
 }
 
-export function useMetadataWorkflow(scanRunId: number | null, finishedAtMs: number | null, exfatSourceId: number | null = null) {
+export function useMetadataWorkflow(scanRunId: number | null, finishedAtMs: number | null, exfatSourceId: number | null = null, limitedScan = false) {
   const [phase, setPhase] = useState<MetadataPhase | null>(null)
   const [retry, setRetry] = useState<{ scanRunId: number; count: number } | null>(null)
 
@@ -33,7 +33,7 @@ export function useMetadataWorkflow(scanRunId: number | null, finishedAtMs: numb
           try {
             associated = await startMediaMetadataRun({ indexingScanRunId: scanRunId! })
           } catch (error) {
-            if (!forceRetry || !(error instanceof ApiError) || error.status !== 409) throw error
+            if (limitedScan || !forceRetry || !(error instanceof ApiError) || error.status !== 409) throw error
             const source = (await getSources(controller.signal)).find((item) => item.id === exfatSourceId)
             if (!source) throw error
             associated = await startMediaMetadataRun({ authorityWindows: sourceAuthorityWindows(source) })
@@ -97,13 +97,13 @@ export function useMetadataWorkflow(scanRunId: number | null, finishedAtMs: numb
       }
     }
 
-    if (exfatSourceId !== null) void followExact()
+    if (limitedScan || exfatSourceId !== null) void followExact()
     else void check()
     return () => {
       controller.abort()
       if (timer !== undefined) window.clearTimeout(timer)
     }
-  }, [scanRunId, finishedAtMs, retry, exfatSourceId])
+  }, [scanRunId, finishedAtMs, retry, exfatSourceId, limitedScan])
 
   return {
     phase: phase?.scanRunId === scanRunId ? phase : null,

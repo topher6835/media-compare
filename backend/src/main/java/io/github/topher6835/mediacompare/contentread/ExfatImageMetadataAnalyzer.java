@@ -21,13 +21,16 @@ public class ExfatImageMetadataAnalyzer {
         this.originals = originals; this.extractor = extractor; this.publisher = publisher;
     }
     public Result analyze(MediaMetadataContentCandidate content, List<ExfatContentReadAuthority> owners) {
+        return analyze(content, owners, null);
+    }
+    public Result analyze(MediaMetadataContentCandidate content, List<ExfatContentReadAuthority> owners, Long limitedScanId) {
         var definition = ImageIoMediaMetadataDefinition.definition();
         var reusable = cache.findReusableResult(content.contentRecordId(), definition);
         if (reusable.isPresent()) return new Result(reusable.get(), false);
         List<Long> sources = owners.stream().map(a -> a.window().sourceId()).toList();
         long after = 0;
         while (true) {
-            var page = candidates.findExfatOccurrences(content, sources, after, MediaMetadataJobDefinition.CANDIDATE_BATCH_SIZE);
+            var page = candidates.findExfatOccurrences(content, sources, after, MediaMetadataJobDefinition.CANDIDATE_BATCH_SIZE, limitedScanId);
             if (page.isEmpty()) return new Result(null, false);
             for (var candidate : page) {
                 after = candidate.fileEntryId();

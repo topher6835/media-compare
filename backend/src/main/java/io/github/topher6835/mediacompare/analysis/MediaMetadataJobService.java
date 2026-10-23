@@ -60,6 +60,8 @@ public class MediaMetadataJobService {
     public ExfatContentReadBundles.MetadataAdmission create(
             CreateMediaMetadataRunRequest request) { return acceptance.create(request); }
 
+    public Long limitedScanId(CreateMediaMetadataRunRequest request) { return acceptance.limitedScanId(request); }
+
     public List<ExfatContentReadAuthority> contentOwners(long jobId) {
         return contentBundles == null ? List.of() : contentBundles.metadataOwners(jobId);
     }
@@ -73,12 +75,16 @@ public class MediaMetadataJobService {
 
     public MediaMetadataExecutionDetails run(long jobId,
             List<ExfatContentReadAuthority> owners) {
-        try { return runCaptured(jobId, List.copyOf(owners)); }
+        return run(jobId, owners, null);
+    }
+
+    public MediaMetadataExecutionDetails run(long jobId, List<ExfatContentReadAuthority> owners, Long limitedScanId) {
+        try { return runCaptured(jobId, List.copyOf(owners), limitedScanId); }
         finally { finishContent(jobId); }
     }
 
     private MediaMetadataExecutionDetails runCaptured(long jobId,
-            List<ExfatContentReadAuthority> owners) {
+            List<ExfatContentReadAuthority> owners, Long limitedScanId) {
         Job job = jobs.findJobById(jobId)
                 .orElseThrow(() -> new MediaMetadataJobConflictException(
                         "Media metadata Job " + jobId + " does not exist"));
@@ -91,7 +97,7 @@ public class MediaMetadataJobService {
         else contentBundles.publishing(owners, () -> executionState.start(job, stage, System.currentTimeMillis()));
 
         try {
-            ImageMetadataStageResult result = owners.isEmpty() ? processCandidates(job, stage) : processExfatCandidates(job, stage, owners);
+            ImageMetadataStageResult result = owners.isEmpty() ? processCandidates(job, stage, limitedScanId) : processExfatCandidates(job, stage, owners, limitedScanId);
             Runnable complete = () -> executionState.complete(job, stage, resultCodec.write(result),
                     result.candidatesAttempted(), System.currentTimeMillis());
             if (owners.isEmpty()) complete.run(); else contentBundles.publishing(owners, complete);
@@ -176,14 +182,15 @@ public class MediaMetadataJobService {
         }
     }
 
-    private ImageMetadataStageResult processCandidates(Job job, JobStage stage) {
+    private ImageMetadataStageResult processCandidates(Job job, JobStage stage, Long limitedScanId) {
         MediaMetadataAnalysisDefinition definition = ImageIoMediaMetadataDefinition.definition();
         long afterContentRecordId = 0;
         MutableCounts counts = new MutableCounts();
         while (true) {
             IndexingInterruptedException.check();
-            List<MediaMetadataContentCandidate> page = candidates.findCandidates(
-                    definition, afterContentRecordId, MediaMetadataJobDefinition.CANDIDATE_BATCH_SIZE);
+            List<MediaMetadataContentCandidate> page = limitedScanId == null
+                    ? candidates.findCandidates(definition, afterContentRecordId, MediaMetadataJobDefinition.CANDIDATE_BATCH_SIZE)
+                    : candidates.findCandidates(definition, afterContentRecordId, MediaMetadataJobDefinition.CANDIDATE_BATCH_SIZE, limitedScanId);
             if (page.isEmpty()) {
                 return counts.toResult();
             }
@@ -191,24 +198,24 @@ public class MediaMetadataJobService {
                 IndexingInterruptedException.check();
                 afterContentRecordId = candidate.contentRecordId();
                 counts.candidatesAttempted++;
-                processCandidate(candidate, definition, counts);
+                processCandidate(candidate, definition, counts, limitedScanId);
             }
             executionState.updateProgress(job, stage, counts.candidatesAttempted);
         }
     }
 
     private ImageMetadataStageResult processExfatCandidates(Job job, JobStage stage,
-            List<ExfatContentReadAuthority> owners) {
+            List<ExfatContentReadAuthority> owners, Long limitedScanId) {
         long after = 0;
         MutableCounts counts = new MutableCounts();
         var sourceIds = owners.stream().map(a -> a.window().sourceId()).toList();
         while (true) {
             IndexingInterruptedException.check();
-            var page = candidates.findExfatCandidates(sourceIds, after, MediaMetadataJobDefinition.CANDIDATE_BATCH_SIZE);
+            var page = candidates.findExfatCandidates(sourceIds, after, MediaMetadataJobDefinition.CANDIDATE_BATCH_SIZE, limitedScanId);
             if (page.isEmpty()) return counts.toResult();
             for (var candidate : page) {
                 IndexingInterruptedException.check(); after = candidate.contentRecordId(); counts.candidatesAttempted++;
-                var result = exfatAnalyzer.analyze(candidate, owners);
+                var result = exfatAnalyzer.analyze(candidate, owners, limitedScanId);
                 if (result.failed()) counts.failed++;
                 else if (result.metadata() == null) counts.staleOrUnavailable++;
                 else counts.recordCompleted(result.metadata());
@@ -220,9 +227,10 @@ public class MediaMetadataJobService {
     private void processCandidate(
             MediaMetadataContentCandidate candidate,
             MediaMetadataAnalysisDefinition definition,
-            MutableCounts counts) {
+            MutableCounts counts, Long limitedScanId) {
         try {
-            Optional<MediaMetadataResult> result = analyzer.analyze(candidate);
+            Optional<MediaMetadataResult> result = limitedScanId == null
+                    ? analyzer.analyze(candidate) : analyzer.analyze(candidate, limitedScanId);
             if (result.isEmpty()) {
                 counts.staleOrUnavailable++;
             } else {

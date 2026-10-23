@@ -3,6 +3,12 @@ package io.github.topher6835.mediacompare.analysis;
 import io.github.topher6835.mediacompare.contentread.ExfatContentReadBundles;
 import io.github.topher6835.mediacompare.web.CreateMediaMetadataRunRequest;
 
+import io.github.topher6835.mediacompare.scan.ScanRepository;
+import io.github.topher6835.mediacompare.scan.ScanOptions;
+import io.github.topher6835.mediacompare.scan.ScanExecutionDefinition;
+import io.github.topher6835.mediacompare.catalog.CatalogRepository;
+import io.github.topher6835.mediacompare.filesystem.WindowsDurableEvidenceFormat;
+
 import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -39,17 +45,55 @@ public class MediaMetadataJobAcceptance {
     public ExfatContentReadBundles.MetadataAdmission create(
             CreateMediaMetadataRunRequest request) {
         admissionLock.lock();
-        try { return contentBundles.admitMetadata(request, transactions::create); }
+        try {
+            var nativeLimited = transactions.createLimitedNative(request.indexingScanRunId());
+            return nativeLimited != null ? nativeLimited : contentBundles.admitMetadata(request, transactions::create);
+        }
         finally { admissionLock.unlock(); }
+    }
+
+    public Long limitedScanId(CreateMediaMetadataRunRequest request) {
+        return transactions.limitedScanId(request.indexingScanRunId());
     }
 
     @Component
     public static class TransactionalAcceptance {
 
         private final JobRepository jobs;
+        private final ScanRepository scans;
+        private final CatalogRepository catalog;
 
-        public TransactionalAcceptance(JobRepository jobs) {
-            this.jobs = jobs;
+        public TransactionalAcceptance(JobRepository jobs,
+                ScanRepository scans,
+                CatalogRepository catalog) {
+            this.jobs = jobs; this.scans = scans; this.catalog = catalog;
+        }
+
+        public Long limitedScanId(Long id) {
+            if (id == null) return null;
+            var scan = scans.findScanRunById(id).orElseThrow();
+            return ScanOptions.from(scan).includeSubfolders() ? null : id;
+        }
+
+        @Transactional
+        public ExfatContentReadBundles.MetadataAdmission createLimitedNative(Long id) {
+            if (id == null) return null;
+            jobs.reserveAdmissionWrite();
+            if (limitedScanId(id) == null) return null;
+            var scan = scans.findScanRunById(id).orElseThrow();
+            var execution = jobs.findJobByScanRunIdAndTypeAndExecutionVersion(id, "SCAN", ScanExecutionDefinition.VERSION_3).orElseThrow();
+            if (!"COMPLETED".equals(scan.status()) || !"COMPLETED".equals(execution.status())) {
+                throw new MediaMetadataJobConflictException("Limited scan must finish before metadata");
+            }
+            var sources = scans.findScanRunSourcesByScanRunId(id);
+            if (sources.isEmpty()) throw new MediaMetadataJobConflictException("Scan has no Sources");
+            for (var row : sources) {
+                var source = catalog.findSourceById(row.sourceId()).orElseThrow();
+                if ("win-drive".equals(source.rootPathDialect())
+                        && WindowsDurableEvidenceFormat.identify(source.bindingEvidenceJson())
+                        == WindowsDurableEvidenceFormat.EXFAT_SOURCE) return null;
+            }
+            return new ExfatContentReadBundles.MetadataAdmission(create(), true);
         }
 
         @Transactional

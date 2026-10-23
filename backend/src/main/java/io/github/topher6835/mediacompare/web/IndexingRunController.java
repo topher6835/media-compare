@@ -29,7 +29,8 @@ public class IndexingRunController {
 
     @PostMapping
     public ResponseEntity<IndexingRunResponse> start(@RequestBody CreateIndexingRunRequest request) {
-        var result = starts.start(request.requestKey(), request.sourceIds(), request.authorityWindows());
+        var result = starts.start(request.requestKey(), request.sourceIds(), request.authorityWindows(),
+                !Boolean.FALSE.equals(request.includeSubfolders()));
         return ResponseEntity.status(result.created() ? 202 : 200)
                 .location(URI.create("/api/indexing-runs/" + result.run().scanRun().id()))
                 .cacheControl(CacheControl.noStore()).body(IndexingRunResponse.from(result.run()));

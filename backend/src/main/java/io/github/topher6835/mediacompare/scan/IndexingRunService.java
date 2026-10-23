@@ -35,6 +35,12 @@ public class IndexingRunService {
     @Transactional(propagation = Propagation.NEVER)
     public StartResult start(String requestKey, List<Long> sourceIds,
             List<SourceAuthorityWindowRequest> authorityWindows) {
+        return start(requestKey, sourceIds, authorityWindows, true);
+    }
+
+    @Transactional(propagation = Propagation.NEVER)
+    public StartResult start(String requestKey, List<Long> sourceIds,
+            List<SourceAuthorityWindowRequest> authorityWindows, boolean includeSubfolders) {
         String key = canonicalKey(requestKey);
         if (sourceIds != null && sourceIds.size() > MAX_SOURCE_IDS) {
             throw new IllegalArgumentException("Too many Source IDs");
@@ -43,31 +49,32 @@ public class IndexingRunService {
         List<Long> canonicalSources = sourceIds.stream().sorted().toList();
         var existing = scans.findScanRunIdByRequestKey(key);
         if (existing.isPresent()) {
-            return replay(existing.orElseThrow(), canonicalSources);
+            return replay(existing.orElseThrow(), canonicalSources, includeSubfolders);
         }
         ScanExecutionDetails accepted;
         try {
-            accepted = acceptance.accept(key, canonicalSources, authorityWindows);
+            accepted = acceptance.accept(key, canonicalSources, authorityWindows, includeSubfolders);
         } catch (DataAccessException exception) {
             if (!IndexingConstraints.uniqueColumn(exception, "scan_run.request_key")) {
                 throw exception;
             }
             // The losing acceptance transaction has rolled back before this reload.
             long winner = scans.findScanRunIdByRequestKey(key).orElseThrow(() -> exception);
-            return replay(winner, canonicalSources);
+            return replay(winner, canonicalSources, includeSubfolders);
         }
         background.submitAccepted(accepted);
         return new StartResult(true, reads.require(accepted.job().scanRunId()));
     }
 
-    private StartResult replay(long scanRunId, List<Long> sourceIds) {
+    private StartResult replay(long scanRunId, List<Long> sourceIds, boolean includeSubfolders) {
         IndexingRunDetails existing;
         try {
             existing = reads.require(scanRunId);
         } catch (java.util.NoSuchElementException exception) {
             throw new IllegalStateException("Request key has no indexing execution: ScanRun " + scanRunId, exception);
         }
-        if (!"INDEX".equals(existing.scanRun().requestType()) || !sourceIds.equals(existing.sourceIds())) {
+        if (!"INDEX".equals(existing.scanRun().requestType()) || !sourceIds.equals(existing.sourceIds())
+                || ScanOptions.from(existing.scanRun()).includeSubfolders() != includeSubfolders) {
             throw new Version2ExecutionConflictException("Request key already identifies a different request");
         }
         return new StartResult(false, existing);

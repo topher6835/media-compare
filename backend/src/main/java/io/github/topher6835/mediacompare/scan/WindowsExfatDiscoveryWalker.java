@@ -41,6 +41,10 @@ public class WindowsExfatDiscoveryWalker {
     public record Result(long physicalCount, Map<Long, MissingClaimAuthority> claims) { }
 
     public Result walk(long scanRunId, long initialCount) throws IOException {
+        return walk(scanRunId, initialCount, true);
+    }
+
+    public Result walk(long scanRunId, long initialCount, boolean includeSubfolders) throws IOException {
         var authorities = bundles.authorities(scanRunId);
         if (authorities.isEmpty()) return new Result(initialCount, Map.of());
         try (var lease = bundles.retain(authorities)) {
@@ -53,7 +57,7 @@ public class WindowsExfatDiscoveryWalker {
                     if (sameWindowsRoute(candidate.root(), other.root()) && !candidate.root().equals(other.root())) {
                         throw new IOException("Selected roots have uncertain spelling aliases");
                     }
-                    if (other.root().contains(candidate.root()) && (!other.root().equals(candidate.root())
+                    if (other.root().contains(candidate.root()) && (includeSubfolders || other.root().equals(candidate.root())) && (!other.root().equals(candidate.root())
                             || other.scope().source().id() < candidate.scope().source().id())) contained = true;
                 }
                 if (!contained) maximal.add(candidate);
@@ -61,12 +65,12 @@ public class WindowsExfatDiscoveryWalker {
             long[] count = {initialCount};
             for (var root : maximal) {
                 var group = authorities.stream().filter(a -> a.scope().context().equals(root.scope().context())
-                        && root.root().contains(a.root())).toList();
-                directory(root.root(), group, lease, count);
+                        && (includeSubfolders ? root.root().contains(a.root()) : root.root().equals(a.root()))).toList();
+                directory(root.root(), group, lease, count, includeSubfolders);
             }
             lease.revalidate();
             var claims = new HashMap<Long, MissingClaimAuthority>();
-            for (var a : authorities) claims.put(a.scope().source().id(), a.missingClaim());
+            for (var a : authorities) claims.put(a.scope().source().id(), a.missingClaim().withSubfolders(includeSubfolders));
             return new Result(count[0], Map.copyOf(claims));
         } catch (IOException | RuntimeException failure) {
             // Loss of any qualified resource makes this bundle incomplete. Committed positives remain history.
@@ -77,7 +81,7 @@ public class WindowsExfatDiscoveryWalker {
     }
 
     private void directory(LocationPath path, List<WindowsExfatScanAuthority> sources,
-            ExfatScanBundles.Lease lease, long[] count) throws IOException {
+            ExfatScanBundles.Lease lease, long[] count, boolean includeSubfolders) throws IOException {
         lease.checkpoint();
         if (path.components().size() > 256) throw new IOException("Discovery depth limit");
         try (var reservation = lease.reserveDirectories(path.components().size() + 1)) {
@@ -95,7 +99,9 @@ public class WindowsExfatDiscoveryWalker {
                 for (var entry : entries) {
                     lease.checkpoint();
                     var child = path.append(entry.spelling());
-                    if (entry.directory()) directory(child, sources, lease, count);
+                    if (entry.directory()) {
+                        if (includeSubfolders) directory(child, sources, lease, count, true);
+                    }
                     else {
                         var participants = sources.stream().filter(a -> a.root().contains(child)).toList();
                         if (!participants.isEmpty()) observe(directory, entry.spelling(), child, participants, lease, count);

@@ -50,6 +50,14 @@ public class MediaMetadataCandidateRepository {
                 JOIN content_record ON content_record.id = file_entry.current_content_id
             """;
 
+    private static String scanScope(String alias) {
+        return " AND (? IS NULL OR EXISTS (SELECT 1 FROM scan_run_source scope"
+                + " WHERE scope.id = " + alias + ".last_positive_scan_run_source_id"
+                + " AND scope.scan_run_id = ? AND scope.status = 'COMPLETED'"
+                + " AND scope.source_id = " + alias + ".source_id"
+                + " AND scope.completed_generation = " + alias + ".last_positive_traversal_generation)) ";
+    }
+
     private final JdbcTemplate jdbcTemplate;
 
     public MediaMetadataCandidateRepository(JdbcTemplate jdbcTemplate) {
@@ -58,6 +66,11 @@ public class MediaMetadataCandidateRepository {
 
     public List<MediaMetadataContentCandidate> findCandidates(
             MediaMetadataAnalysisDefinition definition, long afterContentRecordId, int limit) {
+        return findCandidates(definition, afterContentRecordId, limit, null);
+    }
+
+    public List<MediaMetadataContentCandidate> findCandidates(
+            MediaMetadataAnalysisDefinition definition, long afterContentRecordId, int limit, Long limitedScanId) {
         Objects.requireNonNull(definition, "definition");
         requirePositiveLimit(limit);
 
@@ -75,6 +88,7 @@ public class MediaMetadataCandidateRepository {
                       WHERE file_entry.current_content_id = content_record.id
                         AND file_entry.location_identity_status = 'RESOLVED'
                         AND file_entry.occurrence_token IS NULL
+                        """ + scanScope("membership") + """
                         AND membership.applicability_status = 'ACTIVE'
                         AND membership.presence_status = 'PRESENT'
                         AND membership.observed_file_entry_revision = file_entry.observation_revision
@@ -99,7 +113,7 @@ public class MediaMetadataCandidateRepository {
                 LIMIT ?
                 """, (resultSet, rowNumber) -> new MediaMetadataContentCandidate(
                         resultSet.getLong("id"), resultSet.getLong("size_bytes")),
-                afterContentRecordId,
+                afterContentRecordId, limitedScanId, limitedScanId,
                 MediaMetadataAnalysisDefinition.ANALYSIS_TYPE,
                 definition.analyzerId(),
                 definition.analyzerVersion(),
@@ -110,10 +124,16 @@ public class MediaMetadataCandidateRepository {
 
     public List<MediaMetadataFileCandidate> findOccurrences(
             MediaMetadataContentCandidate candidate, long afterFileEntryId, int limit) {
+        return findOccurrences(candidate, afterFileEntryId, limit, null);
+    }
+
+    public List<MediaMetadataFileCandidate> findOccurrences(MediaMetadataContentCandidate candidate,
+            long afterFileEntryId, int limit, Long limitedScanId) {
         Objects.requireNonNull(candidate, "candidate");
         requirePositiveLimit(limit);
 
-        return jdbcTemplate.query(OCCURRENCE_SELECT + """
+        return jdbcTemplate.query(OCCURRENCE_SELECT.replace("WHERE eligible.file_entry_id = file_entry.id",
+                "WHERE eligible.file_entry_id = file_entry.id" + scanScope("eligible")) + """
                 WHERE file_entry.current_content_id = ?
                   AND content_record.size_bytes = ?
                   AND file_entry.location_identity_status = 'RESOLVED'
@@ -122,7 +142,7 @@ public class MediaMetadataCandidateRepository {
                 ORDER BY file_entry.id
                 LIMIT ?
                 """, MediaMetadataCandidateRepository::mapFileCandidate,
-                candidate.contentRecordId(), candidate.expectedContentSizeBytes(),
+                limitedScanId, limitedScanId, candidate.contentRecordId(), candidate.expectedContentSizeBytes(),
                 afterFileEntryId, limit);
     }
 
@@ -150,9 +170,16 @@ public class MediaMetadataCandidateRepository {
 
     /** Restriction is INSIDE MIN(eligible.id), so an unaccepted overlapping Source cannot win. */
     public List<MediaMetadataContentCandidate> findExfatCandidates(List<Long> sourceIds, long afterContentId, int limit) {
+        return findExfatCandidates(sourceIds, afterContentId, limit, null);
+    }
+
+    public List<MediaMetadataContentCandidate> findExfatCandidates(List<Long> sourceIds, long afterContentId,
+            int limit, Long limitedScanId) {
         requirePositiveLimit(limit);
-        String select = exfatSelect(sourceIds);
+        String select = exfatSelect(sourceIds).replace("AND eligible.file_entry_id = file_entry.id",
+                "AND eligible.file_entry_id = file_entry.id" + scanScope("eligible"));
         var args = new java.util.ArrayList<Object>(sourceIds);
+        args.add(limitedScanId); args.add(limitedScanId);
         args.add(afterContentId); args.add(limit);
         return jdbcTemplate.query("SELECT DISTINCT current_content_id, content_size_bytes FROM (" + select + """
                 WHERE file_entry.occurrence_token IS NOT NULL
@@ -166,11 +193,18 @@ public class MediaMetadataCandidateRepository {
 
     public List<MediaMetadataFileCandidate> findExfatOccurrences(MediaMetadataContentCandidate content,
             List<Long> sourceIds, long afterFileId, int limit) {
+        return findExfatOccurrences(content, sourceIds, afterFileId, limit, null);
+    }
+
+    public List<MediaMetadataFileCandidate> findExfatOccurrences(MediaMetadataContentCandidate content,
+            List<Long> sourceIds, long afterFileId, int limit, Long limitedScanId) {
         requirePositiveLimit(limit);
         var args = new java.util.ArrayList<Object>(sourceIds);
+        args.add(limitedScanId); args.add(limitedScanId);
         args.add(content.contentRecordId()); args.add(content.expectedContentSizeBytes());
         args.add(afterFileId); args.add(limit);
-        return jdbcTemplate.query(exfatSelect(sourceIds) + """
+        return jdbcTemplate.query(exfatSelect(sourceIds).replace("AND eligible.file_entry_id = file_entry.id",
+                "AND eligible.file_entry_id = file_entry.id" + scanScope("eligible")) + """
                 WHERE file_entry.occurrence_token IS NOT NULL
                   AND file_entry.location_identity_status = 'RESOLVED'
                   AND file_entry.current_content_id = ? AND content_record.size_bytes = ?

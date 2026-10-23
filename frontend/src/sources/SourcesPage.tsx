@@ -161,6 +161,7 @@ function IndexingPanel({
         <div>
           <p className="eyebrow">Source analysis</p>
           <h2 id="indexing-heading">{sourceName}</h2>
+          {run.includeSubfolders === false && <p>Subfolders excluded. Previously indexed files are preserved.</p>}
         </div>
         <span className={`run-status ${statusClass}`}>
           {analysisStatus(run, metadata)}
@@ -339,6 +340,7 @@ export function SourcesPage() {
     text: string
   } | null>(null)
   const [run, setRun] = useState<IndexingRun | null>(null)
+  const [includeSubfolders, setIncludeSubfolders] = useState<Record<number, boolean>>({})
   const [startingSourceId, setStartingSourceId] = useState<number | null>(null)
   const [uncertainStart, setUncertainStart] = useState<PendingIndexingStart | null>(
     getPendingIndexingStart,
@@ -459,6 +461,7 @@ export function SourcesPage() {
     run?.scanRunId === completedScanRunId
       ? sources?.find((source) => run.sourceIds.includes(source.id) && source.filesystemProfile === 'EXFAT')?.id ?? null
       : null,
+    run?.includeSubfolders === false,
   )
 
   useEffect(() => {
@@ -572,6 +575,7 @@ export function SourcesPage() {
         ? retainedAttempt.requestKey
         : crypto.randomUUID()
     const attempt: PendingIndexingStart = { sourceId: source.id, requestKey,
+      includeSubfolders: retryUncertain && retainedAttempt ? retainedAttempt.includeSubfolders : includeSubfolders[source.id] ?? true,
       authorityWindows: retryUncertain ? retainedAttempt?.authorityWindows : undefined }
     rememberPendingIndexingStart(attempt)
     startLock.current = true
@@ -592,7 +596,7 @@ export function SourcesPage() {
         attempt.authorityWindows = sourceAuthorityWindows(fresh)
         rememberPendingIndexingStart(attempt)
       }
-      const accepted = await startIndexingRun(requestKey, source.id, attempt.authorityWindows)
+      const accepted = await startIndexingRun(requestKey, source.id, attempt.authorityWindows, attempt.includeSubfolders)
       clearPendingIndexingStart(requestKey)
       if (!mounted.current) return
       setRun(accepted)
@@ -970,19 +974,28 @@ export function SourcesPage() {
                       {isPreparing ? 'Preparing…' : source.filesystemProfile === 'EXFAT' ? 'Prepare/Accept' : 'Prepare Source'}
                     </button>
                   ) : source?.preparationState === 'READY' ? (
-                    <button
-                      type="button"
-                      disabled={disabledByOther || isStarting || preparingSourceId !== null}
-                      onClick={() => {
-                        void startAnalysis(source, isUncertain)
-                      }}
-                    >
-                      {isStarting
-                        ? 'Starting…'
-                        : isUncertain
-                          ? 'Retry request'
-                          : 'Analyze Source'}
-                    </button>
+                    <div>
+                      <label>
+                        <input type="checkbox"
+                          checked={isUncertain ? uncertainStart?.includeSubfolders ?? true : includeSubfolders[source.id] ?? true}
+                          disabled={disabledByOther || isStarting || isUncertain}
+                          onChange={(event) => setIncludeSubfolders((current) => ({ ...current, [source.id]: event.target.checked }))}
+                        /> Include subfolders
+                      </label>
+                      <button
+                        type="button"
+                        disabled={disabledByOther || isStarting || preparingSourceId !== null}
+                        onClick={() => {
+                          void startAnalysis(source, isUncertain)
+                        }}
+                      >
+                        {isStarting
+                          ? 'Starting…'
+                          : isUncertain
+                            ? 'Retry request'
+                            : 'Analyze Source'}
+                      </button>
+                    </div>
                   ) : (
                     <span className="source-active-label">Analysis unavailable</span>
                   )}

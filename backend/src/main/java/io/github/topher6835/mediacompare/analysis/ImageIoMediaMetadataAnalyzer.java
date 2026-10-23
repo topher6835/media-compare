@@ -32,6 +32,10 @@ public class ImageIoMediaMetadataAnalyzer {
     }
 
     public Optional<MediaMetadataResult> analyze(MediaMetadataContentCandidate candidate) {
+        return analyze(candidate, null);
+    }
+
+    public Optional<MediaMetadataResult> analyze(MediaMetadataContentCandidate candidate, Long limitedScanId) {
         Objects.requireNonNull(candidate, "candidate");
         MediaMetadataAnalysisDefinition definition = ImageIoMediaMetadataDefinition.definition();
         Optional<MediaMetadataResult> cached = metadataCache.findReusableResult(
@@ -42,8 +46,9 @@ public class ImageIoMediaMetadataAnalyzer {
 
         long afterFileEntryId = 0;
         while (true) {
-            List<MediaMetadataFileCandidate> occurrences = candidateRepository.findOccurrences(
-                    candidate, afterFileEntryId, OCCURRENCE_PAGE_SIZE);
+            List<MediaMetadataFileCandidate> occurrences = limitedScanId == null
+                    ? candidateRepository.findOccurrences(candidate, afterFileEntryId, OCCURRENCE_PAGE_SIZE)
+                    : candidateRepository.findOccurrences(candidate, afterFileEntryId, OCCURRENCE_PAGE_SIZE, limitedScanId);
             if (occurrences.isEmpty()) {
                 return Optional.empty();
             }

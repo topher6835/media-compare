@@ -2,11 +2,12 @@ package io.github.topher6835.mediacompare.web;
 
 import java.util.List;
 import io.github.topher6835.mediacompare.scan.IndexingRunDetails;
+import io.github.topher6835.mediacompare.scan.ScanOptions;
 
 public record IndexingRunResponse(long scanRunId, long jobId, String requestKey, String status, String currentStage,
         long progressCompleted, Long progressTotal, long createdAtMs, Long startedAtMs, Long finishedAtMs,
         String errorMessage, List<Long> sourceIds, List<Stage> stages, AssignmentResult assignmentResult,
-        HashingResult hashingResult, boolean completedWithIssues) {
+        HashingResult hashingResult, boolean completedWithIssues, boolean includeSubfolders) {
 
     public static IndexingRunResponse from(IndexingRunDetails run) {
         var job = run.job();
@@ -19,7 +20,7 @@ public record IndexingRunResponse(long scanRunId, long jobId, String requestKey,
                         stage.progressTotal(), stage.startedAtMs(), stage.finishedAtMs(), stage.errorMessage())).toList(),
                 assignment == null ? null : new AssignmentResult(assignment.assignedCount(), assignment.skippedCount()),
                 hashing == null ? null : new HashingResult(hashing.hashedCount(), hashing.cachedCount(), hashing.skippedCount(), hashing.failedCount()),
-                run.completedWithIssues());
+                run.completedWithIssues(), ScanOptions.from(run.scanRun()).includeSubfolders());
     }
 
     public record Stage(String stageType, String status, long progressCompleted, Long progressTotal,

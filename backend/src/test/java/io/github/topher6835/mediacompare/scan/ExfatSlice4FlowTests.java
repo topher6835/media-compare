@@ -37,6 +37,36 @@ class ExfatSlice4FlowTests extends ExfatSlice4TestSupport {
         assertEquals(2, java.util.UUID.fromString(file.occurrenceToken()).variant());
     }
 
+    @Test void limitedOverlappingRootsObserveOnlyTheirOwnDirectFiles() throws Exception {
+        long parent = source(ROOT), nested = source(ROOT.append("Nested"));
+        access.add("C:\\Photos\\top.jpg", "top");
+        access.add("C:\\Photos\\Nested\\child.jpg", "child");
+        access.add("C:\\Photos\\Nested\\Deep\\skip.jpg", "skip");
+        var accepted = app.getBean(IndexingRunAcceptance.class).accept(java.util.UUID.randomUUID().toString(),
+                List.of(parent, nested), authorityRequests(parent, nested), false);
+        assertEquals("COMPLETED", execution.run(accepted.job().scanRunId()).job().status());
+        assertEquals(2, access.opens);
+        assertEquals(2, count("file_entry")); assertEquals(2, count("source_membership"));
+        assertFalse(access.enumerations.containsKey(ROOT.append("Nested").append("Deep")));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM source_membership WHERE source_id=?", Long.class, parent));
+        assertFalse(WindowsExfatSupport.PRODUCTION.available());
+    }
+
+    @Test void limitedEmptyRootPreservesPriorTopLevelAndDescendantHistory() throws Exception {
+        long parent = source(ROOT);
+        access.add("C:\\Photos\\top.jpg", "top");
+        access.add("C:\\Photos\\Nested\\child.jpg", "child");
+        var first = admit(parent); execution.run(first.job().scanRunId());
+        var oldMembers = jdbc.queryForList("SELECT * FROM source_membership ORDER BY id");
+        var oldFiles = jdbc.queryForList("SELECT * FROM file_entry ORDER BY id");
+        access.files.clear(); prepare(parent);
+        var limited = app.getBean(IndexingRunAcceptance.class).accept(java.util.UUID.randomUUID().toString(),
+                List.of(parent), authorityRequests(parent), false);
+        assertEquals("COMPLETED", execution.run(limited.job().scanRunId()).job().status());
+        assertEquals(oldMembers, jdbc.queryForList("SELECT * FROM source_membership ORDER BY id"));
+        assertEquals(oldFiles, jdbc.queryForList("SELECT * FROM file_entry ORDER BY id"));
+    }
+
     @Test void independentUnchangedRescanAlwaysReadsFullyAndCreatesDistinctOccurrenceAndContent() throws Exception {
         long id = source(ROOT); access.add("C:\\Photos\\photo.jpg", "identical bytes and metadata");
         var first = admit(id); execution.run(first.job().scanRunId()); var prior = onlyFile();

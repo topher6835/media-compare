@@ -64,6 +64,7 @@ public class Version3ScanExecutionService {
                 || jobs.hasActiveScanJob()) {
             throw new Version2ExecutionConflictException("ScanRun is not eligible for a v3 execution");
         }
+        ScanOptions.from(scan);
         List<ScanRunSource> sources = scans.findScanRunSourcesByScanRunId(scanRunId);
         if (sources.isEmpty()) {
             throw new Version2ExecutionConflictException("SCAN requires at least one Source");

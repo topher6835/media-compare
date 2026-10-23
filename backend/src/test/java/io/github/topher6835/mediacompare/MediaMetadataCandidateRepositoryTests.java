@@ -103,6 +103,28 @@ class MediaMetadataCandidateRepositoryTests {
     }
 
     @Test
+    void limitedScopeFiltersBothContentAndOccurrencesWithoutFallbackToOlderFiles() {
+        Source source = insertSource("/catalog/limited");
+        ContentRecord shared = insertContent(10);
+        ContentRecord nestedOnly = insertContent(12);
+        insertFile(source, shared, "nested/first.jpg", "PRESENT");
+        FileEntry direct = insertFile(source, shared, "direct.jpg", "PRESENT");
+        insertFile(source, nestedOnly, "nested/only.jpg", "PRESENT");
+        jdbcTemplate.update("INSERT INTO scan_run (id, request_type, status, options_version, options_json, created_at_ms) VALUES (100, 'INDEX', 'COMPLETED', 2, ?, 1)",
+                new io.github.topher6835.mediacompare.scan.ScanOptions(false).json());
+        jdbcTemplate.update("INSERT INTO scan_run_source (id, scan_run_id, source_id, status, source_location_revision, traversal_generation, completed_generation) VALUES (101, 100, ?, 'COMPLETED', ?, 1, 1)",
+                source.id(), source.locationRevision());
+        jdbcTemplate.update("UPDATE source_membership SET last_positive_scan_run_source_id=101, last_positive_traversal_generation=1 WHERE file_entry_id=?", direct.id());
+        var content = new MediaMetadataContentCandidate(shared.id(), 10);
+        assertEquals(List.of(content), candidateRepository.findCandidates(DEFINITION, 0, 100, 100L));
+        assertEquals(List.of(direct.id()), candidateRepository.findOccurrences(content, 0, 100, 100L).stream()
+                .map(MediaMetadataFileCandidate::fileEntryId).toList());
+        jdbcTemplate.update("UPDATE source_membership SET presence_status='MISSING' WHERE file_entry_id=?", direct.id());
+        assertTrue(candidateRepository.findOccurrences(content, 0, 100, 100L).isEmpty(), "Must not fall back to the older nested occurrence");
+        assertEquals(2, candidateRepository.findCandidates(DEFINITION, 0, 100).size(), "Existing global behavior is unchanged");
+    }
+
+    @Test
     void deduplicatesContentCandidatesAndOrdersPresentOccurrencesByFileEntryId() {
         Source source = insertSource("/catalog/source");
         ContentRecord content = insertContent(10);

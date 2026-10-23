@@ -15,13 +15,14 @@ import org.springframework.stereotype.Component;
 @Component
 public class ExfatReceiptAuthority {
     private final ExfatScanBundles bundles;
+    private final ScanRepository scans;
     private final SourceMembershipRepository memberships;
     private final CatalogRepository catalog;
     private final LocationContextRepository contexts;
 
     public ExfatReceiptAuthority(ExfatScanBundles bundles, SourceMembershipRepository memberships,
-            CatalogRepository catalog, LocationContextRepository contexts) {
-        this.bundles = bundles; this.memberships = memberships; this.catalog = catalog; this.contexts = contexts;
+            CatalogRepository catalog, LocationContextRepository contexts, ScanRepository scans) {
+        this.scans = scans; this.bundles = bundles; this.memberships = memberships; this.catalog = catalog; this.contexts = contexts;
     }
 
     /** Requires the caller's outer exact-window lease and transaction. */
@@ -34,11 +35,14 @@ public class ExfatReceiptAuthority {
         if (!memberships.findById(file.id()).orElseThrow().equals(file)) throw integrity();
         var receipt = OccurrenceProfileValidation.requireExfat(file);
         var path = new LocationPathCodec().decode(receipt.locationPath());
+        boolean includeSubfolders = ScanOptions.from(scans.findScanRunById(scanRunId).orElseThrow()).includeSubfolders();
         var qualifying = bundles.authorities(scanRunId).stream().filter(a -> a.scope().context().id().equals(receipt.contextId())
-                && a.root().contains(path)).toList();
+                && a.root().contains(path) && (includeSubfolders
+                        || path.components().size() == a.root().components().size() + 1)).toList();
         if (receipt.scanRunId() != scanRunId || qualifying.size() != receipt.sources().size()) throw integrity();
         for (var source : receipt.sources()) {
             var a = bundles.require(scanRunId, source.sourceId());
+            if (!qualifying.contains(a)) throw integrity();
             bundles.requireCatalog(a, stage, "COMPLETED");
             if (!a.bundleUuid().equals(receipt.bundleUuid()) || a.jobId() != receipt.scanJobId()
                     || !a.window().windowId().equals(source.windowUuid()) || a.scanRunSourceId() != source.scanRunSourceId()

@@ -193,12 +193,14 @@ public class SourceMembershipPublicationService {
     public int reconcile(MissingClaimAuthority claim, ScanRunSource runSource, long completedAtMs) {
         Objects.requireNonNull(claim, "Missing-claim authority");
         contexts.reserveWrite();
+        boolean includeSubfolders = ScanOptions.from(scans.findScanRunById(runSource.scanRunId()).orElseThrow()).includeSubfolders();
+        require(claim.includeSubfolders() == includeSubfolders, "Traversal coverage disagrees with scan options");
         if (claim.exfat() != null) {
             var a = claim.exfat();
-            require(a.missingClaim().equals(claim) && a.scanRunSourceId() == runSource.id()
+            require(a.missingClaim().withSubfolders(includeSubfolders).equals(claim) && a.scanRunSourceId() == runSource.id()
                     && a.generation() == runSource.traversalGeneration(), "Foreign exFAT missing claim");
             bundles.requireCatalog(a, ScanExecutionDefinition.RECONCILIATION, "DISCOVERED");
-            int changed = occurrences.markUnseenMissing(claim.sourceId(), claim.locationContextId(), a.scanRunSourceId(), a.generation());
+            int changed = includeSubfolders ? occurrences.markUnseenMissing(claim.sourceId(), claim.locationContextId(), a.scanRunSourceId(), a.generation()) : 0;
             require(scans.completeSourceReconciliation(a.scanRunSourceId(), a.generation(), completedAtMs) == 1,
                     "exFAT reconciliation generation changed");
             return changed;
@@ -216,8 +218,8 @@ public class SourceMembershipPublicationService {
                 && current.traversalGeneration() == runSource.traversalGeneration()
                 && current.completedGeneration() == null,
                 "ScanRunSource is not eligible for trusted reconciliation");
-        int changed = memberships.markUnseenMissing(
-                claim.sourceId(), current.id(), current.traversalGeneration());
+        int changed = includeSubfolders ? memberships.markUnseenMissing(
+                claim.sourceId(), current.id(), current.traversalGeneration()) : 0;
         require(scans.completeSourceReconciliation(current.id(), current.traversalGeneration(),
                 completedAtMs) == 1, "ScanRunSource changed during reconciliation");
         return changed;

@@ -33,7 +33,7 @@ public class MediaMetadataBackgroundService {
     public MediaMetadataExecutionDetails start() {
         MediaMetadataExecutionDetails accepted = jobs.create();
         try {
-            executor.execute(new Task(accepted.job().id(), java.util.List.of()));
+            executor.execute(new Task(accepted.job().id(), java.util.List.of(), null));
         } catch (RejectedExecutionException exception) {
             try { recovery.failIfActive(accepted.job().id(), "Execution could not be scheduled"); }
             finally { jobs.finishContent(accepted.job().id()); }
@@ -47,7 +47,7 @@ public class MediaMetadataBackgroundService {
         var admission = jobs.create(request);
         if (!admission.submit()) return admission.details();
         var accepted = admission.details();
-        Task task = new Task(accepted.job().id(), jobs.contentOwners(accepted.job().id()));
+        Task task = new Task(accepted.job().id(), jobs.contentOwners(accepted.job().id()), jobs.limitedScanId(request));
         try { executor.execute(task); }
         catch (RejectedExecutionException failure) {
             task.neverStarted(); throw new MediaMetadataSchedulingException(failure);
@@ -58,10 +58,12 @@ public class MediaMetadataBackgroundService {
     private final class Task implements MediaMetadataExecutor.NeverStartedTask {
         private final long jobId;
         private final java.util.List<ExfatContentReadAuthority> owners;
-        Task(long jobId, java.util.List<ExfatContentReadAuthority> owners) {
+        private final Long limitedScanId;
+        Task(long jobId, java.util.List<ExfatContentReadAuthority> owners, Long limitedScanId) {
+            this.limitedScanId = limitedScanId;
             this.jobId = jobId; this.owners = java.util.List.copyOf(owners);
         }
-        @Override public void run() { runCaptured(jobId, owners); }
+        @Override public void run() { runCaptured(jobId, owners, limitedScanId); }
         @Override public void neverStarted() {
             try { recovery.failIfActive(jobId, "Execution could not be scheduled"); }
             finally { jobs.finishContent(jobId); }
@@ -69,9 +71,10 @@ public class MediaMetadataBackgroundService {
     }
 
     private void runCaptured(long jobId,
-            java.util.List<ExfatContentReadAuthority> owners) {
+            java.util.List<ExfatContentReadAuthority> owners, Long limitedScanId) {
         try {
-            if (owners.isEmpty()) jobs.run(jobId); else jobs.run(jobId, owners);
+            if (limitedScanId == null && owners.isEmpty()) jobs.run(jobId);
+            else jobs.run(jobId, owners, limitedScanId);
         } catch (Exception exception) {
             log.warn("Media metadata execution stopped: Job {}", jobId, exception);
             boolean interrupted = Thread.interrupted();

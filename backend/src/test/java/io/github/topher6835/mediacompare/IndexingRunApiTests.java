@@ -83,7 +83,8 @@ class IndexingRunApiTests {
         String key = UUID.randomUUID().toString();
         var result = start(key.toUpperCase(java.util.Locale.ROOT), List.of(source.id())).andExpect(status().isAccepted())
                 .andExpect(header().string("Cache-Control", "no-store"))
-                .andExpect(jsonPath("$.requestKey").value(key)).andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.requestKey").value(key)).andExpect(jsonPath("$.includeSubfolders").value(true))
+                .andExpect(jsonPath("$.status").value("PENDING"))
                 .andExpect(jsonPath("$.stages.length()").value(1)).andExpect(jsonPath("$.stages[0].stageType").value("DISCOVERY"))
                 .andExpect(jsonPath("$.stages[0].resultJson").doesNotExist()).andReturn();
         IndexingRunResponse response = body(result);
@@ -97,6 +98,29 @@ class IndexingRunApiTests {
         assertFalse(executor.submissionTransaction);
         assertFalse(executor.workerTransaction);
         assertEquals("COMPLETED", detail(response.scanRunId()).status());
+    }
+
+    @Test
+    void limitedScopeIsDurableAndPartOfReplayIncludingAfterRecovery() throws Exception {
+        Source source = source("limited");
+        String key = UUID.randomUUID().toString();
+        String payload = json.writeValueAsString(Map.of("requestKey", key, "sourceIds", List.of(source.id()), "includeSubfolders", false));
+        var accepted = mvc.perform(post("/api/indexing-runs").contentType(MediaType.APPLICATION_JSON).content(payload))
+                .andExpect(status().isAccepted()).andExpect(jsonPath("$.includeSubfolders").value(false)).andReturn();
+        var response = body(accepted);
+        assertFalse(ScanOptions.from(scans.findScanRunById(response.scanRunId()).orElseThrow()).includeSubfolders());
+        mvc.perform(post("/api/indexing-runs").contentType(MediaType.APPLICATION_JSON).content(payload)).andExpect(status().isOk());
+        start(key, List.of(source.id())).andExpect(status().isConflict());
+        assertEquals(1, executor.submissions.get());
+        mvc.perform(post("/api/media-metadata-runs").contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(Map.of("indexingScanRunId", response.scanRunId()))))
+                .andExpect(status().isConflict());
+        assertEquals(1, count("job"));
+        recovery.failIfActive(response.jobId(), Version2InterruptionRecovery.RESTART_MESSAGE);
+        mvc.perform(post("/api/indexing-runs").contentType(MediaType.APPLICATION_JSON).content(payload))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("FAILED"))
+                .andExpect(jsonPath("$.includeSubfolders").value(false));
+        assertEquals(1, executor.submissions.get());
     }
 
     @Test
@@ -367,13 +391,13 @@ class IndexingRunApiTests {
         public int attemptCount() { return attempts.get(); }
         @Override @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NEVER)
         public ScanExecutionDetails accept(String key, List<Long> sourceIds,
-                List<io.github.topher6835.mediacompare.web.SourceAuthorityWindowRequest> authorityWindows) {
+                List<io.github.topher6835.mediacompare.web.SourceAuthorityWindowRequest> authorityWindows, boolean includeSubfolders) {
             if (barrier != null) {
                 attempts.incrementAndGet();
                 try { barrier.await(10, TimeUnit.SECONDS); }
                 catch (Exception failure) { throw new IllegalStateException(failure); }
             }
-            return super.accept(key, sourceIds, authorityWindows);
+            return super.accept(key, sourceIds, authorityWindows, includeSubfolders);
         }
     }
 }

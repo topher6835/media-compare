@@ -75,6 +75,64 @@ class Version3ExecutionTests {
     }
 
     @Test
+    void limitedScanPreservesUnseenHistoryAndScopesHashingAndMetadata() throws Exception {
+        Path directory = Files.createTempDirectory("media-v3-limited-").toRealPath();
+        Path root = Files.createDirectory(directory.resolve("root"));
+        Path child = Files.createDirectory(root.resolve("child"));
+        Path goneTop = Files.writeString(root.resolve("gone.jpg"), "top bytes");
+        Path nested = Files.writeString(child.resolve("nested.jpg"), "nested bytes");
+        Path kept = Files.writeString(root.resolve("keep.jpg"), "keep bytes");
+        try (ConfigurableApplicationContext app = new SpringApplicationBuilder(MediaCompareApplication.class)
+                .web(WebApplicationType.NONE).run("--spring.datasource.url=jdbc:sqlite:" + directory.resolve("catalog.db")
+                        + "?foreign_keys=on", "--logging.level.root=ERROR")) {
+            var jdbc = app.getBean(JdbcTemplate.class);
+            seed(jdbc, path(root), root);
+            var execution = execution(app, root);
+            assertEquals("COMPLETED", run(execution, 10));
+            var oldFiles = jdbc.queryForList("SELECT * FROM file_entry WHERE id <> ? ORDER BY id", fileId(jdbc, kept));
+            var oldMemberships = jdbc.queryForList("SELECT * FROM source_membership WHERE relative_path <> 'keep.jpg' ORDER BY id");
+            var hashes = jdbc.queryForList("SELECT * FROM content_hash ORDER BY analysis_record_id");
+            Files.delete(goneTop);
+            Files.writeString(nested, "changed nested bytes that must not be processed");
+            Files.writeString(child.resolve("new.jpg"), "must not be indexed");
+            scan(jdbc, 20, 1);
+            jdbc.update("UPDATE scan_run SET options_version=2, options_json=? WHERE id=20", new ScanOptions(false).json());
+            assertEquals("COMPLETED", run(execution, 20));
+            assertEquals(oldFiles, jdbc.queryForList("SELECT * FROM file_entry WHERE id <> ? ORDER BY id", fileId(jdbc, kept)));
+            assertEquals(3, count(jdbc, "SELECT COUNT(*) FROM file_entry"));
+            assertEquals(oldMemberships, jdbc.queryForList("SELECT * FROM source_membership WHERE relative_path <> 'keep.jpg' ORDER BY id"));
+            assertEquals(hashes, jdbc.queryForList("SELECT * FROM content_hash ORDER BY analysis_record_id"));
+            assertEquals(0, count(jdbc, "SELECT COUNT(*) FROM source_membership WHERE presence_status='MISSING'"));
+            assertEquals(1, app.getBean(JobRepository.class).findJobStageByJobIdAndType(
+                    execution.findByScanRunId(20).orElseThrow().job().id(), "DISCOVERY").orElseThrow().progressCompleted());
+            var candidates = app.getBean(io.github.topher6835.mediacompare.analysis.MediaMetadataCandidateRepository.class);
+            var definition = io.github.topher6835.mediacompare.analysis.ImageIoMediaMetadataDefinition.definition();
+            var page = candidates.findCandidates(definition, 0, 100, 20L);
+            assertEquals(1, page.size());
+            assertEquals(List.of(fileId(jdbc, kept)), candidates.findOccurrences(page.getFirst(), 0, 100, 20L)
+                    .stream().map(c -> c.fileEntryId()).toList());
+            app.getBean(io.github.topher6835.mediacompare.analysis.MediaMetadataFileEvidenceValidator.class)
+                    .captureBeforeExtraction(candidates.findOccurrences(page.getFirst(), 0, 100, 20L).getFirst());
+            var jobs = app.getBean(io.github.topher6835.mediacompare.analysis.MediaMetadataJobService.class);
+            var request = new io.github.topher6835.mediacompare.web.CreateMediaMetadataRunRequest(20L, null);
+            var metadata = app.getBean(io.github.topher6835.mediacompare.analysis.MediaMetadataBackgroundService.class).start(request);
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+            var complete = jobs.find(metadata.job().id());
+            while (List.of("PENDING", "RUNNING").contains(complete.job().status()) && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+                complete = jobs.find(metadata.job().id());
+            }
+            assertEquals("COMPLETED", complete.job().status());
+            assertEquals(1, complete.job().progressCompleted());
+            assertEquals(1, count(jdbc, "SELECT COUNT(*) FROM analysis_record WHERE analysis_type='MEDIA_METADATA'"), complete.toString());
+            Files.delete(nested);
+            scan(jdbc, 30, 1);
+            assertEquals("COMPLETED", run(execution, 30));
+            assertEquals(2, count(jdbc, "SELECT COUNT(*) FROM source_membership WHERE presence_status='MISSING'"));
+        }
+    }
+
+    @Test
     void nestedSourcesSharePhysicalFilesAcrossBothOrdersAndRepeatScans() throws Exception {
         for (boolean parentFirst : List.of(true, false)) {
             Path directory = Files.createTempDirectory("media-v3-overlap-").toRealPath();
