@@ -1,7 +1,9 @@
 package io.github.topher6835.mediacompare;
 
 import java.io.IOException;
+import java.util.Arrays;
 
+import io.github.topher6835.mediacompare.management.ManagementApplication;
 import io.github.topher6835.mediacompare.session.SessionCommand;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -10,6 +12,10 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 public class MediaCompareApplication {
 
 	public static void main(String[] args) throws IOException {
+		if (args.length > 0 && "manage".equals(args[0])) {
+			ManagementApplication.main(Arrays.copyOfRange(args, 1, args.length));
+			return;
+		}
 		if (args.length > 0 && "session".equals(args[0])) {
 			SessionCommand.run(args);
 			return;

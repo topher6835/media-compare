@@ -288,6 +288,16 @@ Person/scene/action clusters are derived, recomputable interpretations of observ
 
 The current operational model is `Session -> Catalog -> Source -> SourceMembership -> FileEntry -> ContentRecord -> AnalysisRecord`. V6 makes FileEntry source-independent and puts Source relationship and presence on SourceMembership. V3 is the current four-stage SCAN execution. Context creation, acceptance, retirement, same-anchor replacement, first-time Source binding, explicit Source unbinding, fixed-root rebinding, and explicit relocate-and-bind are available. Automatic remount recognition and other provider profiles remain future work.
 
+### Session-independent management startup (Stage 1)
+
+`MediaCompareApplication.main` dispatches `manage` to the separate `ManagementApplication` entry point before Spring startup. Management uses only JDK APIs and can also run directly with application classes and the JDK. `ManagementServer` binds `127.0.0.1` (default port 8081), owns its HTTP lifecycle, and exposes read-only `GET`/`HEAD /api/management/status` with `service: media-compare-management` and `catalogState: NOT_STARTED`. It initializes no Session, SQLite/DataSource, Flyway, repositories, catalog workers, or Source authority. Closing management stops its HTTP server; no catalog child exists yet.
+
+`StaticFrontendHandler` serves an explicitly supplied frontend build directory without copying assets into the backend. HTML routes support SPA fallback; missing assets and unknown APIs return 404. Path traversal and links resolving outside the build are rejected; no directory listing, filesystem-management endpoint, catalog proxy, or write API is exposed. The distribution must retain the external build directory. The entry point attempts to open the normal browser, with a printed-URL fallback and `--no-browser` for development/testing.
+
+React's `ApplicationStartup` checks the management status before mounting catalog routes. Management currently shows disabled New/Open actions and informational Recents, including when a catalog deep link is opened. A management-endpoint 404 retains the existing direct catalog workflow; other failures show a retry state. Vite's `management` mode targets `127.0.0.1:8081`; its default catalog proxy remains `localhost:8080`.
+
+The approved later boundary is management -> one Session-bound backend child process, with readiness/failure reporting and actual process-exit confirmation before switching. Supervision, folder selection, Session operations, Recents and catalog forwarding remain unimplemented. Management must remain independent of the child's Spring context and resource lifetime; no speculative supervisor abstraction or catalog lifecycle refactor is added in Stage 1.
+
 ### Catalogs and Location Contexts
 
 A Session is one portable folder above one catalog. It contains `session.json`, `catalog.db`, its `catalog.db.lock` sidecar once opened, and generated `cache/previews` beneath the folder. Original media remains at Source paths outside the Session. The minimal manifest declares type `media-compare-session` and format version 1; it contains no identity or absolute Session path. The catalog schema remains Session-agnostic with no `session_id` or catalog UUID added. A closed Session can be moved or copied as a folder.

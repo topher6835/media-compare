@@ -10,7 +10,7 @@ Media Compare is an early-stage application for media comparison workflows. V6 m
 
 ## Repository Structure
 
-- `backend/` — Spring Boot application, Maven wrapper, local data directory, and Flyway migration directory
+- `backend/` — independent Java management entry point, Spring Boot catalog application, Maven wrapper, local data directory, and Flyway migrations
 - `frontend/` — React and TypeScript application built with Vite
 - `docs/` — architecture, data model, decisions, and current project status
 - `AGENTS.md` — repository operating guidance for AI agents
@@ -23,6 +23,28 @@ Media Compare is an early-stage application for media comparison workflows. V6 m
 Maven does not need to be installed separately because the backend includes Maven wrappers for macOS/Linux and Windows. The bounded ffprobe runner exists but is not yet connected to durable video analysis, so ffprobe is not required for the current indexing and image-metadata workflows. When the runner is exercised, it uses an absolute path supplied through the optional `media-compare.ffprobe.executable` property or, when the property is absent, the `ffprobe` command from PATH.
 
 ## Run Locally
+
+### Session-independent startup (Stage 1)
+
+Build the existing frontend from `frontend/` with `npm run build`, then package the Java application from `backend/` with `./mvnw -q package -DskipTests` (`mvnw.cmd` on Windows). No additional frontend or resource-copy step is needed. From `backend/`, start the independent management service:
+
+```sh
+java -jar target/media-compare-0.0.1-SNAPSHOT.jar manage ../frontend/dist
+```
+
+On Windows:
+
+```bat
+java -jar target\media-compare-0.0.1-SNAPSHOT.jar manage ..\frontend\dist
+```
+
+This serves the React build at `http://127.0.0.1:8081` and attempts to open the normal browser. If automatic opening is unavailable, open the printed address manually. It requires no Session or `MEDIA_COMPARE_SESSION_ROOT` and starts no Spring context, database, migrations, catalog workers, or Source authority. The optional arguments are `[port] [--no-browser]`; port `0` selects an available port. Stop with Ctrl+C.
+
+`GET /api/management/status` reports `{"service":"media-compare-management","catalogState":"NOT_STARTED"}` independently of a catalog backend. The startup screen displays disabled New/Open actions and informational Recent Sessions. Session selection, folder browsing, history, deletion, switching, child-process supervision, and catalog API forwarding are not implemented. The frontend build remains an external directory that must accompany the Java application; installer packaging is deferred.
+
+For frontend development against management, leave the service on port 8081 and run `npm run dev -- --mode management` from `frontend/`. This uses the same frontend with Vite's normal development features and proxies `/api` to management. Plain `npm run dev` retains its existing catalog-backend proxy to port 8080.
+
+### Existing catalog development workflow
 
 Build the backend once from `backend/`, then use the one-shot Session command to create a workspace. It exits without starting Spring or Flyway.
 

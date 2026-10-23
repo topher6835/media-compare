@@ -7,6 +7,7 @@ import { HomePage } from './HomePage.tsx'
 import { MediaLibraryPage } from './library/MediaLibraryPage.tsx'
 import { MediaLibraryItemDetailPage } from './library/MediaLibraryItemDetailPage.tsx'
 import { SourcesPage } from './sources/SourcesPage.tsx'
+import { ApplicationStartup } from './session/ApplicationStartup.tsx'
 
 function AppHeader() {
   return (
@@ -23,7 +24,7 @@ function AppHeader() {
   )
 }
 
-function App() {
+function CatalogApp() {
   return (
     <div className="app-shell">
       <AppHeader />
@@ -43,6 +44,10 @@ function App() {
       </main>
     </div>
   )
+}
+
+function App() {
+  return <ApplicationStartup><CatalogApp /></ApplicationStartup>
 }
 
 export default App

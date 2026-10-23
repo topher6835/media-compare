@@ -4,9 +4,19 @@
 
 General product development resumes in the new Mac development clone at `/Users/chris/Code/Personal/Projects/media-compare-dev`, initially verified on `main` at `f4c40db` with production exFAT disabled. Final Slice 6 production approval is deferred; Slice 6 remains incomplete and all outstanding acceptance requirements remain binding, especially active-work release and native handle closure. The completed automated, functional and VeraCrypt evidence remains valid and should not be repeated without a specific reason. Revisit final approval separately, reconciling existing evidence before deciding whether additional validation is necessary.
 
-Current checkpoint: `main` at `12a336d`; the user reports it pushed to GitHub. Optional Subfolder Scanning is implemented, validated and Mac-accepted; production exFAT remains disabled in this clone.
+Current checkpoint: Stage 1 Session Startup and Management changes are uncommitted on `main`, starting from clean `6cc042e`. Optional Subfolder Scanning is implemented, validated and Mac-accepted; production exFAT remains disabled in this clone.
 
 The original Mac and Windows workspaces retain the protected 11-file uncommitted activation/test patch; their previously reported Git checkpoints are historical until reverified. New feature development must not accidentally include or ship that unapproved patch.
+
+### Session Startup and Management — Stage 1
+
+Stage 1 review correction: browser launch defaults to enabled; `--no-browser` suppresses it. The existing entry-point test now covers both modes in forced-headless child JVMs, checking Session-independent HTTP startup and unsupported-browser fallback without launching a browser. The focused management suite passed 7 tests with no failures/errors/skips; `git diff --check` passed. Existing Stage 1 work remains uncommitted; Stage 2 has not begun.
+
+The independent Java management entry point starts with no selected Session and serves the existing React build plus read-only `/api/management/status` on `127.0.0.1:8081`. It attempts normal browser opening and supports a printed-URL fallback/`--no-browser`. No Spring context, catalog/database, migrations, indexing/metadata/preview workers, or Source authority is initialized. React shows a startup screen with disabled New/Open controls and informational Recent Sessions; catalog routes remain unmounted. Unknown APIs and missing assets remain 404s; static serving rejects traversal and links outside the configured build directory.
+
+The existing catalog entry point, Session CLI, lifecycle and default Vite catalog workflow are preserved. Vite `--mode management` targets the independent service. The built frontend is served from an explicit external directory, with no duplicate frontend or new dependency. See README for build/launch commands. Functional New/Open, folder selection, Recents, deletion, switching, child-process supervision and catalog API forwarding are not implemented. The approved future lifecycle owns one catalog child at a time and waits for actual exit before switching; Stage 1 adds no supervisor abstraction.
+
+Validation on macOS: 23 focused backend tests passed (6 new management HTTP/JDK-only entry-point tests and 17 existing Session startup/lifecycle/ownership tests); frontend ESLint, TypeScript/Vite build and 5 startup tests passed; the executable JAR packaged successfully. The first HTTP attempt was blocked by sandbox socket permissions; rerunning those 6 tests with loopback access passed without failures/errors/skips. Headless Chrome against the packaged service verified built React without a catalog, a catalog deep link remaining on startup, disabled controls, no catalog API requests, and no horizontal overflow at 375px. Live Vite management mode and unavailable-service retry passed. A separate isolated temporary Session verified the packaged CLI/catalog backend with default Vite (management endpoint 404, health OK, empty Sources and SPA delivery). All validation processes stopped. Real Windows execution, automatic browser opening and installer packaging remain unverified. No database migration, production exFAT change, commit, push, branch or stash was made.
 
 ### Optional Subfolder Scanning — implemented and Mac-accepted
 
@@ -427,7 +437,7 @@ Resume general product development in the new clone without including the unappr
 7. Variant Matching V1.1.
 8. Advanced semantic/AI matching.
 
-The next product-development step is architectural inspection for Session Startup and Management. Its approved user-facing requirements are recorded in [DECISIONS.md](DECISIONS.md#session-startup-and-management-planned); GUI startup, folder selection, switching and lifecycle integration remain undecided and unimplemented. Folder hierarchy tracking, exclusion patterns, and depth settings remain outside Optional Subfolder Scanning's scope.
+Review Stage 1 Session Startup and Management before authorizing another implementation stage. The recommended next focused stage is catalog child-process supervision: selected-path handoff, readiness/failure reporting, orderly shutdown and actual process-exit confirmation, while management stays available. Functional Session UI, folder selection, Recents, deletion, switching and catalog forwarding remain future work; folder selection details are undecided. Approved requirements and architecture are recorded in [DECISIONS.md](DECISIONS.md#session-startup-and-management-planned). Folder hierarchy tracking, exclusion patterns, and depth settings remain outside Optional Subfolder Scanning's scope.
 
 Revisit final exFAT approval separately, reconciling existing evidence before deciding which additional validation is necessary. The remaining acceptance sequence is:
 

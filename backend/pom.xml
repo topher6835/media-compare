@@ -76,6 +76,9 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
+				<configuration>
+					<mainClass>io.github.topher6835.mediacompare.MediaCompareApplication</mainClass>
+				</configuration>
 			</plugin>
 		</plugins>
 	</build>

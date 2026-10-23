@@ -193,6 +193,19 @@ main {
   margin-top: 28px;
 }
 
+.startup-note {
+  margin-top: 20px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.session-startup button:disabled {
+  cursor: not-allowed;
+  color: var(--text-muted);
+  border-color: var(--border-strong);
+  background: var(--surface-subtle);
+}
+
 /* Media Library browsing; the observed card keeps its geometry even when
    browser-native containment skips painting the preview contents. */
 .library-header {
