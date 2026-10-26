@@ -30,7 +30,7 @@ class ManagementServerTests {
             assertEquals("127.0.0.1", server.baseUri().getHost());
             var status = get(server, "/api/management/status");
             assertEquals(200, status.statusCode());
-            assertEquals("{\"service\":\"media-compare-management\",\"catalogState\":\"NOT_STARTED\"}", status.body().strip());
+            assertEquals("{\"service\":\"media-compare-management\",\"catalogState\":\"NOT_STARTED\",\"processAlive\":false,\"failureCode\":null,\"exitCode\":null}", status.body().strip());
             assertEquals("no-store", status.headers().firstValue("Cache-Control").orElseThrow());
             assertEquals("<html>React entry</html>", get(server, "/").body());
             assertEquals("<html>React entry</html>", get(server, "/library/items/42").body());

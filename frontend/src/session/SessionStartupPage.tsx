@@ -6,7 +6,7 @@ export function SessionStartupPage() {
       <p className="page-intro">
         A Session keeps your catalog and previews together, separate from your original media.
       </p>
-      <p className="startup-note">No Session is open. Session management is coming in a later update.</p>
+      <p className="startup-note">Session controls are coming in a later update.</p>
       <div className="home-actions">
         <article>
           <h2>New Session</h2>

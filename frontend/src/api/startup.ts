@@ -1,4 +1,5 @@
 export type StartupMode = 'management' | 'catalog'
+const catalogStates = ['NOT_STARTED', 'CREATED', 'STARTING', 'RUNNING', 'STOPPING', 'FAILED']
 
 export async function getStartupMode(signal?: AbortSignal): Promise<StartupMode> {
   const response = await fetch('/api/management/status', {
@@ -13,7 +14,7 @@ export async function getStartupMode(signal?: AbortSignal): Promise<StartupMode>
   const status: unknown = await response.json()
   if (typeof status !== 'object' || status === null ||
       !('service' in status) || status.service !== 'media-compare-management' ||
-      !('catalogState' in status) || status.catalogState !== 'NOT_STARTED') {
+      !('catalogState' in status) || typeof status.catalogState !== 'string' || !catalogStates.includes(status.catalogState)) {
     throw new Error('Unsupported management status')
   }
   return 'management'

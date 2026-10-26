@@ -24,7 +24,7 @@ Maven does not need to be installed separately because the backend includes Mave
 
 ## Run Locally
 
-### Session-independent startup (Stage 1)
+### Session-independent startup (Stages 1–2)
 
 Build the existing frontend from `frontend/` with `npm run build`, then package the Java application from `backend/` with `./mvnw -q package -DskipTests` (`mvnw.cmd` on Windows). No additional frontend or resource-copy step is needed. From `backend/`, start the independent management service:
 
@@ -40,7 +40,11 @@ java -jar target\media-compare-0.0.1-SNAPSHOT.jar manage ..\frontend\dist
 
 This serves the React build at `http://127.0.0.1:8081` and attempts to open the normal browser. If automatic opening is unavailable, open the printed address manually. It requires no Session or `MEDIA_COMPARE_SESSION_ROOT` and starts no Spring context, database, migrations, catalog workers, or Source authority. The optional arguments are `[port] [--no-browser]`; port `0` selects an available port. Stop with Ctrl+C.
 
-`GET /api/management/status` reports `{"service":"media-compare-management","catalogState":"NOT_STARTED"}` independently of a catalog backend. The startup screen displays disabled New/Open actions and informational Recent Sessions. Session selection, folder browsing, history, deletion, switching, child-process supervision, and catalog API forwarding are not implemented. The frontend build remains an external directory that must accompany the Java application; installer packaging is deferred.
+`GET /api/management/status` reports the independent service's catalog lifecycle: `NOT_STARTED`, `CREATED`, `STARTING`, `RUNNING`, `STOPPING`, or `FAILED`, plus `processAlive`, a bounded nullable `failureCode`, and nullable `exitCode`. Failure does not imply process exit. The startup screen displays disabled New/Open actions and informational Recent Sessions for all valid states. Session selection, folder browsing, history, deletion, switching UI, and catalog API forwarding are not implemented. The frontend build remains an external directory that must accompany the Java application; installer packaging is deferred.
+
+Stage 2 adds internal Java lifecycle control through `ManagementServer.catalog()`: `start(selectedSessionPath)`, `status()`, and `requestStop()`. There are no HTTP start/stop endpoints or new user-facing CLI Session controls. The manager launches one child using the current installation's JVM and packaged JAR (or full development classpath). Only the child initializes Spring, validates the Session, acquires ownership, migrates SQLite and recovers interrupted work. The child binds `127.0.0.1` on an OS-assigned port and reports readiness through a launch-token-specific private output pipe after Spring initialization completes. The existing `/api/health` endpoint remains unchanged and is not used to infer child readiness.
+
+Startup has a 60-second deadline; shutdown has a 120-second deadline. Stop sends a private stdin command and closes the control pipe, allowing normal context/worker cleanup. Starting another child is forbidden while the prior process is alive, including after timeout. Management close waits for actual child exit; an explicit close that times out throws and leaves HTTP status available. No forced termination or Session cleanup is performed. Control-pipe EOF also requests child cleanup if management disappears. A stuck initialization/worker can still keep the child alive after management JVM termination; OS/process crashes and forced termination cannot guarantee orderly cleanup. Real Windows lifecycle acceptance remains outstanding.
 
 For frontend development against management, leave the service on port 8081 and run `npm run dev -- --mode management` from `frontend/`. This uses the same frontend with Vite's normal development features and proxies `/api` to management. Plain `npm run dev` retains its existing catalog-backend proxy to port 8080.
 

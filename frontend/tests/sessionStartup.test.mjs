@@ -34,6 +34,16 @@ test('missing management endpoint preserves the direct catalog workflow', async 
   assert.equal(await getStartupMode(), 'catalog')
 })
 
+test('every catalog lifecycle state keeps the independent management interface available', async (t) => {
+  let state
+  t.mock.method(globalThis, 'fetch', async () => Response.json({
+    service: 'media-compare-management', catalogState: state, processAlive: true,
+  }))
+  for (state of ['NOT_STARTED', 'CREATED', 'STARTING', 'RUNNING', 'STOPPING', 'FAILED']) {
+    assert.equal(await getStartupMode(), 'management', state)
+  }
+})
+
 test('unavailable or unexpected management responses never select catalog routes', async (t) => {
   const responses = [
     new Response(null, { status: 503 }),
@@ -51,7 +61,7 @@ test('startup explains unavailable actions and never offers catalog navigation',
   assert.match(html, /New Session/)
   assert.match(html, /Open Existing Session/)
   assert.match(html, /Recent Sessions/)
-  assert.match(html, /No Session is open/)
+  assert.match(html, /Session controls are coming/)
   assert.equal((html.match(/disabled=""/g) ?? []).length, 2)
   assert.doesNotMatch(html, /href=|onClick=|<form/)
 })
