@@ -8,11 +8,11 @@ Flyway V1–V5 retain their historical schema meaning. Java migration `V6__sourc
 
 V8 adds `media_relationship`, bringing its schema to fifteen application tables. It changes no existing catalog rows. The implemented SHA exact projection produces only transient grouping edges; it creates no durable relationship row or schema change.
 
-V9 adds `preview_asset` as the sixteenth application table without changing existing rows. It stores successful filesystem-cache asset metadata; generation is not implemented.
+V9 adds `preview_asset` as the sixteenth application table without changing existing rows. It stores successful filesystem-cache asset metadata; the implemented JPEG/PNG SMALL_THUMBNAIL generator publishes into this schema as described below.
 
 ## Implemented Tables
 
-V10 adds paired nullable occurrence/receipt columns and native/token history indexes to FileEntry without adding a table. Existing rows retain null evidence and their IDs/FKs. Current local production activation and incomplete acceptance are recorded in [the Slice 6 checkpoint](WINDOWS_EXFAT_SLICE6_PRODUCTION_ACCEPTANCE.md); no schema changed during activation. The storage contract and downgrade limitation are recorded below.
+V10 adds paired nullable occurrence/receipt columns and native/token history indexes to FileEntry without adding a table. Existing rows retain null evidence and their IDs/FKs. Historical local production activation and incomplete acceptance are recorded in [the Slice 6 checkpoint](WINDOWS_EXFAT_SLICE6_PRODUCTION_ACCEPTANCE.md); no schema changed during that activation. Production exFAT remains disabled in the development clone. The storage contract and downgrade limitation are recorded below.
 
 ### `source`
 
@@ -511,7 +511,7 @@ The current implementation does not include:
 - AI-specific result schemas and provider infrastructure.
 - Filesystem-action history.
 - Medium previews, additional image formats, video previews, automatic whole-library scheduling, future scheduler performance changes, and cache eviction/cleanup.
-- Final FFmpeg/ffprobe discovery strategy.
+- FFmpeg discovery and durable video metadata integration; the existing ffprobe runner already supports an optional absolute executable path with PATH fallback when absent.
 - WAL-specific architecture.
 - Final symlink/junction traversal behavior.
 - Automatic Source remount recognition and filesystem volume hints.

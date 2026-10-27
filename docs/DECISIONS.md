@@ -641,7 +641,7 @@ V5 implements LocationContext/Source binding storage, and V6/v3 use the pure sca
 - Use the repository-local identity `topher6835 <topher6835@users.noreply.github.com>`.
 - Use the `github-personal` SSH alias with origin `git@github-personal:topher6835/media-compare.git`.
 - Keep this configuration repository-local and do not disturb other GitHub identities.
-- Do not commit or push unless explicitly requested.
+- Follow [the mandatory review and Git approval process](../AGENTS.md#mandatory-review-and-git-approval-process), including independent actual-diff review and separate commit and push approvals.
 
 ## Still Open
 
