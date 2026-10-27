@@ -24,6 +24,19 @@ Tests should cover meaningful behavior and important failure cases. Do not add t
 
 Use Codex deliberately for meaningful implementation work. Straightforward work may be handled manually when that conserves usage without compromising correctness.
 
+## Codex Model Selection
+
+Prefer the least expensive model that can reliably complete the task. Select reasoning effort according to actual complexity and risk:
+
+- Luna: Preferred for simple, low-risk tasks such as straightforward documentation updates, wording corrections, small mechanical changes, and other well-defined tasks.
+- GPT-6.1 Sol — Medium: Routine coding, documentation reconciliation, focused implementation/tests, and moderate reasoning tasks.
+- GPT-6.1 Sol — High: Complex implementation, architecture, concurrency, process lifecycle, and filesystem-related work.
+- Astra: Selective use for critical architectural decisions, security, filesystem identity/authority, original-file safety, complex failure recovery, difficult filesystem races, and high-risk independent reviews where additional reasoning adds meaningful value.
+
+Use Luna when the task is sufficiently simple and well-defined; escalate to Sol when implementation complexity or reasoning demands justify it. Astra may perform focused design or code reviews without implementing an entire milestone.
+
+The ChatGPT planning conversation recommends the model and reasoning level; the developer makes the final selection, and Codex executes the authorized task using that selection. Avoid unnecessary model usage and expensive validation without compromising safety. Independent review, testing, and Git approval requirements apply regardless of the model used.
+
 ## Incremental Change Rules
 
 - Make the smallest coherent change that completes the requested task.
@@ -55,6 +68,41 @@ Commit approval does not authorize pushing. After SHA confirmation and separate 
 ### Stage E — Next milestone
 
 Identify the next planned milestone from verified repository status and the approved roadmap. Do not automatically begin implementing it.
+
+## Short New-Chat Handoff
+
+Use a short seed prompt instead of reproducing the complete project history. Include the project and active development repository, latest owner-confirmed approved SHA and branch, milestone/completion status, immediate objective or authorized task, authoritative document references, and exceptional risks, protected work, or unresolved decisions not adequately documented. Default to discussion unless implementation is explicitly authorized.
+
+ChatGPT should prefer the connected GitHub repository `topher6835/media-compare` (`main`) at the latest owner-approved and pushed commit. Verify that baseline rather than assuming the branch is current. Retrieve `AGENTS.md` and `docs/STATUS.md` first, then consult other relevant project documents. GitHub exposes pushed changes, not uncommitted local modifications; a new chat must not assume access to local work. Codex continues inspecting documentation and implementation in the local `media-compare-dev` checkout.
+
+If GitHub access is unavailable, report the limitation and request the necessary documents or verified context. Distinguish supplied summaries from direct inspection; never claim to have read inaccessible documentation. Reading repository documentation grants no authorization to modify GitHub files or bypass the established local review, commit, and push workflow.
+
+This template supplements the living documentation; it does not replace it or override project decisions. Fill in the changing information:
+
+```markdown
+Project: Media Compare (v2).
+Active development repository: <repository path>.
+Latest owner-confirmed approved baseline: <commit SHA> on <branch>.
+Current milestone and completion status: <milestone/status>.
+Immediate objective or explicitly authorized task: <objective/task>.
+Mode: <discussion only, or exact implementation authorization>.
+Remain in discussion unless implementation is explicitly authorized.
+
+ChatGPT: verify the latest owner-approved pushed SHA in connected topher6835/media-compare (main).
+Retrieve AGENTS.md and docs/STATUS.md first; then README.md and docs/DECISIONS.md as relevant.
+Consult docs/ARCHITECTURE.md and docs/DATA_MODEL.md as relevant.
+GitHub omits uncommitted local work; Codex inspects local documentation and implementation.
+If GitHub is unavailable, report it and request needed documents/verified context; never claim unread access.
+Exceptional risks, protected work, unresolved decisions: <details or none beyond docs>.
+
+Before implementation, verify repository/branch/baseline and preserve existing changes.
+During authorized implementation, validate appropriately and update affected documentation.
+Preserve independent gates: summary review → actual diff review (including untracked files)
+→ explicit commit authorization → developer commits and returns SHA → SHA confirmation
+→ separate push authorization → successful push verification, as defined in AGENTS.md.
+Codex must not stage, commit, or push without authorization; follow AGENTS.md.
+Do not begin another milestone automatically.
+```
 
 ## Cross-Platform Requirement
 
