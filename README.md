@@ -40,7 +40,7 @@ java -jar target\media-compare-0.0.1-SNAPSHOT.jar manage ..\frontend\dist
 
 This serves the React build at `http://127.0.0.1:8081` and attempts to open the normal browser. If automatic opening is unavailable, open the printed address manually. It requires no Session or `MEDIA_COMPARE_SESSION_ROOT` and starts no Spring context, database, migrations, catalog workers, or Source authority. The optional arguments are `[port] [--no-browser] [--dev-origin=http://localhost:5173]`; port `0` selects an available port. Use the printed numeric loopback address; unexpected Host headers are rejected. Stop with Ctrl+C.
 
-Choose **Open Existing Session**, browse Home or filesystem roots/drives (on macOS, enter Volumes from the filesystem root), or paste an absolute directory path. Enter a folder to see whether its Session structure is valid, then choose **Open this Session**. Catalog ownership, SQLite/Flyway, worker recovery and Source verification still run only in the managed Spring child. Structural validation does not establish full catalog integrity. Initialization progress and bounded failure messages remain in React; another selection is allowed after a failed child actually exits. Refresh recognizes the current child. New Session, folder creation, Recent Sessions, deletion and switching UI remain deferred.
+Choose **Open Existing Session**, browse Home or filesystem roots/drives (on macOS, enter Volumes from the filesystem root), or paste an absolute directory path. Enter a folder to see whether its Session structure is valid, then choose **Open this Session**. Catalog ownership, SQLite/Flyway, worker recovery and Source verification still run only in the managed Spring child. Structural validation does not establish full catalog integrity. Initialization progress and bounded failure messages remain in React; another selection is allowed after a failed child actually exits. Refresh recognizes the current child. New Session and folder creation remain unavailable in management/React; Recent Sessions, deletion and switching UI remain deferred.
 
 Browsing is read-only and lists directories only: at most 500 results from at most 10,000 examined entries per request. Name filtering and direct entry support large directories; paths beyond the examination limit require direct entry. From the macOS filesystem root, the ordinary Volumes directory exposes mounted local/external/network volumes; management does not hard-code its location. Windows uses filesystem roots for available drives, with direct entry for accessible UNC/network paths. Browsing a location does not make it supported Session storage: existing macOS/APFS and Windows/NTFS Session rules still apply. No network-neighborhood discovery or native folder dialog is included. Native Windows acceptance is outstanding.
 
@@ -82,7 +82,7 @@ mvnw.cmd -q package -DskipTests
 java -jar target\media-compare-0.0.1-SNAPSHOT.jar session create "C:\path\to\My Session"
 ```
 
-The command creates this minimal `session.json` in a new or empty folder:
+The command creates this minimal `session.json` in a new or empty folder (including missing ancestors):
 
 ```json
 {
@@ -90,6 +90,8 @@ The command creates this minimal `session.json` in a new or empty folder:
   "formatVersion": 1
 }
 ```
+
+Stage 4 Task 1 also provides the backend-only `SessionCreationService` for a named direct child under an existing absolute parent on supported macOS/APFS or Windows/NTFS storage. It preserves unrelated parent entries, adds ` (001)` through ` (999)` for definite collisions, and never recreates a disappeared directory. Portable names allow spaces and Unicode, with a 249 UTF-16-unit/UTF-8-byte limit and explicit rejection of unsafe/reserved forms. Initialization failure leaves the attempted location for inspection, without automatic cleanup or another suffix. This service is not yet exposed through management or React; native Windows creation acceptance remains outstanding. See [the creation contract](docs/ARCHITECTURE.md#safe-named-session-creation-stage-4-task-1) for checks and race limits. Stage 4 is incomplete.
 
 Select that existing folder through the `MEDIA_COMPARE_SESSION_ROOT` environment variable. The backend fails startup if no valid Session is selected. Start the backend from `backend/`.
 

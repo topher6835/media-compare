@@ -82,16 +82,31 @@ public final class Session {
         HostFileSystems.current().requireSessionStorage(root);
         if (Files.exists(root, LinkOption.NOFOLLOW_LINKS)) {
             requireDirectory(root, "Session root");
-            try (var entries = Files.list(root)) {
-                if (entries.findAny().isPresent()) {
-                    throw new FileAlreadyExistsException("Session target is not empty: " + root);
-                }
-            }
         } else {
             Files.createDirectories(root);
         }
-        Files.writeString(child(root, "session.json"), MANIFEST, StandardOpenOption.CREATE_NEW);
-        return open(root);
+        return initializeEmptyDirectory(root, () -> requireDirectory(root, "Session root"));
+    }
+
+    @FunctionalInterface
+    interface InitializationCheck { void check() throws IOException; }
+
+    /** Initializes only an existing empty directory; never creates or recreates directories. */
+    static Session initializeEmptyDirectory(Path root, InitializationCheck check) throws IOException {
+        check.check();
+        requireDirectory(root, "Session root");
+        try (var entries = Files.list(root)) {
+            if (entries.findAny().isPresent()) {
+                throw new FileAlreadyExistsException("Session target is not empty: " + root);
+            }
+        }
+        check.check();
+        Files.writeString(child(root, "session.json"), MANIFEST,
+                StandardOpenOption.CREATE_NEW, LinkOption.NOFOLLOW_LINKS);
+        check.check();
+        Session session = open(root);
+        check.check();
+        return session;
     }
 
     /** Removes only recognized workspace contents after proving catalog ownership is idle. */
@@ -105,7 +120,7 @@ public final class Session {
     public Path previewCacheRoot() { return child(root, "cache", "previews"); }
     public String catalogJdbcUrl() { return "jdbc:sqlite:" + catalogPath().toUri() + "?foreign_keys=on"; }
 
-    private static Path normalizedRoot(Path selectedRoot) throws IOException {
+    static Path normalizedRoot(Path selectedRoot) throws IOException {
         if (selectedRoot == null || selectedRoot.toString().isBlank()) {
             throw new IOException("media-compare.session-root must select a Session folder");
         }

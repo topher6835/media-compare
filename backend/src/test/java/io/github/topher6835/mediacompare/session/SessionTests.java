@@ -36,6 +36,31 @@ class SessionTests {
     }
 
     @Test
+    void cliStillCreatesMissingAncestorsAndAcceptsExistingEmptyDirectory() throws Exception {
+        Path nested = directory.resolve("missing/ancestors/new Session");
+        MediaCompareApplication.main(new String[] {"session", "create", nested.toString()});
+        Path empty = Files.createDirectory(directory.resolve("empty"));
+        MediaCompareApplication.main(new String[] {"session", "create", empty.toString()});
+        assertEquals(Files.readString(nested.resolve("session.json")), Files.readString(empty.resolve("session.json")));
+        assertEquals(empty.toRealPath(), Session.open(empty).root());
+        assertFalse(Files.exists(empty.resolve("catalog.db")));
+    }
+
+    @Test
+    void sharedInitializerNeverRecreatesDirectoryAndNeverOverwritesConcurrentManifest() throws Exception {
+        Path missing = directory.resolve("not-created");
+        assertThrows(IOException.class, () -> Session.initializeEmptyDirectory(missing, () -> { }));
+        assertFalse(Files.exists(missing));
+
+        Path root = Files.createDirectory(directory.resolve("concurrent"));
+        int[] checks = { 0 };
+        assertThrows(IOException.class, () -> Session.initializeEmptyDirectory(root, () -> {
+            if (++checks[0] == 2) Files.writeString(root.resolve("session.json"), "keep concurrent file");
+        }));
+        assertEquals("keep concurrent file", Files.readString(root.resolve("session.json")));
+    }
+
+    @Test
     void refusesArbitraryNonemptyDirectoryAndInvalidRoots() throws Exception {
         Path root = directory.resolve("existing");
         Files.createDirectory(root);

@@ -2,9 +2,9 @@
 
 ## Current State
 
-Current implementation checkpoint: Session Startup and Management Stages 1–3 are implemented, including the timeout compatibility fix and final reservation corrections.
+Current implementation checkpoint: Session Startup and Management Stages 1–3 are implemented, including the timeout compatibility fix and final reservation corrections. Stage 4 Task 1 implements the backend Session creation foundation. Management integration and React Session creation remain incomplete; New Session remains disabled in React. Stage 4 is incomplete.
 
-The active development clone is `/Users/chris/Code/Personal/Projects/media-compare-dev`. On 2026-10-26, the verified Stage 3 implementation baseline was `main` at `49fbaab2a64bed6b7e9741a7ff0895d186053434` (`Implement Stage 3 Session opening and async catalog operations`). The working tree was clean before documentation reconciliation. Local HEAD, `origin/main` and a direct GitHub `main` read matched that SHA, confirming the implementation was committed locally and present remotely.
+The active development clone is `/Users/chris/Code/Personal/Projects/media-compare-dev`. The owner-approved starting baseline for Stage 4 Task 1 was `main` at `95a6feee94a23cf12fef6458610157cf8815f971`; local HEAD and `origin/main` matched and the working tree was clean before Task 1 began. This SHA identifies the approved starting point, not a Task 1 revision. Record any eventual Task 1 commit and push only after their separate approval gates are completed.
 
 Stage 3 includes filesystem browsing, Open Existing Session, bounded filter validation, secured catalog forwarding and the asynchronous preparation/preflight/reveal timeout fix, including final reservation corrections. Its recorded focused validation is preserved below; native Windows drive/UNC/lifecycle acceptance, external/network-volume opening and automatic browser opening remain unverified. Optional Subfolder Scanning is implemented, validated and Mac-accepted.
 
@@ -13,6 +13,24 @@ Production exFAT remains disabled in this clone, verified in `WindowsExfatSuppor
 The original Mac and Windows workspaces retain the protected 11-file uncommitted activation/test patch according to the recorded deferral; those workspaces were not inspected or modified here, and their earlier Git checkpoints remain historical until reverified. New development must not include or ship that unapproved patch.
 
 The milestone sections below preserve implementation and validation history, including task-time Git states and recommendations. They do not override this checkpoint or the authoritative [Next Recommended Step](#next-recommended-step).
+
+### Stage 4 Task 1 — Safe Session creation foundation (2026-10-27)
+
+`SessionCreationService.create(parent, name)` creates a dedicated direct child under an existing absolute, supported parent, which may contain unrelated data. It uses the requested name then ` (001)` through ` (999)`, advancing only after `FileAlreadyExistsException` plus a successful no-follow observation of the occupied name and unchanged parent evidence. Files, directories and links remain untouched. Permission, uncertain collision and identity/storage failures stop the operation.
+
+Portable name validation accepts spaces, Unicode and ordinary punctuation, rejects unsafe/reserved Windows forms, and limits input to 249 UTF-16 units and 249 UTF-8 bytes, reserving six for suffixes. Canonical parent/ancestor and child identities, types, storage and relationship are rechecked around directory/manifest writes. NTFS observations use existing native volume serial/file IDs and native local-drive classification; APFS uses NIO keys. Trusted ancestor aliases resolve under existing Session policy, while linked selected parents/children are refused. This is race-resistant pathname-based creation in the trusted local environment, not atomic handle-relative traversal or protection against adversarial substitution.
+
+`Session.create` and the new service share empty-directory initialization with the unchanged `session.json` contract. Only CLI creation may create missing ancestors. Stage 4 uses `Files.createDirectory` once per candidate and never recreates missing directories. Failed initialization preserves the attempted location, reports a bounded error with inspection advice, and never deletes, overwrites or retries another suffix. SQLite, Flyway, locking and catalog startup remain the supervised child's responsibility. No HTTP, operation-handle, supervisor, frontend, dependency, schema or production exFAT change is included.
+
+Final focused backend gate on macOS: **58 tests, 57 passed, zero failures/errors, one existing real-Windows NTFS test skipped**. All 28 new creation-service tests passed, alongside CLI/manifest/startup/Source-boundary and host regressions. Deterministic tests cover collisions through exhaustion, file/directory/link preservation, names/lengths, unsupported/uncertain storage, injected permission/write failures, missing/replaced parents/children/aliases, same-store enforcement, native evidence conflicts and remote/uncertain Windows drive types. Initial default mock-based runs failed because sandbox JVM self-attachment was unavailable; the cached Mockito premain agent below resolved it without dependency/build changes. Two initial filesystem-stub fixture failures were corrected before the final passing gate.
+
+Exact final command from `backend/`:
+
+```sh
+./mvnw -o -q '-Dtest=SessionCreationServiceTests,SessionTests,SessionFilesystemPolicyTests,SessionStartupTests,SessionSourceBoundaryTests,SessionSourceAliasTests,SessionSourceIsolationTests,HostFileSystemTests,WindowsHostFileSystemTests' '-DargLine=-javaagent:/Users/chris/.m2/repository/org/mockito/mockito-core/5.23.0/mockito-core-5.23.0.jar' test > target/session-creation-regression.log 2>&1
+```
+
+The agent path is a local validation workaround, not application configuration. Repository-root `git diff --check` and `git diff --no-index --check /dev/null <new-file>` for each of the four untracked Java files passed. No frontend/full-suite/exFAT acceptance rerun was needed. Native Windows creation, drive/permission/long-path behavior, junction/reparse handling and handle closure still require real Windows/NTFS verification; deterministic mocked native observations do not establish that acceptance. No protected original workspace was inspected or modified.
 
 ### Session Startup and Management — Stage 3
 
@@ -24,7 +42,7 @@ Security is active for managed operation: exact numeric loopback Host; Origin/Fe
 
 Management forwards relative `/api` calls only to the supervisor's ready child snapshot, requiring a public per-launch catalog identifier and supplying a separate private child credential. The managed child rejects direct HTTP without that credential. Stale/missing generations return 409; a matching unavailable generation returns 503. Preview images use generation-specific URLs and an HttpOnly SameSite=Strict capability cookie; cookies cannot authorize writes or other APIs. Management responses are not cached. Existing single-child/actual-exit, startup/shutdown budgets, failure liveness and ownership-retention guarantees remain intact.
 
-Folder creation is deliberately deferred: safely creating directories across platforms needs a focused implementation rather than a naive path-based write operation. New Session remains disabled; Recents, deletion and switching UI are absent. No dependency, schema migration, exFAT activation or filesystem authority rule changed. Original/protected workspaces were not modified. New Session and secure folder creation require separate authorization. Native Windows drive/UNC/lifecycle acceptance, real external/network-volume opening and automatic browser opening remain unverified.
+Stage 3 deferred folder creation; the Stage 4 Task 1 backend foundation is now described above. New Session management/UI integration remains deferred and disabled; Recents, deletion and switching UI are absent. No dependency, schema migration, exFAT activation or Source authority rule changed. Original/protected workspaces were not modified. Further New Session work requires separate authorization. Native Windows drive/UNC/lifecycle acceptance, real external/network-volume opening and automatic browser opening remain unverified.
 
 Stage 3 review corrections: directory filters now normalize once with `Locale.ROOT`, accept at most 256 characters and return a bounded HTTP 400 message for oversized input. Case-insensitive Unicode/space matching, ordering and listing limits are preserved. Eight filesystem-browser tests and fourteen management workflow/security/startup tests passed (22 total, no failures/errors/skips); `git diff --check` passed. No frontend or full application suite was rerun for these backend-only corrections, and the unrelated exFAT expectation was untouched.
 
@@ -485,9 +503,9 @@ Documentation reconciliation (2026-10-26) corrected the verified Stage 3 Git che
 
 ## Next Recommended Step
 
-Separately discuss and authorize the next bounded Session Startup and Management task, using the remaining approved workflows below to define its scope.
+After Stage 4 Task 1 completes its Git approval process under `AGENTS.md`, separately discuss and authorize the scope of Stage 4 Task 2. Task 2 is not authorized by this recommendation.
 
-Session Startup and Management remains the first approved roadmap priority, with Stages 1–3 already implemented. The remaining roadmap is unchanged:
+Session Startup and Management remains the first approved roadmap priority, with Stages 1–3 and the Stage 4 Task 1 backend foundation implemented. The remaining roadmap is unchanged:
 
 1. Session Startup and Management.
 2. Library search, sorting, and filtering.
@@ -498,7 +516,7 @@ Session Startup and Management remains the first approved roadmap priority, with
 7. Variant Matching V1.1.
 8. Advanced semantic/AI matching.
 
-The remaining Session Startup and Management workflows are New Session with secure folder creation, Recents, deletion and switching UI; any next implementation scope requires separate authorization. Approved requirements and implemented boundaries are recorded in [DECISIONS.md](DECISIONS.md#session-startup-and-management-stages-13-implemented-remaining-workflows-planned). Folder hierarchy tracking, exclusion patterns, and depth settings remain outside Optional Subfolder Scanning's scope.
+The remaining Session Startup and Management workflows are New Session management/UI integration using the Task 1 foundation, Recents, deletion and switching UI; any next implementation scope requires separate authorization. Approved requirements and implemented boundaries are recorded in [DECISIONS.md](DECISIONS.md#session-startup-and-management-stages-13-implemented-remaining-workflows-planned). Folder hierarchy tracking, exclusion patterns, and depth settings remain outside Optional Subfolder Scanning's scope.
 
 Final exFAT approval remains deferred rather than the current next action. When separately authorized, reconcile existing evidence before deciding which additional validation is necessary. The preserved acceptance sequence is:
 
