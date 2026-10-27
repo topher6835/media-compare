@@ -27,6 +27,7 @@ public final class CatalogProcessSupervisor implements AutoCloseable {
     });
     private Process child;
     private String token;
+    private String catalogId;
     private CatalogStatus.State state = NOT_STARTED;
     private CatalogStatus.Failure failure;
     private Integer port;
@@ -56,6 +57,7 @@ public final class CatalogProcessSupervisor implements AutoCloseable {
         if (child != null && child.isAlive()) throw new IllegalStateException("Previous catalog process is still alive");
         cancelDeadlines();
         token = UUID.randomUUID().toString();
+        catalogId = UUID.randomUUID().toString();
         failure = null;
         port = null;
         exitCode = null;
@@ -85,6 +87,18 @@ public final class CatalogProcessSupervisor implements AutoCloseable {
         boolean alive = child != null && child.isAlive();
         if (child != null && !alive && exitCode == null) exited(child);
         return new CatalogStatus(state, alive, port, exitCode, failure);
+    }
+
+    /** Browser generation is deliberately separate from the private child credential. */
+    public synchronized String catalogId() { return catalogId; }
+
+    record Route(String catalogId, int port, String credential) { }
+
+    synchronized Route route(String expectedId) {
+        CatalogStatus current = status();
+        if (current.state() != RUNNING || !current.processAlive() || current.port() == null
+                || expectedId == null || !expectedId.equals(catalogId)) return null;
+        return new Route(catalogId, current.port(), token);
     }
 
     public synchronized CatalogStatus requestStop() {

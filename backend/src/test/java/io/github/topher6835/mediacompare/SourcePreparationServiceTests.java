@@ -45,6 +45,8 @@ import io.github.topher6835.mediacompare.location.LocationPathParser;
 import io.github.topher6835.mediacompare.location.MacOsApfsLocationContextEvidence;
 import io.github.topher6835.mediacompare.location.MacOsApfsSourceRootEvidence;
 import io.github.topher6835.mediacompare.location.MacOsApfsSourceRootProbeRequest;
+import io.github.topher6835.mediacompare.operation.CatalogOperations;
+import io.github.topher6835.mediacompare.operation.CatalogOperationRequest;
 
 @SpringBootTest
 @Import(SourcePreparationServiceTests.ProbeConfiguration.class)
@@ -71,6 +73,45 @@ class SourcePreparationServiceTests {
     @Autowired private LocationContextAcceptanceService acceptance;
     @Autowired private SourceBindingPeriodRepository periods;
     @Autowired private FakeProbe probe;
+    @Autowired private CatalogOperations operations;
+
+    @Test
+    void asynchronousPreparationPreservesBindingFailureAndReplaySemantics() throws Exception {
+        String root = Path.of("/", USERS.components().toArray(String[]::new)).resolve("async-pictures").toString();
+        Source source = register("Async Pictures", root);
+        var input = new CatalogOperationRequest(CatalogOperationRequest.Kind.PREPARE_SOURCE, source.id(), null, null, null);
+        String id = operations.reserve().operationId();
+        operations.submit(id, input);
+        var completed = awaitOperation(id);
+        assertEquals(CatalogOperations.State.SUCCEEDED, completed.status());
+        assertEquals("READY", completed.result().get("preparationState").stringValue());
+        assertEquals(1, periods.findBySourceId(source.id()).size());
+        int probes = probe.contextCalls;
+        operations.submit(id, input);
+        assertEquals(probes, probe.contextCalls);
+        assertEquals(1, periods.findBySourceId(source.id()).size());
+
+        Source unavailable = register("Unavailable", root + "-missing");
+        probe.anchorFailure = ContinuityProbeResult.unavailable();
+        String failed = operations.reserve().operationId();
+        operations.submit(failed, new CatalogOperationRequest(CatalogOperationRequest.Kind.PREPARE_SOURCE,
+                unavailable.id(), null, null, null));
+        var failure = awaitOperation(failed);
+        assertEquals(CatalogOperations.State.FAILED, failure.status());
+        assertEquals(422, failure.errorStatus());
+        assertEquals("PATH_UNAVAILABLE", failure.errorCode());
+        assertTrue(periods.findBySourceId(unavailable.id()).isEmpty());
+    }
+
+    private CatalogOperations.Status awaitOperation(String id) throws Exception {
+        long end = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() < end) {
+            var status = operations.status(id);
+            if (status.completedAtMs() != null) return status;
+            Thread.sleep(5);
+        }
+        throw new AssertionError(operations.status(id));
+    }
 
     @BeforeEach
     void clear() {

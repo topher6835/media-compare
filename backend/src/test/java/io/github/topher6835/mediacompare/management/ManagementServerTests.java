@@ -30,14 +30,14 @@ class ManagementServerTests {
             assertEquals("127.0.0.1", server.baseUri().getHost());
             var status = get(server, "/api/management/status");
             assertEquals(200, status.statusCode());
-            assertEquals("{\"service\":\"media-compare-management\",\"catalogState\":\"NOT_STARTED\",\"processAlive\":false,\"failureCode\":null,\"exitCode\":null}", status.body().strip());
+            assertEquals("{\"service\":\"media-compare-management\",\"catalogState\":\"NOT_STARTED\",\"processAlive\":false,\"failureCode\":null,\"exitCode\":null,\"catalogId\":null}", status.body().strip());
             assertEquals("no-store", status.headers().firstValue("Cache-Control").orElseThrow());
             assertEquals("<html>React entry</html>", get(server, "/").body());
             assertEquals("<html>React entry</html>", get(server, "/library/items/42").body());
             var script = get(server, "/assets/app.js");
             assertEquals("console.log('React build')", script.body());
             assertTrue(script.headers().firstValue("Content-Type").orElseThrow().startsWith("text/javascript"));
-            for (String path : new String[] {"/api/sources", "/api/management/status/extra", "/assets/missing.js", "/missing.css"}) {
+            for (String path : new String[] { "/api/management/status/extra", "/assets/missing.js", "/missing.css"}) {
                 var missing = get(server, path);
                 assertEquals(404, missing.statusCode(), path);
                 assertFalse(missing.body().contains("React entry"), path);
@@ -52,11 +52,11 @@ class ManagementServerTests {
     void onlyReadMethodsAreAccepted() throws Exception {
         try (ManagementServer server = ManagementServer.start(frontendBuild(), 0)) {
             for (String path : new String[] {"/", "/api/management/status"}) {
-                var post = client.send(HttpRequest.newBuilder(server.baseUri().resolve(path))
+                var post = client.send(ManagementTestClient.authorized(server, path)
                         .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
                 assertEquals(405, post.statusCode());
                 assertEquals("GET, HEAD", post.headers().firstValue("Allow").orElseThrow());
-                var head = client.send(HttpRequest.newBuilder(server.baseUri().resolve(path))
+                var head = client.send(ManagementTestClient.authorized(server, path)
                         .method("HEAD", HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
                 assertEquals(200, head.statusCode());
                 assertTrue(head.body().isEmpty());
@@ -124,6 +124,7 @@ class ManagementServerTests {
             assertTrue(line.startsWith("Media Compare management: "), line);
             URI base = URI.create(line.substring("Media Compare management: ".length()));
             var response = client.send(HttpRequest.newBuilder(base.resolve("/api/management/status"))
+                    .header(LocalApiSecurity.ACCESS_HEADER, ManagementTestClient.capability(base))
                     .timeout(Duration.ofSeconds(5)).build(), HttpResponse.BodyHandlers.ofString());
             assertEquals(200, response.statusCode());
             assertTrue(response.body().contains("NOT_STARTED"));
@@ -149,7 +150,7 @@ class ManagementServerTests {
     }
 
     private HttpResponse<String> get(ManagementServer server, String path) throws Exception {
-        return client.send(HttpRequest.newBuilder(server.baseUri().resolve(path)).timeout(Duration.ofSeconds(5)).build(),
+        return client.send(ManagementTestClient.authorized(server, path).timeout(Duration.ofSeconds(5)).build(),
                 HttpResponse.BodyHandlers.ofString());
     }
 }

@@ -1,3 +1,4 @@
+import { runCatalogOperation } from './catalogOperations.ts'
 import { requestJson } from './http.ts'
 import type { MediaLibraryItem } from './mediaLibrary.ts'
 
@@ -97,6 +98,7 @@ export interface CleanupPreflightFileResult {
 }
 
 export interface CleanupPreflightResponse {
+  checkedAtMs?: number
   digestHex: string
   status: CleanupPreflightStatus
   reason: CleanupPreflightReason | null
@@ -107,22 +109,16 @@ export interface CleanupPreflightResponse {
   candidates: CleanupPreflightFileResult[]
 }
 
-export function checkExactDuplicateCleanupSafety(
+export async function checkExactDuplicateCleanupSafety(
   digestHex: string,
   request: CleanupPreflightRequest,
   signal?: AbortSignal,
 ): Promise<CleanupPreflightResponse> {
-  return requestJson<CleanupPreflightResponse>(
-    `/api/exact-duplicate-groups/${encodeURIComponent(digestHex)}/cleanup-preflight`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        keeperFileEntryId: request.keeperFileEntryId,
-        candidateFileEntryIds: request.candidateFileEntryIds,
-      }),
-      signal,
-    },
-  )
+  const completion = await runCatalogOperation<CleanupPreflightResponse>({
+    kind: 'CLEANUP_PREFLIGHT', digestHex,
+    preflight: { keeperFileEntryId: request.keeperFileEntryId, candidateFileEntryIds: request.candidateFileEntryIds },
+  }, signal)
+  return { ...completion.result, checkedAtMs: completion.completedAtMs }
 }
 
 const supportedCategories = new Set<TechnicalFileCategory>([

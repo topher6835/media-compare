@@ -2,6 +2,7 @@ package io.github.topher6835.mediacompare;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import java.io.IOException;
@@ -11,6 +12,10 @@ import java.nio.file.*;
 import java.nio.file.attribute.FileTime;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import io.github.topher6835.mediacompare.operation.CatalogOperations;
+import tools.jackson.databind.json.JsonMapper;
 
 import io.github.topher6835.mediacompare.analysis.ContentHashFileHasher;
 import io.github.topher6835.mediacompare.catalog.*;
@@ -36,6 +41,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 class CleanupPreflightApiTests extends V3ApiTestBase {
     @Autowired CleanupPreflightService service;
     @Autowired TestValidator validator;
+    @Autowired CatalogOperations operations;
     @Autowired SourceMembershipRepository memberships;
     Source source;
     Path keeperPath;
@@ -43,6 +49,81 @@ class CleanupPreflightApiTests extends V3ApiTestBase {
     long keeper;
     long candidate;
     String digest;
+
+    @Test
+    void asyncPreflightAdmitsBeforeHashingFinishesAndFreshChecksRejectChangedBytes() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        validator.duringRead = () -> {
+            entered.countDown();
+            try { assertTrue(release.await(5, TimeUnit.SECONDS)); }
+            catch (InterruptedException failure) { Thread.currentThread().interrupt(); throw new IllegalStateException(failure); }
+        };
+        String command = "{\"kind\":\"CLEANUP_PREFLIGHT\",\"digestHex\":\"" + digest + "\",\"preflight\":" + body() + "}";
+        String id = reserveOperation();
+        try {
+            mvc.perform(post("/api/catalog-operations/" + id).contentType(MediaType.APPLICATION_JSON).content(command))
+                    .andExpect(status().isAccepted());
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            mvc.perform(get("/api/catalog-operations/" + id)).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("RUNNING"));
+            assertEquals(1, release.getCount());
+        } finally { release.countDown(); }
+        var first = awaitOperation(id);
+        assertEquals("READY", first.result().get("status").stringValue());
+        assertEquals(2, validator.hashReads.get());
+        // An identical submission returns the original observation; it is never fresh authority.
+        mvc.perform(post("/api/catalog-operations/" + id).contentType(MediaType.APPLICATION_JSON).content(command))
+                .andExpect(status().isAccepted()).andExpect(jsonPath("$.result.status").value("READY"));
+        assertEquals(2, validator.hashReads.get());
+        Files.writeString(candidatePath, "edited");
+        String fresh = reserveOperation();
+        mvc.perform(post("/api/catalog-operations/" + fresh).contentType(MediaType.APPLICATION_JSON).content(command))
+                .andExpect(status().isAccepted());
+        assertEquals("BLOCKED", awaitOperation(fresh).result().get("status").stringValue());
+        assertEquals("edited", Files.readString(candidatePath));
+        assertNotNull(first.completedAtMs());
+    }
+
+    @Test
+    void cancelledAsyncPreflightCannotPublishAReadyResult() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        validator.duringRead = () -> {
+            entered.countDown();
+            try { release.await(); }
+            catch (InterruptedException failure) { Thread.currentThread().interrupt(); }
+        };
+        String id = reserveOperation();
+        try {
+            mvc.perform(post("/api/catalog-operations/" + id).contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"kind\":\"CLEANUP_PREFLIGHT\",\"digestHex\":\"" + digest + "\",\"preflight\":" + body() + "}"))
+                    .andExpect(status().isAccepted());
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            mvc.perform(post("/api/catalog-operations/" + id + "/cancel")).andExpect(status().isOk());
+        } finally { release.countDown(); }
+        var cancelled = awaitOperation(id);
+        assertEquals(CatalogOperations.State.CANCELLED, cancelled.status());
+        assertNull(cancelled.result());
+        assertEquals("copies", Files.readString(keeperPath));
+        assertEquals("copies", Files.readString(candidatePath));
+    }
+
+    private String reserveOperation() throws Exception {
+        String response = mvc.perform(post("/api/catalog-operations")).andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        return JsonMapper.builder().build().readTree(response).get("operationId").stringValue();
+    }
+
+    private CatalogOperations.Status awaitOperation(String id) throws Exception {
+        long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() < end) {
+            var result = operations.status(id);
+            if (result.completedAtMs() != null) return result;
+            Thread.sleep(5);
+        }
+        throw new AssertionError(operations.status(id));
+    }
 
     @BeforeEach
     void group() throws Exception {

@@ -23,7 +23,10 @@ public final class CatalogChildApplication {
         control.start();
         System.out.println("MC_CATALOG " + token + " INITIALIZING");
         boolean initialized = false;
-        try (var context = SpringApplication.run(MediaCompareApplication.class,
+        var application = new SpringApplication(MediaCompareApplication.class);
+        application.addInitializers(context -> context.getBeanFactory().registerSingleton(
+                "managedCatalogSecurity", ManagedCatalogSecurity.registration(token)));
+        try (var context = application.run(
                 "--media-compare.session-root=" + args[1],
                 "--media-compare.test-catalog-override=false",
                 "--server.address=127.0.0.1", "--server.port=0", "--server.ssl.enabled=false",

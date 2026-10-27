@@ -1,3 +1,4 @@
+import { catalogFetch } from './connection.ts'
 export class ApiError extends Error {
   readonly status: number
 
@@ -18,7 +19,7 @@ export async function requestJson<T>(
     headers.set('Content-Type', 'application/json')
   }
 
-  const response = await fetch(url, { ...init, headers })
+  const response = await catalogFetch(url, { ...init, headers })
 
   if (!response.ok) {
     throw new ApiError(response.status)

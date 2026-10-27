@@ -57,6 +57,7 @@ function registrationErrorMessage(error: unknown): string {
 
 function preparationErrorMessage(error: unknown): string {
   if (error instanceof SourcePreparationApiError) {
+    if (error.operationMessage) return error.operationMessage
     if (error.code === 'PATH_UNAVAILABLE') {
       return 'This folder is unavailable to the backend. Check the path and try again.'
     }
@@ -351,6 +352,7 @@ export function SourcesPage() {
   const [startMessageIsError, setStartMessageIsError] = useState(false)
   const registrationLock = useRef(false)
   const preparationLock = useRef(false)
+  const preparationRequest = useRef<AbortController | null>(null)
   const startLock = useRef(false)
   const mounted = useRef(true)
   const recoveryMessage = useRef(false)
@@ -386,6 +388,7 @@ export function SourcesPage() {
     mounted.current = true
     return () => {
       mounted.current = false
+      preparationRequest.current?.abort()
     }
   }, [])
 
@@ -656,10 +659,12 @@ export function SourcesPage() {
   async function prepare(source: Source) {
     if (preparationLock.current || source.preparationState === 'REBIND_REQUIRED') return
     preparationLock.current = true
+    const controller = new AbortController()
+    preparationRequest.current = controller
     setPreparingSourceId(source.id)
     setPreparationMessage(null)
     try {
-      const ready = await prepareSource(source.id)
+      const ready = await prepareSource(source.id, controller.signal)
       if (!mounted.current) return
       setSources((current) => current?.map((item) => item.id === ready.id ? ready : item) ?? null)
       await refreshCollection().catch(() => setListError(true))
@@ -671,6 +676,7 @@ export function SourcesPage() {
       }
     } finally {
       preparationLock.current = false
+      preparationRequest.current = null
       if (mounted.current) setPreparingSourceId(null)
     }
   }

@@ -1,4 +1,5 @@
-import { requestJson } from './http.ts'
+import { CatalogOperationError, runCatalogOperation } from './catalogOperations.ts'
+import { ApiError, requestJson } from './http.ts'
 
 export interface Source {
   id: number
@@ -23,15 +24,18 @@ export type SourcePreparationErrorCode =
 export class SourcePreparationApiError extends Error {
   readonly status: number
   readonly code: SourcePreparationErrorCode | null
+  readonly operationMessage: string | null
 
   constructor(
     status: number,
     code: SourcePreparationErrorCode | null,
+    operationMessage: string | null = null,
   ) {
     super(`Source preparation failed with status ${status}`)
     this.name = 'SourcePreparationApiError'
     this.status = status
     this.code = code
+    this.operationMessage = operationMessage
   }
 }
 
@@ -64,22 +68,24 @@ export function registerSource(
   })
 }
 
-export async function prepareSource(sourceId: number): Promise<Source> {
-  const response = await fetch(`/api/sources/${sourceId}/prepare`, {
-    method: 'POST',
-    headers: { Accept: 'application/json' },
-  })
-  if (!response.ok) {
-    let code: SourcePreparationErrorCode | null = null
-    try {
-      const body = (await response.json()) as { code?: SourcePreparationErrorCode }
-      code = body.code ?? null
-    } catch {
-      // Network and server errors may have no JSON response.
+export async function prepareSource(sourceId: number, signal?: AbortSignal): Promise<Source> {
+  try {
+    await runCatalogOperation<Source>({ kind: 'PREPARE_SOURCE', sourceId }, signal)
+    // A retained completion snapshot is not current live authority. Re-read the ordinary projection.
+    try { return await requestJson<Source>(`/api/sources/${sourceId}`, { signal }) }
+    catch (error) {
+      if (signal?.aborted) throw error
+      throw new SourcePreparationApiError(error instanceof ApiError ? error.status : 503, null,
+        'Preparation completed, but current Source state could not be refreshed. Refresh the Source list before trying again.')
     }
-    throw new SourcePreparationApiError(response.status, code)
+  } catch (error) {
+    if (error instanceof CatalogOperationError) {
+      const known: SourcePreparationErrorCode[] = ['PATH_UNAVAILABLE', 'PROFILE_UNSUPPORTED', 'EVIDENCE_UNCERTAIN', 'PROBE_ERROR', 'STATE_CHANGED']
+      throw new SourcePreparationApiError(error.status, known.includes(error.code as SourcePreparationErrorCode) ? error.code as SourcePreparationErrorCode : null,
+        error.code.startsWith('OPERATION_') || error.code === 'CATALOG_CHANGED' ? error.message : null)
+    }
+    throw error
   }
-  return (await response.json()) as Source
 }
 
 export interface SourceAuthorityWindow { sourceId: number; windowId: string }

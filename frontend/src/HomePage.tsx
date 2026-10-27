@@ -1,3 +1,4 @@
+import { catalogFetch } from './api/connection.ts'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -5,7 +6,7 @@ export function HomePage() {
   const [health, setHealth] = useState({ state: 'pending', label: 'Checking…' })
 
   useEffect(() => {
-    fetch('/api/health')
+    catalogFetch('/api/health')
       .then((response) => {
         if (!response.ok) {
           throw new Error('Health request failed')

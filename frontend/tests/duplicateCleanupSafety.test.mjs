@@ -37,7 +37,7 @@ test('maps every backend reason to a specific useful explanation', () => {
     assert.equal(cleanupSafetyReasonMessage(reason), message)
   }
   assert.equal(cleanupSafetyReasonMessage(null), 'Safety requirements were not met; review the group again.')
-  assert.equal(cleanupSafetyLabels.READY, 'READY NOW')
+  assert.equal(cleanupSafetyLabels.READY, 'CHECK PASSED')
   assert.notEqual(cleanupSafetyLabels.BLOCKED, cleanupSafetyLabels.CHECK_FAILED)
 })
 
@@ -113,34 +113,34 @@ test('matches keeper/candidates by physical ID only, independent of array order 
   assert.deepEqual(response, before)
 })
 
-test('POST sends only physical IDs, never snapshot fields, and forwards cancellation', async (t) => {
+test('async submission sends only physical IDs and returns the completion observation time', async (t) => {
   const response = result()
   const controller = new AbortController()
-  let calls = 0
+  const calls = []
   t.mock.method(globalThis, 'fetch', async (url, init) => {
-    calls++
-    assert.equal(url, '/api/exact-duplicate-groups/a%2Fb/cleanup-preflight')
+    calls.push({ url, init })
+    if (url === '/api/catalog-operations') return Response.json({ operationId: 'runtime.safety', status: 'RESERVED' })
+    assert.equal(url, '/api/catalog-operations/runtime.safety')
     assert.equal(init.method, 'POST')
     assert.equal(init.headers.get('Content-Type'), 'application/json')
-    assert.equal(init.headers.get('Accept'), 'application/json')
     assert.equal(init.signal, controller.signal)
-    assert.deepEqual(JSON.parse(init.body), { keeperFileEntryId: 10, candidateFileEntryIds: [20, 30] })
-    return Response.json(response)
+    assert.deepEqual(JSON.parse(init.body), { kind: 'CLEANUP_PREFLIGHT', digestHex: 'a/b', preflight: { keeperFileEntryId: 10, candidateFileEntryIds: [20, 30] } })
+    return Response.json({ operationId: 'runtime.safety', status: 'SUCCEEDED', result: response, completedAtMs: 1234 })
   })
   assert.deepEqual(await checkExactDuplicateCleanupSafety('a/b', {
-    keeperFileEntryId: 10, candidateFileEntryIds: [20, 30],
-    paths: ['untrusted'], sizeBytes: 999, candidateCount: 999, estimatedSavingsBytes: 999,
-  }, controller.signal), response)
-  assert.equal(calls, 1)
+    keeperFileEntryId: 10, candidateFileEntryIds: [20, 30], paths: ['untrusted'], sizeBytes: 999,
+  }, controller.signal), { ...response, checkedAtMs: 1234 })
+  assert.equal(calls.length, 2)
 })
 
-test('backend BLOCKED resolves as a result; HTTP and transport failures reject for the UI failure state', async (t) => {
+test('backend BLOCKED is an observation, while terminal operation failure rejects for the UI', async (t) => {
   const blocked = result('BLOCKED', 'IO_UNAVAILABLE')
-  const fetchMock = t.mock.method(globalThis, 'fetch', async () => Response.json(blocked))
   const request = { keeperFileEntryId: 10, candidateFileEntryIds: [20, 30] }
-  assert.deepEqual(await checkExactDuplicateCleanupSafety('a', request), blocked)
-  fetchMock.mock.mockImplementation(async () => new Response(null, { status: 503 }))
-  await assert.rejects(checkExactDuplicateCleanupSafety('a', request), (error) => error instanceof ApiError && error.status === 503)
-  fetchMock.mock.mockImplementation(async () => { throw new TypeError('Network unavailable') })
-  await assert.rejects(checkExactDuplicateCleanupSafety('a', request), /Network unavailable/)
+  const fetchMock = t.mock.method(globalThis, 'fetch', async (url) => Response.json({
+    operationId: 'runtime.blocked', status: url === '/api/catalog-operations' ? 'RESERVED' : 'SUCCEEDED', result: blocked, completedAtMs: 1234,
+  }))
+  assert.deepEqual(await checkExactDuplicateCleanupSafety('a', request), { ...blocked, checkedAtMs: 1234 })
+  fetchMock.mock.mockImplementation(async (url) => Response.json({ operationId: 'runtime.failure',
+    status: url === '/api/catalog-operations' ? 'RESERVED' : 'FAILED', errorStatus: 503, errorCode: 'OPERATION_FAILED' }))
+  await assert.rejects(checkExactDuplicateCleanupSafety('a', request), error => error instanceof ApiError && error.status === 503)
 })

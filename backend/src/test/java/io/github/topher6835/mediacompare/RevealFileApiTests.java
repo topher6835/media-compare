@@ -8,6 +8,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.util.concurrent.atomic.AtomicInteger;
+import io.github.topher6835.mediacompare.operation.CatalogOperations;
+import tools.jackson.databind.json.JsonMapper;
 
 import io.github.topher6835.mediacompare.catalog.Source;
 import io.github.topher6835.mediacompare.matching.FinderRevealProcess;
@@ -33,9 +35,30 @@ class RevealFileApiTests extends V3ApiTestBase {
     @Autowired RevealCatalog revealCatalog;
     @Autowired CleanupPreflightApiTests.TestValidator validator;
     @Autowired TestFinder finder;
+    @Autowired CatalogOperations operations;
     Source source;
     Path file;
     long fileId;
+
+    @Test void asyncRevealRetainsActionHeaderValidationAndExecutesOnceOnReplay() throws Exception {
+        String response = mvc.perform(post("/api/catalog-operations")).andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String id = JsonMapper.builder().build().readTree(response).get("operationId").stringValue();
+        String command = "{\"kind\":\"REVEAL_FILE\",\"fileEntryId\":" + fileId + "}";
+        mvc.perform(post("/api/catalog-operations/" + id).contentType("application/json").content(command))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("ACTION_HEADER_REQUIRED"));
+        assertEquals(0, finder.calls.get());
+        mvc.perform(post("/api/catalog-operations/" + id).header("X-Media-Compare-Reveal", "1")
+                .contentType("application/json").content(command)).andExpect(status().isAccepted());
+        long end = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+        while (operations.status(id).completedAtMs() == null && System.nanoTime() < end) Thread.sleep(5);
+        assertEquals(CatalogOperations.State.SUCCEEDED, operations.status(id).status());
+        mvc.perform(post("/api/catalog-operations/" + id).header("X-Media-Compare-Reveal", "1")
+                .contentType("application/json").content(command)).andExpect(status().isAccepted());
+        assertEquals(1, finder.calls.get());
+        assertEquals(file, finder.path);
+        assertEquals(0, validator.hashReads.get());
+    }
 
     @BeforeEach
     void prepare() throws Exception {

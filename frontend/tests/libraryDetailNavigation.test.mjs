@@ -218,13 +218,15 @@ test('reveal API sends only a physical FileEntry ID and no browser path', async 
   const calls = []
   globalThis.fetch = async (url, options) => {
     calls.push([url, options])
-    return { ok: true, status: 204 }
+    return Response.json({ operationId: 'runtime.reveal', status: url === '/api/catalog-operations' ? 'RESERVED' : 'SUCCEEDED', result: null, completedAtMs: 1234 })
   }
   try {
     await revealMediaLibraryFile(7)
-    assert.deepEqual(calls, [['/api/media-library/items/7/reveal', {
-      method: 'POST', headers: { 'X-Media-Compare-Reveal': '1' }, signal: undefined,
-    }]])
+    assert.equal(calls.length, 2)
+    assert.equal(calls[0][0], '/api/catalog-operations')
+    assert.equal(calls[1][0], '/api/catalog-operations/runtime.reveal')
+    assert.equal(calls[1][1].headers.get('X-Media-Compare-Reveal'), '1')
+    assert.deepEqual(JSON.parse(calls[1][1].body), { kind: 'REVEAL_FILE', fileEntryId: 7 })
   } finally {
     globalThis.fetch = originalFetch
   }

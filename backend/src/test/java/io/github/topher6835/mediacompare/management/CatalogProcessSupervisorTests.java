@@ -36,7 +36,8 @@ class CatalogProcessSupervisorTests {
             assertTrue(running.processAlive());
             assertNotNull(running.port());
             var response = client.send(HttpRequest.newBuilder(java.net.URI.create(
-                    "http://127.0.0.1:" + running.port() + "/api/health")).build(), HttpResponse.BodyHandlers.ofString());
+                    "http://127.0.0.1:" + running.port() + "/api/health"))
+                    .header(ManagedCatalogSecurity.HEADER, catalog.route(catalog.catalogId()).credential()).build(), HttpResponse.BodyHandlers.ofString());
             assertEquals(200, response.statusCode());
             assertEquals("ok", response.body());
             assertTrue(Files.isRegularFile(session.catalogPath()));
@@ -65,7 +66,7 @@ class CatalogProcessSupervisorTests {
             assertTrue(response.body().contains("\"processAlive\":false"));
             assertFalse(response.body().contains("missing-private-session"));
             assertEquals(200, get(management, "/").statusCode());
-            assertEquals(405, client.send(HttpRequest.newBuilder(management.baseUri().resolve("/api/management/start"))
+            assertEquals(403, client.send(HttpRequest.newBuilder(management.baseUri().resolve("/api/management/start"))
                     .POST(HttpRequest.BodyPublishers.ofString("private path")).build(), HttpResponse.BodyHandlers.ofString()).statusCode());
             catalog.start(Session.create(directory.resolve("valid")).root());
             await(catalog, s -> s.state() == RUNNING);
@@ -238,7 +239,7 @@ class CatalogProcessSupervisorTests {
     }
 
     private HttpResponse<String> get(ManagementServer management, String path) throws Exception {
-        return client.send(HttpRequest.newBuilder(management.baseUri().resolve(path)).timeout(Duration.ofSeconds(3)).build(),
+        return client.send(ManagementTestClient.authorized(management, path).timeout(Duration.ofSeconds(3)).build(),
                 HttpResponse.BodyHandlers.ofString());
     }
 

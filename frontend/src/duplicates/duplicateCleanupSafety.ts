@@ -5,14 +5,15 @@ import type {
 
 // Page component state only; never part of the saved cleanup plan.
 export type CleanupSafetyState =
-  | { status: 'NOT_CHECKED' | 'CHECKING' | 'CHECK_FAILED' }
+  | { status: 'NOT_CHECKED' | 'CHECKING' }
+  | { status: 'CHECK_FAILED'; message?: string }
   | { status: 'READY' | 'BLOCKED'; result: CleanupPreflightResponse }
 
 export const cleanupSafetyLabels: Record<CleanupSafetyState['status'], string> = {
   NOT_CHECKED: 'NOT CHECKED',
   CHECKING: 'CHECKING',
   CHECK_FAILED: 'CHECK FAILED',
-  READY: 'READY NOW',
+  READY: 'CHECK PASSED',
   BLOCKED: 'BLOCKED',
 }
 

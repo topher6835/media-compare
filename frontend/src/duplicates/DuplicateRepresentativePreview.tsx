@@ -1,3 +1,4 @@
+import { catalogAssetUrl } from '../api/connection.ts'
 import { useEffect, useRef, useState } from 'react'
 import { getMediaLibraryItem, scheduleMediaLibraryThumbnails, type MediaLibraryItem } from '../api/mediaLibrary.ts'
 
@@ -60,7 +61,7 @@ export function DuplicateRepresentativePreview({ representative }: { representat
   const preview = item?.fileEntryId === representative?.fileEntryId ? item : representative
   return <div className="duplicate-representative" ref={node}>
     {preview?.thumbnail.url && !broken
-      ? <img src={preview.thumbnail.url} alt={`Representative exact image: ${preview.displayName}`}
+      ? <img src={catalogAssetUrl(preview.thumbnail.url)} alt={`Representative exact image: ${preview.displayName}`}
         loading="lazy" onError={() => setBroken(true)} />
       : <div className="library-placeholder">
         <svg viewBox="0 0 32 32" aria-hidden="true" className="library-image-symbol">

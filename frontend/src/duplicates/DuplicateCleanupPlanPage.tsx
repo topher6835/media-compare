@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { CatalogOperationError } from '../api/catalogOperations.ts'
 import {
   checkExactDuplicateCleanupSafety,
   exactDuplicateFilterSearch,
@@ -84,9 +85,10 @@ export function DuplicateCleanupPlanPage() {
       if (!signal.aborted) {
         setSafetyStates((states) => ({ ...states, [entry.digestHex]: { status: result.status, result } }))
       }
-    } catch {
+    } catch (error) {
       if (!signal.aborted) {
-        setSafetyStates((states) => ({ ...states, [entry.digestHex]: { status: 'CHECK_FAILED' } }))
+        setSafetyStates((states) => ({ ...states, [entry.digestHex]: { status: 'CHECK_FAILED',
+          message: error instanceof CatalogOperationError ? error.message : undefined } }))
       }
     }
   }
@@ -174,7 +176,7 @@ export function DuplicateCleanupPlanPage() {
               <button type="button" disabled={checking} onClick={() => void checkPlan(entries, true)}>Check cleanup plan</button>
             </div>
             <dl className="cleanup-stats" role="status" aria-live="polite">
-              <div><dt>Ready now</dt><dd>{safetySummary.readyNow}</dd></div>
+              <div><dt>Checks passed</dt><dd>{safetySummary.readyNow}</dd></div>
               <div><dt>Blocked</dt><dd>{safetySummary.blocked}</dd></div>
               <div><dt>Not checked</dt><dd>{safetySummary.notChecked}</dd></div>
               <div><dt>Check failed</dt><dd>{safetySummary.failed}</dd></div>
@@ -199,7 +201,8 @@ export function DuplicateCleanupPlanPage() {
                     <span className={`status-badge safety-${safety.status.toLowerCase()}`}>{cleanupSafetyLabels[safety.status]}</span>
                     {safety.status === 'CHECKING' && <p>Checking current catalog authority and reading file bytes…</p>}
                     {safety.status === 'NOT_CHECKED' && <p>This group has not been checked.</p>}
-                    {safety.status === 'CHECK_FAILED' && <p>The safety request could not be completed. Safety is unavailable; use Check again to retry.</p>}
+                    {safety.status === 'CHECK_FAILED' && <p>{safety.message ?? 'The safety request could not be completed. Safety is unavailable; use Check again to retry.'}</p>}
+                    {result?.checkedAtMs !== undefined && <p className="planner-note">Check completed at {new Date(result.checkedAtMs).toLocaleTimeString()}. Files were verified during the check; this is not continuing authority.</p>}
                     {result?.status === 'READY' && (
                       <>
                         <p>The backend safety check passed at that moment.</p>

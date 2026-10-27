@@ -1,3 +1,4 @@
+import { catalogAssetUrl } from '../api/connection.ts'
 import { memo, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { MediaLibraryItem } from '../api/mediaLibrary.ts'
@@ -54,7 +55,7 @@ export const MediaLibraryCard = memo(function MediaLibraryCard({ item, mode, fro
           {url && (!broken || retryRequest) && (
             <img
               key={imageUrl}
-              src={imageUrl ?? undefined}
+              src={imageUrl ? catalogAssetUrl(imageUrl) : undefined}
               alt={item.displayName}
               loading="lazy"
               decoding="async"

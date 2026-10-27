@@ -1,3 +1,4 @@
+import { catalogAssetUrl } from '../api/connection.ts'
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
 import { ApiError } from '../api/http.ts'
@@ -77,7 +78,7 @@ export function MediaLibraryItemDetailContent({ item, brokenPreview, onPreviewEr
         <h1>{item.displayName}</h1>
         <div className="item-detail-layout">
           <div className="item-detail-preview">
-            {previewUrl && !brokenPreview ? <img src={previewUrl} alt={item.displayName}
+            {previewUrl && !brokenPreview ? <img src={catalogAssetUrl(previewUrl)} alt={item.displayName}
               onError={onPreviewError} />
               : <div className="library-placeholder">
                 <svg viewBox="0 0 32 32" aria-hidden="true" className="library-image-symbol">

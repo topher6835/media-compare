@@ -43,7 +43,12 @@ public final class Session {
         requireRegularFile(manifest, "Session manifest");
         JsonNode document;
         try {
-            document = JSON.readTree(Files.readString(manifest));
+            // The manifest is tiny and fixed-format. Bound reads even if a selected file changes size.
+            try (var input = Files.newInputStream(manifest, LinkOption.NOFOLLOW_LINKS)) {
+                byte[] bytes = input.readNBytes(65_537);
+                if (bytes.length > 65_536) throw new IOException("Session manifest is too large");
+                document = JSON.readTree(bytes);
+            }
         } catch (JacksonException exception) {
             throw new IOException("Invalid Session manifest JSON: " + manifest, exception);
         }

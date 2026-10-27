@@ -2234,3 +2234,13 @@ dd {
 .physical-copy-path.is-filter-nonmatch {
   background: var(--surface-subtle);
 }
+
+.folder-browser { max-width: 850px; margin-top: 1.5rem; }
+.folder-browser fieldset { border: 1px solid var(--border-color, #ccc); border-radius: 8px; padding: 1rem; min-width: 0; }
+.folder-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin: .75rem 0; }
+.folder-path-form { display: flex; flex-wrap: wrap; gap: .6rem; margin: 1rem 0; align-items: center; }
+.folder-path-form label { flex-basis: 100%; }
+.folder-path-form input { flex: 1; min-width: 0; padding: .6rem; }
+.folder-current-path { overflow-wrap: anywhere; }
+.folder-list { list-style: none; padding: 0; max-height: 340px; overflow: auto; border-block: 1px solid var(--border-color, #ccc); }
+.folder-list button { display: block; width: 100%; text-align: left; overflow-wrap: anywhere; padding: .65rem; }

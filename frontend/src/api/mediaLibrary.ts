@@ -1,5 +1,6 @@
+import { runCatalogOperation } from './catalogOperations.ts'
 import type { SourceAuthorityWindow } from './sources.ts'
-import { ApiError, requestJson } from './http.ts'
+import { requestJson } from './http.ts'
 
 export type GenerationSupport = 'SUPPORTED' | 'UNSUPPORTED'
 export type ThumbnailState = 'MISSING' | 'PUBLISHED'
@@ -71,10 +72,7 @@ export function getMediaLibraryItem(fileEntryId: number, signal?: AbortSignal): 
 }
 
 export async function revealMediaLibraryFile(fileEntryId: number, signal?: AbortSignal): Promise<void> {
-  const response = await fetch(`/api/media-library/items/${fileEntryId}/reveal`, {
-    method: 'POST', headers: { 'X-Media-Compare-Reveal': '1' }, signal,
-  })
-  if (!response.ok) throw new ApiError(response.status)
+  await runCatalogOperation<null>({ kind: 'REVEAL_FILE', fileEntryId }, signal)
 }
 
 export function getMediaLibraryGroups(
