@@ -196,6 +196,10 @@ class SessionCreationServiceTests {
                     () -> new SessionCreationService().create(parent, "Name"));
             assertInstanceOf(AccessDeniedException.class, error.getCause());
             assertTrue(error.getMessage().contains(child.toString()));
+            var recovery = assertInstanceOf(SessionCreationService.CreationFailure.class, error);
+            assertTrue(recovery.mutationAttempted());
+            assertFalse(recovery.directoryCreated());
+            assertEquals(child, recovery.attemptedPath());
         }
         assertFalse(Files.exists(child));
         assertFalse(Files.exists(parent.resolve("Name (001)")));
@@ -265,6 +269,10 @@ class SessionCreationServiceTests {
             assertInstanceOf(AccessDeniedException.class, error.getCause());
             assertTrue(error.getMessage().contains(child.toString()));
             assertTrue(error.getMessage().contains("not removed"));
+            var recovery = assertInstanceOf(SessionCreationService.CreationFailure.class, error);
+            assertTrue(recovery.mutationAttempted());
+            assertTrue(recovery.directoryCreated());
+            assertEquals(child, recovery.attemptedPath());
         }
         assertTrue(Files.isDirectory(child));
         assertFalse(Files.exists(manifest));

@@ -7,6 +7,7 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -22,13 +23,21 @@ public final class ManagementServer implements AutoCloseable {
     private final LocalApiSecurity security;
     private final FilesystemBrowser filesystem = new FilesystemBrowser();
     private final CatalogApiForwarder forwarder;
+    private final SessionLifecycleAdmission admission;
+    private final SessionCreationOperations creations;
+    private final SessionCreationApi creationApi;
     private final ExecutorService requests = Executors.newFixedThreadPool(8);
 
-    private ManagementServer(HttpServer server, CatalogProcessSupervisor catalog, String developmentOrigin) {
+    private ManagementServer(HttpServer server, CatalogProcessSupervisor catalog, String developmentOrigin,
+            SessionCreationOperations.Creator creator) {
         this.server = server;
         this.catalog = catalog;
         security = new LocalApiSecurity(server.getAddress().getPort(), developmentOrigin);
         forwarder = new CatalogApiForwarder(catalog);
+        admission = new SessionLifecycleAdmission(catalog);
+        creations = creator == null ? new SessionCreationOperations(catalog, admission)
+                : new SessionCreationOperations(catalog, admission, creator, System::nanoTime, Duration.ofMinutes(10));
+        creationApi = new SessionCreationApi(creations);
     }
 
     public static ManagementServer start(Path frontendRoot, int port) throws IOException {
@@ -44,10 +53,16 @@ public final class ManagementServer implements AutoCloseable {
     }
 
     private static ManagementServer start(Path frontendRoot, int port, CatalogProcessSupervisor catalog, String developmentOrigin) throws IOException {
+        return start(frontendRoot, port, catalog, developmentOrigin, null);
+    }
+
+    // Package-local creator seam supports deterministic IO admission tests without changing filesystem policy.
+    static ManagementServer start(Path frontendRoot, int port, CatalogProcessSupervisor catalog,
+            String developmentOrigin, SessionCreationOperations.Creator creator) throws IOException {
         StaticFrontendHandler frontend = new StaticFrontendHandler(frontendRoot);
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
         ManagementServer management;
-        try { management = new ManagementServer(server, catalog, developmentOrigin); }
+        try { management = new ManagementServer(server, catalog, developmentOrigin, creator); }
         catch (RuntimeException invalid) { server.stop(0); throw invalid; }
         server.setExecutor(management.requests);
         server.createContext("/api", management::handleApi);
@@ -83,6 +98,10 @@ public final class ManagementServer implements AutoCloseable {
 
     private void handleManagement(HttpExchange exchange, String path) throws IOException {
         try {
+            if (path.equals(SessionCreationApi.PREFIX) || path.startsWith(SessionCreationApi.PREFIX + "/")) {
+                creationApi.handle(exchange, path);
+                return;
+            }
             if (path.equals("/api/management/open")) {
                 if (!requireMethod(exchange, "POST")) return;
                 String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
@@ -92,9 +111,11 @@ public final class ManagementServer implements AutoCloseable {
                 byte[] bytes = exchange.getRequestBody().readNBytes(65_537);
                 if (bytes.length > 65_536) { exchange.sendResponseHeaders(413, -1); return; }
                 Path selected = filesystem.absolutePath(new String(bytes, StandardCharsets.UTF_8));
-                var validation = filesystem.validate(selected);
-                if (!validation.get("kind").equals("VALID_SESSION")) { ManagementJson.send(exchange, 422, validation); return; }
-                try { catalog.start(selected); }
+                try (var lease = admission.acquire()) {
+                    var validation = filesystem.validate(selected);
+                    if (!validation.get("kind").equals("VALID_SESSION")) { ManagementJson.send(exchange, 422, validation); return; }
+                    lease.start(selected);
+                }
                 catch (IllegalStateException conflict) {
                     ManagementJson.send(exchange, 409, Map.of("message", "The previous catalog must fully exit before opening another Session.")); return;
                 }
@@ -113,6 +134,8 @@ public final class ManagementServer implements AutoCloseable {
                         filesystem.validate(filesystem.absolutePath(parameters(exchange).get("path"))));
                 default -> exchange.sendResponseHeaders(404, -1);
             }
+        } catch (SessionCreationOperations.Failure conflict) {
+            ManagementJson.send(exchange, conflict.status, Map.of("code", conflict.code, "message", conflict.getMessage()));
         } catch (FilesystemBrowser.InvalidFilterException invalid) {
             ManagementJson.send(exchange, 400, Map.of("message", invalid.getMessage()));
         } catch (IllegalArgumentException invalid) {
@@ -160,6 +183,7 @@ public final class ManagementServer implements AutoCloseable {
     }
 
     @Override public void close() {
+        creations.shutdown(Duration.ofSeconds(30)); // Slow/uncertain creation keeps recovery/status available.
         catalog.close(); // A live child keeps management/status available after an explicit close failure.
         server.stop(1);
         requests.shutdownNow();

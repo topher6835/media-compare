@@ -15,6 +15,25 @@ import io.github.topher6835.mediacompare.filesystem.HostFileSystems;
 public final class SessionCreationService {
     public record CreatedSession(String name, Path path, Session session) { }
 
+    /** Structured recovery evidence; a failed create call may have made a directory before throwing. */
+    public static final class CreationFailure extends IOException {
+        private final Path attemptedPath;
+        private final boolean directoryCreated;
+        private final boolean mutationAttempted;
+
+        private CreationFailure(String message, Path attemptedPath, boolean directoryCreated,
+                boolean mutationAttempted, Exception cause) {
+            super(message, cause);
+            this.attemptedPath = attemptedPath;
+            this.directoryCreated = directoryCreated;
+            this.mutationAttempted = mutationAttempted;
+        }
+
+        public Path attemptedPath() { return attemptedPath; }
+        public boolean directoryCreated() { return directoryCreated; }
+        public boolean mutationAttempted() { return mutationAttempted; }
+    }
+
     enum Phase { BEFORE_CREATE, AFTER_COLLISION, AFTER_CREATE, BEFORE_MANIFEST, AFTER_INITIALIZATION }
 
     @FunctionalInterface
@@ -40,20 +59,23 @@ public final class SessionCreationService {
             parentEvidence = SessionDirectoryEvidence.capture(parent, host);
             revalidateParent(selectedParent, parentEvidence, host);
         } catch (IOException | SecurityException | IllegalArgumentException failure) {
-            throw failure(selectedParent, false, failure);
+            throw failure(selectedParent, false, false, failure);
         }
         for (int suffix = 0; suffix <= 999; suffix++) {
             String name = suffix == 0 ? requestedName
                     : requestedName + String.format(Locale.ROOT, " (%03d)", suffix);
             Path child = parent.resolve(name);
             boolean created = false;
+            boolean mutationAttempted = false;
             try {
                 checkpoint.reached(Phase.BEFORE_CREATE, child);
                 revalidateParent(selectedParent, parentEvidence, host);
                 try {
+                    mutationAttempted = true;
                     Files.createDirectory(child);
                     created = true;
                 } catch (FileAlreadyExistsException collision) {
+                    mutationAttempted = false; // This call did not create a directory.
                     checkpoint.reached(Phase.AFTER_COLLISION, child);
                     revalidateParent(selectedParent, parentEvidence, host);
                     // A provider exception alone is insufficient. Confirm an entry without following links.
@@ -76,11 +98,11 @@ public final class SessionCreationService {
                 childEvidence.revalidate(host);
                 return new CreatedSession(name, session.root(), session);
             } catch (IOException | SecurityException | IllegalArgumentException failure) {
-                throw failure(child, created, failure);
+                throw failure(child, created, mutationAttempted, failure);
             }
         }
-        throw new IOException("All 1,000 Session names are occupied under " + display(parent)
-                + "; choose another name or parent directory");
+        throw new CreationFailure("All 1,000 Session names are occupied under " + display(parent)
+                + "; choose another name or parent directory", parent, false, false, null);
     }
 
     private static void revalidateParent(Path selected, SessionDirectoryEvidence evidence,
@@ -91,11 +113,12 @@ public final class SessionCreationService {
         evidence.revalidate(host);
     }
 
-    private static IOException failure(Path path, boolean created, Exception cause) {
+    private static CreationFailure failure(Path path, boolean created, boolean mutationAttempted, Exception cause) {
         String advice = created
                 ? "; initialization did not complete. The directory was not removed. Inspect it before retrying."
                 : "; creation was not confirmed. Inspect this location and check storage/permissions before retrying.";
-        return new IOException("Cannot create Session at " + display(path) + advice, cause);
+        return new CreationFailure("Cannot create Session at " + display(path) + advice,
+                path, created, mutationAttempted, cause);
     }
 
     private static String display(Path path) {
