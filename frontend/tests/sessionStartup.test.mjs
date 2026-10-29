@@ -86,7 +86,7 @@ test('browsing and validation encode host paths independently; opening uses an a
   assert.equal(requests[2].options.headers.get('Content-Type'), 'text/plain;charset=UTF-8')
 })
 
-test('startup offers Open while retaining disabled New and unmounted catalog routes', () => {
+test('isolated startup without management recovery keeps New disabled and catalog routes unmounted', () => {
   const html = renderToStaticMarkup(createElement(SessionStartupPage))
   assert.match(html, /Open Existing Session/)
   assert.match(html, /Recent Sessions/)
@@ -116,5 +116,5 @@ test('reusable folder browser has Open and New modes without creating Sessions',
   assert.match(html, /Open this Session/)
   assert.doesNotMatch(html, /Folder creation/)
   const future = renderToStaticMarkup(createElement(FolderBrowser, { mode: 'new', onSelect() {}, onCancel() {} }))
-  assert.match(future, /Folder creation and New Session setup are not available/)
+  assert.match(future, /Select an existing parent folder/)
 })

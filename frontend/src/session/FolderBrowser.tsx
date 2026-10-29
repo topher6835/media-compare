@@ -8,7 +8,7 @@ interface Props {
   busy?: boolean
 }
 
-/** Navigation and folder selection are shared; Session creation is a later workflow. */
+/** Browsing and selection are read-only in both modes. */
 export function FolderBrowser({ mode, onSelect, onCancel, busy = false }: Props) {
   const [roots, setRoots] = useState<Folder[]>([])
   const [listing, setListing] = useState<DirectoryListing | null>(null)
@@ -22,15 +22,24 @@ export function FolderBrowser({ mode, onSelect, onCancel, busy = false }: Props)
 
   useEffect(() => {
     const controller = new AbortController()
-    getFilesystemRoots(controller.signal).then(setRoots)
+    getFilesystemRoots(controller.signal).then((nextRoots) => {
+      if (controller.signal.aborted) return
+      setRoots(nextRoots)
+      if (mode === 'new') {
+        const home = nextRoots.find((root) => root.name === 'Home')
+        if (home) {
+          setTarget((current) => current ?? { path: home.path, filter: '' })
+        }
+      }
+    })
       .catch((failure: unknown) => { if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : 'Locations are unavailable.') })
     return () => controller.abort()
-  }, [rootsAttempt])
+  }, [rootsAttempt, mode])
 
   useEffect(() => {
     if (!target) return
     const controller = new AbortController()
-    Promise.all([getDirectories(target.path, target.filter, controller.signal), validateSession(target.path, controller.signal)])
+    Promise.all([getDirectories(target.path, target.filter, controller.signal), mode === 'open' ? validateSession(target.path, controller.signal) : Promise.resolve(null)])
       .then(([nextListing, nextValidation]) => {
         if (controller.signal.aborted) return
         setListing(nextListing)
@@ -43,7 +52,7 @@ export function FolderBrowser({ mode, onSelect, onCancel, busy = false }: Props)
         setLoading(false)
       })
     return () => controller.abort()
-  }, [target])
+  }, [target, mode])
 
   function navigate(path: string, nextFilter = '') {
     setLoading(true)
@@ -90,7 +99,7 @@ export function FolderBrowser({ mode, onSelect, onCancel, busy = false }: Props)
         {listing.truncated && <p role="status">This listing reached its limit. Filter names, or enter the full path to reach another folder.</p>}
         {validation && <p role="status"><strong>{validation.kind === 'VALID_SESSION' ? 'Media Compare Session' : validation.kind === 'DIRECTORY' ? 'Ordinary folder' : 'Cannot open Session'}</strong>: {validation.message}</p>}
       </>}
-      {mode === 'new' && <p>Folder creation and New Session setup are not available yet.</p>}
+      {mode === 'new' && <p>Select an existing parent folder. Nothing is created while browsing.</p>}
       <div className="folder-actions">
         <button type="button" disabled={!selectable} onClick={() => { if (listing) onSelect(listing.path) }}>{mode === 'open' ? 'Open this Session' : 'Select folder'}</button>
         <button type="button" onClick={onCancel}>Cancel</button>
