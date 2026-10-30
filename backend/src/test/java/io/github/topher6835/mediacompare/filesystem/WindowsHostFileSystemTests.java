@@ -78,6 +78,39 @@ class WindowsHostFileSystemTests {
     }
 
     @Test
+    void sessionStorageRequiresQualifiedLocalNtfsDrive() throws Exception {
+        Path selected = Path.of("C:/Sessions");
+        for (int driveType : List.of(0, 1, 4, 5, 6)) {
+            var observation = WindowsVolumeProbe.classify("C:\\Sessions", "NTFS",
+                    volume("NTFS", driveType, "C:\\", null, List.of(), false));
+            var probe = new WindowsVolumeProbe() {
+                @Override public Result probe(Path path) { return observation; }
+            };
+            var host = new WindowsHostFileSystem(probe, new FakeNtfs(), new WindowsExfatHostFileSystem());
+            assertThrows(WindowsFileAccessException.class, () -> host.requireSessionStorage(selected),
+                    "Remote/unknown drive type " + driveType + " must not qualify by NTFS type alone");
+        }
+        for (int driveType : List.of(2, 3)) {
+            var observation = WindowsVolumeProbe.classify("C:\\Sessions", "NTFS",
+                    volume("NTFS", driveType, "C:\\", null, List.of(), false));
+            var probe = new WindowsVolumeProbe() {
+                @Override public Result probe(Path path) { return observation; }
+            };
+            var host = new WindowsHostFileSystem(probe, new FakeNtfs(), new WindowsExfatHostFileSystem());
+            assertDoesNotThrow(() -> host.requireSessionStorage(selected));
+        }
+        var unavailable = new WindowsHostFileSystem(new FakeProbe(), new FakeNtfs(), new WindowsExfatHostFileSystem());
+        assertThrows(WindowsFileAccessException.class, () -> unavailable.requireSessionStorage(selected));
+        var nestedVolume = WindowsVolumeProbe.classify("C:\\Sessions", "NTFS",
+                volume("NTFS", 3, "C:\\mounted\\", null, List.of(), false));
+        var nestedProbe = new WindowsVolumeProbe() {
+            @Override public Result probe(Path path) { return nestedVolume; }
+        };
+        var nested = new WindowsHostFileSystem(nestedProbe, new FakeNtfs(), new WindowsExfatHostFileSystem());
+        assertThrows(WindowsFileAccessException.class, () -> nested.requireSessionStorage(selected));
+    }
+
+    @Test
     void boundedNativeTextRequiresTerminationAndGuidShape() throws Exception {
         assertTrue(WindowsVolumeProbe.validGuid(GUID));
         assertFalse(WindowsVolumeProbe.validGuid("C:\\"));

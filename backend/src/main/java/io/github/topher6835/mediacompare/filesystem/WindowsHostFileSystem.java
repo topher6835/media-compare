@@ -61,7 +61,14 @@ public final class WindowsHostFileSystem implements HostFileSystem {
 
     @Override
     public void requireSessionStorage(Path path) throws IOException {
-        if (profile(path) != FileSystemProfile.NTFS) throw new WindowsFileAccessException(
-                WindowsFileAccessException.Reason.UNSUPPORTED, "Windows Sessions require NTFS storage");
+        var volume = volumes.probe(path);
+        var nativeVolume = volume.nativeVolume();
+        String text = path.toString().replace('/', '\\');
+        if (volume.profile() != FileSystemProfile.NTFS || !WindowsVolumeProbe.ordinaryDrivePath(text)
+                || nativeVolume == null || (nativeVolume.driveType() != 2 && nativeVolume.driveType() != 3)
+                || !text.substring(0, 3).equalsIgnoreCase(nativeVolume.volumeRoot())) {
+            throw new WindowsFileAccessException(WindowsFileAccessException.Reason.UNSUPPORTED,
+                    "Windows Sessions require a qualified local NTFS drive");
+        }
     }
 }

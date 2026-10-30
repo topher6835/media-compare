@@ -244,9 +244,17 @@ final class SessionCreationOperations {
     private synchronized void refresh() {
         entries.values().forEach(this::observeLaunch);
         // Retry records expire first so they cannot leave an orphaned root outside the record bound.
-        entries.values().removeIf(entry -> entry.kind == RETRY_OPEN && expired(entry));
+        entries.values().removeIf(entry -> entry.kind == RETRY_OPEN && expired(entry)
+                && !neededForReservedRetry(entry));
         entries.values().removeIf(entry -> entry.kind == CREATE && expired(entry)
                 && entries.values().stream().noneMatch(other -> other != entry && other.creationId.equals(entry.id)));
+    }
+
+    private boolean neededForReservedRetry(SessionCreationOperation entry) {
+        var root = entries.get(entry.creationId);
+        return root != null && root.latestAttemptId.equals(entry.id)
+                && entries.values().stream().anyMatch(other -> other.kind == RETRY_OPEN
+                        && other.state == RESERVED && entry.id.equals(other.previousAttemptId) && !expired(other));
     }
 
     private boolean expired(SessionCreationOperation entry) {

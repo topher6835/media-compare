@@ -282,6 +282,35 @@ class SessionCreationOperationsTests {
         }
     }
 
+    @Test void reservedRetryRetainsLatestFailedAttemptNeededForRefreshUntilReservationExpires() throws Exception {
+        try (var fixture = new Fixture(SessionCreationActions::create)) {
+            String creation = fixture.reserve();
+            fixture.operations.submit(creation, input("Recoverable retry"));
+            await(fixture.operations, creation, state("OPENING"));
+            fixture.failed(false);
+            await(fixture.operations, creation, state("OPEN_FAILED"));
+            String failedRetry = (String) fixture.operations.reserveRetry(creation, creation).get("operationId");
+            fixture.operations.submitRetry(failedRetry);
+            await(fixture.operations, failedRetry, state("OPENING"));
+            fixture.failed(false);
+            await(fixture.operations, failedRetry, state("OPEN_FAILED"));
+
+            fixture.ticks.addAndGet(Duration.ofMinutes(9).toNanos());
+            String reserved = (String) fixture.operations.reserveRetry(creation, failedRetry).get("operationId");
+            fixture.ticks.addAndGet(Duration.ofMinutes(2).toNanos());
+            // React refresh reads the root, then this latest failure, before finding its reserved retry.
+            assertEquals(failedRetry, fixture.operations.status(creation).get("latestAttemptId"));
+            assertEquals("OPEN_FAILED", fixture.operations.status(failedRetry).get("state"));
+            assertEquals("RESERVED", fixture.operations.status(reserved).get("state"));
+            assertEquals(2, fixture.starts.get()); // Discovery never submits the reservation.
+
+            fixture.ticks.addAndGet(Duration.ofMinutes(9).toNanos());
+            assertEquals(0, ((List<?>) fixture.operations.list().get("operations")).size());
+            assertEquals(2, fixture.starts.get());
+            assertTrue(Files.exists(directory.resolve("Recoverable retry/session.json")));
+        }
+    }
+
     @Test void interruptedCreationKeepsAnUncertainObservationAndNeverStartsCatalog() throws Exception {
         CountDownLatch entered = new CountDownLatch(1);
         try (var fixture = new Fixture(input -> {
