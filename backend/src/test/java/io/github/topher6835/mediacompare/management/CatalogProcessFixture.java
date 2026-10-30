@@ -8,7 +8,7 @@ import java.nio.file.StandardWatchEventKinds;
 public final class CatalogProcessFixture {
     public static void main(String[] args) throws Exception {
         String token = args[1];
-        Path root = Path.of(args[2]);
+        Path root = Path.of(CatalogChildCommand.sessionPath(args[2]));
         String mode = root.getFileName().toString();
         System.out.println("MC_CATALOG " + token + " INITIALIZING");
         if (mode.equals("wrong-token")) {

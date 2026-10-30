@@ -63,7 +63,7 @@ public final class CatalogProcessSupervisor implements AutoCloseable {
         exitCode = null;
         stopRequested = false;
         var command = new ArrayList<>(commandPrefix);
-        command.addAll(List.of("catalog-child", token, sessionRoot.toAbsolutePath().normalize().toString()));
+        command.addAll(List.of("catalog-child", token, CatalogChildCommand.sessionArgument(sessionRoot)));
         try {
             child = new ProcessBuilder(command).redirectErrorStream(true).start();
         } catch (IOException exception) {

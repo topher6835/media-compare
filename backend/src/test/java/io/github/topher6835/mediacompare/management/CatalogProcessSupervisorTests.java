@@ -193,7 +193,7 @@ class CatalogProcessSupervisorTests {
         Session session = Session.create(directory.resolve("parent lost"));
         String token = java.util.UUID.randomUUID().toString();
         var command = new java.util.ArrayList<>(CatalogChildCommand.currentApplication());
-        command.addAll(List.of("catalog-child", token, session.root().toString()));
+        command.addAll(List.of("catalog-child", token, CatalogChildCommand.sessionArgument(session.root())));
         Process child = new ProcessBuilder(command).redirectErrorStream(true).start();
         var ready = new CompletableFuture<Void>();
         Thread output = new Thread(() -> {

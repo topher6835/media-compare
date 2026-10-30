@@ -103,11 +103,26 @@ class SessionCreationServiceTests {
     }
 
     @Test
-    void maximumLengthStillAllowsFinalSuffix() throws Exception {
+    void maximumComponentAllowsSuffixOrPreservesNativeFullPathFailureWithoutReplay() throws Exception {
         Path parent = parent();
         String name = "a".repeat(249);
         Files.createDirectory(parent.resolve(name));
-        assertEquals(name + " (001)", new SessionCreationService().create(parent, name).name());
+        Path attempted = parent.resolve(name + " (001)");
+        assertEquals(255, attempted.getFileName().toString().length());
+        try {
+            assertEquals(attempted.getFileName().toString(), new SessionCreationService().create(parent, name).name());
+            assertTrue(Files.isRegularFile(attempted.resolve("session.json")));
+        } catch (SessionCreationService.CreationFailure failure) {
+            // Native Windows full-path limits are independent of portable component validity.
+            if (!HostFileSystems.isWindows()) throw failure;
+            assertEquals(attempted, failure.attemptedPath());
+            if (failure.directoryCreated()) assertTrue(Files.isDirectory(attempted));
+            assertFalse(Files.exists(attempted.resolve("session.json")));
+            assertTrue(failure.getCause() instanceof IOException);
+        }
+        assertTrue(Files.isDirectory(parent.resolve(name)));
+        assertFalse(Files.exists(parent.resolve(name).resolve("session.json")));
+        assertFalse(Files.exists(parent.resolve(name + " (002)")));
     }
 
     @Test
@@ -162,7 +177,7 @@ class SessionCreationServiceTests {
     }
 
     @Test
-    void unsupportedOrUncertainStorageAndMissingIdentityFailBeforeCreatingAnything() throws Exception {
+    void unsupportedOrUncertainStorageFailsBeforeCreatingAnything() throws Exception {
         Path parent = parent();
         for (FileSystemProfile profile : List.of(FileSystemProfile.EXFAT, FileSystemProfile.UNKNOWN,
                 FileSystemProfile.UNSUPPORTED)) {
@@ -171,11 +186,40 @@ class SessionCreationServiceTests {
                 assertThrows(IOException.class, () -> new SessionCreationService().create(parent, "Name"));
             }
         }
-        try (var files = mockStatic(Files.class, CALLS_REAL_METHODS)) {
+        assertFalse(Files.exists(parent.resolve("Name")));
+    }
+
+    @Test
+    void apfsMissingNioIdentityFailsBeforeCreatingAnything() throws Exception {
+        Path parent = parent();
+        try (var hosts = mockStatic(HostFileSystems.class);
+                var files = mockStatic(Files.class, CALLS_REAL_METHODS)) {
+            hosts.when(HostFileSystems::current).thenReturn(host(FileSystemProfile.APFS));
             var attributes = mock(BasicFileAttributes.class);
             when(attributes.isDirectory()).thenReturn(true);
             files.when(() -> Files.readAttributes(parent, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS))
                     .thenReturn(attributes);
+            assertThrows(IOException.class, () -> new SessionCreationService().create(parent, "Name"));
+        }
+        assertFalse(Files.exists(parent.resolve("Name")));
+    }
+
+    @Test
+    void windowsNativeIdentityRemainsRequiredWhenNioIdentityIsUnavailable() throws Exception {
+        Path parent = parent();
+        HostFileSystem windows = spy(host(FileSystemProfile.NTFS));
+        doReturn(true).when(windows).isWindows();
+        try (var hosts = mockStatic(HostFileSystems.class);
+                var files = mockStatic(Files.class, CALLS_REAL_METHODS);
+                var nativeAccess = mockStatic(WindowsNtfsNative.class);
+                var volumes = windowsVolumes(3)) {
+            hosts.when(HostFileSystems::current).thenReturn(windows);
+            var attributes = mock(BasicFileAttributes.class);
+            when(attributes.isDirectory()).thenReturn(true);
+            files.when(() -> Files.readAttributes(parent, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS))
+                    .thenReturn(attributes);
+            nativeAccess.when(() -> WindowsNtfsNative.observe(any())).thenReturn(
+                    new WindowsNtfsNative.Observation(null, true, false));
             assertThrows(IOException.class, () -> new SessionCreationService().create(parent, "Name"));
         }
         assertFalse(Files.exists(parent.resolve("Name")));

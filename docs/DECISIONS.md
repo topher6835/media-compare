@@ -60,10 +60,12 @@ This file records decisions already made. It distinguishes the reviewed V1 imple
 - Retry Opening is a deliberate separate reservation/submission against the precise latest failed attempt of a known created Session, after actual child exit. It never calls creation. Old sibling reservations are ignored; ambiguous eligible reservations require inspection. Leaving the UI detaches observation without claiming cancellation or rollback.
 - No dependency, schema, backend lifecycle/filesystem-policy or Source-authority change is needed. Stage 4 safety review/acceptance and native Windows qualification remain separate gates.
 
-### Stage 4 Task 4 Part 1 corrections (2026-10-29; local, awaiting independent review)
+### Stage 4 Task 4 Part 1 corrections (2026-10-29; subsequently independently approved and pushed)
 
 - Enforce the existing local-NTFS-only Session policy in the shared Windows storage gate, including Open/CLI: require native fixed/removable drive evidence and a matching ordinary drive root, rather than NTFS type alone. No Source authority or exFAT policy changes.
 - Keep the latest failed opening readable while an unexpired RESERVED retry depends on it for refresh recovery. End that dependency pin on submission, supersession or reservation expiry; retain the 64-record bound and no-replay/restart contracts. These corrections and macOS validation do not establish native Windows or final Stage 4 acceptance; see [the report](SESSION_STAGE4_TASK4_ACCEPTANCE.md).
+
+Part 1 is the approved/pushed `ee1911abbe16798ca2d9c739fd37474d72addb90` checkpoint. Part 2's initial native Windows failures and authorized local corrections are preserved in [the separate evidence](SESSION_STAGE4_TASK4_ACCEPTANCE.md#part-2--native-windows-qualification). The correction encodes only the private Session-path argument as tagged UTF-8/Base64URL ASCII, then strictly decodes it before existing validation, because the Windows Java launcher corrupted raw Japanese arguments before main. No authority, filesystem-policy, schema or dependency-version decision changes. Ancestor-junction support and raw extended-prefix syntax policy remain undecided; diagnostic tests must not impose acceptance of junctions or new lexical rejection rules. Corrections and final acceptance require separate review; production exFAT stays disabled.
 
 ## Optional Subfolder Scanning (2026-10-22)
 

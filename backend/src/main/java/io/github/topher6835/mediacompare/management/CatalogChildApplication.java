@@ -17,6 +17,7 @@ public final class CatalogChildApplication {
     public static void main(String[] args) throws Exception {
         if (args.length != 2) throw new IllegalArgumentException("Catalog child requires a launch token and Session path");
         String token = args[0];
+        String sessionPath = CatalogChildCommand.sessionPath(args[1]);
         var stop = new CountDownLatch(1);
         Thread control = new Thread(() -> awaitStop(token, stop), "media-compare-catalog-control");
         control.setDaemon(true);
@@ -27,7 +28,7 @@ public final class CatalogChildApplication {
         application.addInitializers(context -> context.getBeanFactory().registerSingleton(
                 "managedCatalogSecurity", ManagedCatalogSecurity.registration(token)));
         try (var context = application.run(
-                "--media-compare.session-root=" + args[1],
+                "--media-compare.session-root=" + sessionPath,
                 "--media-compare.test-catalog-override=false",
                 "--server.address=127.0.0.1", "--server.port=0", "--server.ssl.enabled=false",
                 "--spring.main.lazy-initialization=false", "--spring.main.web-application-type=servlet")) {
